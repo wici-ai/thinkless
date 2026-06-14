@@ -47,3 +47,5 @@ fixture/v1-slice-target/
 fixture/rollback-target/
 fixture/tui-live-target/
 fixture/tui-chat-intake-target/
+fixture/setup-state-plan-target/
+fixture/setup-state-measure-target/

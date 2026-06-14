@@ -68,6 +68,7 @@ npm run verify:context-condensation
 npm run verify:goal-interrogation
 npm run verify:goal-doc
 npm run verify:goal-metric
+npm run verify:setup-state
 npm run verify:docs-sync
 npm run verify:limit-artifact
 ```

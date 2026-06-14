@@ -2,7 +2,7 @@ import { chmod } from 'node:fs/promises';
 import { atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
 import { loadConfig } from '../shared/config.js';
 import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.js';
-import type { BaselineFile, CheckpointSnapshot, GoalFile, RunOptions, WiCiConfig } from '../shared/types.js';
+import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, RunOptions, WiCiConfig } from '../shared/types.js';
 import { hashFile, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
 import { applyInjections, drainInbox, injectionIds } from './inbox.js';
@@ -124,7 +124,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       ({ goal, checkpoint } = await drainEvalLockAnswers(paths, goal, checkpoint, events));
     }
 
-    const setup = await ensurePlanAndBaseline(paths, goal, config, events);
+    const setup = await ensurePlanAndBaseline(paths, goal, config, events, checkpoint);
+    checkpoint = setup.checkpoint;
     let baseline = setup.baseline;
     if (!baseline) {
       checkpoint = {
@@ -796,13 +797,14 @@ async function ensurePlanAndBaseline(
   paths: ReturnType<typeof runPaths>,
   goal: GoalFile,
   config: WiCiConfig,
-  events: EventWriter
-): Promise<{ baseline: BaselineFile | null; waitReason: string }> {
+  events: EventWriter,
+  checkpoint: Checkpoint
+): Promise<{ baseline: BaselineFile | null; waitReason: string; checkpoint: Checkpoint }> {
   let createdSetup = false;
   const acceptance = await ensureAcceptanceSpec(paths, goal);
   if (!acceptance.ok) {
     await ensureAcceptanceSpecQuestion(paths, events, acceptance.reason ?? 'Acceptance criteria need clarification.');
-    return { baseline: null, waitReason: ACCEPTANCE_SPEC_WAIT_REASON };
+    return { baseline: null, waitReason: ACCEPTANCE_SPEC_WAIT_REASON, checkpoint };
   }
   if (acceptance.created) {
     createdSetup = true;
@@ -814,9 +816,25 @@ async function ensurePlanAndBaseline(
   const hasPlan = (await exists(paths.plan)) && (await exists(paths.measure)) && (await exists(paths.checks));
   if (!hasPlan) {
     await unlockEvalScripts(paths);
+    checkpoint = await saveSetupCheckpoint(paths, checkpoint, goal, events, 'PLAN');
     await events.emit('PLAN_START', 'Planner is materializing PLAN.md and locked eval scripts');
     const result = await runInitialPlanner(paths, goal, config);
+    checkpoint = {
+      ...checkpoint,
+      sessions: {
+        ...checkpoint.sessions,
+        planner: result.sessionId ?? checkpoint.sessions.planner
+      },
+      plan_hash: await hashFile(paths.plan),
+      events_seq: events.seq
+    };
+    await saveCheckpoint(paths, checkpoint);
     await events.emit('PLAN_DONE', result.stdout ?? 'planner completed', { sessionId: result.sessionId });
+    checkpoint = {
+      ...checkpoint,
+      events_seq: events.seq
+    };
+    await saveCheckpoint(paths, checkpoint);
     const benchmark = await ensureBenchmarkManifest(paths, goal);
     await events.emit('BENCHMARK_SELECTED', 'Recorded benchmark selection in .opt/benchmark.json', {
       tool: benchmark.manifest.tool,
@@ -846,8 +864,9 @@ async function ensurePlanAndBaseline(
   if (!baseline) {
     if (config.evaluation.lock_mode === 'manual' && !hasEvalLockApproval(goal)) {
       await ensureEvalLockQuestion(paths, events);
-      return { baseline: null, waitReason: EVAL_LOCK_WAIT_REASON };
+      return { baseline: null, waitReason: EVAL_LOCK_WAIT_REASON, checkpoint };
     }
+    checkpoint = await saveSetupCheckpoint(paths, checkpoint, goal, events, 'MEASURE');
     await events.emit('BASELINE_START', 'Running checks and measure to initialize baseline');
     baseline = await initializeBaseline(paths, goal, config);
     await events.emit('BASELINE_DONE', 'Initialized baseline metric', baseline.best_metric);
@@ -873,7 +892,26 @@ async function ensurePlanAndBaseline(
     await events.emit('DIRTY_TARGET_ON_START', 'Existing target has uncommitted changes; recovery will decide whether to keep or revert them', undefined, 'warn');
   }
 
-  return { baseline, waitReason: '' };
+  return { baseline, waitReason: '', checkpoint };
+}
+
+async function saveSetupCheckpoint(
+  paths: ReturnType<typeof runPaths>,
+  checkpoint: Checkpoint,
+  goal: GoalFile,
+  events: EventWriter,
+  state: 'PLAN' | 'MEASURE'
+): Promise<Checkpoint> {
+  const next = {
+    ...checkpoint,
+    supervisor_state: state,
+    goal_version: goal.version,
+    plan_hash: await hashFile(paths.plan),
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq
+  };
+  await saveCheckpoint(paths, next);
+  return next;
 }
 
 async function drainEvalLockAnswers(
