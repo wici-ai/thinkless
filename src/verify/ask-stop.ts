@@ -1,9 +1,10 @@
 import { resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
-import { atomicWriteJson } from '../shared/atomic.js';
+import { atomicWriteJson, readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
-import type { GoalFile } from '../shared/types.js';
+import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
+import { writeInjection } from '../supervisor/inbox.js';
 import { readOutbox } from '../supervisor/outbox.js';
 
 const target = resolve('fixture/ask-stop-target');
@@ -23,8 +24,38 @@ async function main(): Promise<void> {
   assert(result.exitCode === 0, `ask-stop supervisor run failed:\n${result.all}`);
 
   const messages = await readOutbox(paths, 10);
-  assert(messages.some((message) => message.kind === 'question' && message.text.includes('Stop candidate:')), `missing ask-mode question: ${JSON.stringify(messages)}`);
+  const question = messages.find((message) => message.kind === 'question' && message.text.includes('Stop candidate:'));
+  assert(question?.reply_key, `missing ask-mode question: ${JSON.stringify(messages)}`);
   assert(!messages.some((message) => message.kind === 'stop_verdict'), `ask-mode wrote stop_verdict instead of question: ${JSON.stringify(messages)}`);
+  const ledgerBeforeWait = await readJsonLines<LedgerEntry>(paths.ledger);
+
+  const waiting = await execa(process.execPath, ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--max-iters', '3', '--mode', 'stub'], {
+    cwd: resolve('.'),
+    all: true,
+    reject: false,
+    timeout: 30_000
+  });
+  assert(waiting.exitCode === 0, `ask-stop wait run failed:\n${waiting.all}`);
+  assert((waiting.all ?? '').includes('awaiting stop answer'), `ask-stop did not remain paused without new input:\n${waiting.all}`);
+  const ledgerAfterWait = await readJsonLines<LedgerEntry>(paths.ledger);
+  assert(ledgerAfterWait.length === ledgerBeforeWait.length, `ask-stop wait unexpectedly advanced ledger: ${ledgerBeforeWait.length}->${ledgerAfterWait.length}`);
+
+  const answer = await writeInjection(paths, { kind: 'answer', text: 'continue', reply_to: question.reply_key, priority: 'normal' });
+  const resumed = await execa(process.execPath, ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--max-iters', '3', '--mode', 'stub'], {
+    cwd: resolve('.'),
+    all: true,
+    reject: false,
+    timeout: 30_000
+  });
+  assert(resumed.exitCode === 0, `ask-stop resume run failed:\n${resumed.all}`);
+  const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
+  assert(checkpoint.drained_inbox.includes(answer.id), `resume answer was not drained: ${JSON.stringify(checkpoint.drained_inbox)}`);
+  const answered = (await readOutbox(paths, 20)).find((message) => message.id === question.id);
+  assert(answered?.answered === true && answered.answer_text?.includes('continue'), `stop question was not marked answered: ${JSON.stringify(answered)}`);
+  const ledgerAfterResume = await readJsonLines<LedgerEntry>(paths.ledger);
+  assert(ledgerAfterResume.length > ledgerAfterWait.length, `ask-stop resume did not continue execution: ${ledgerAfterWait.length}->${ledgerAfterResume.length}`);
+  const events = await readJsonLines<RunEvent>(paths.events);
+  assert(events.some((event) => event.type === 'OUTBOX_ANSWERED' && event.message.includes('Resuming from stop question')), 'resume event missing OUTBOX_ANSWERED marker');
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree dirty after ask stop:\n${status}`);
@@ -35,6 +66,8 @@ async function main(): Promise<void> {
         ok: true,
         target,
         ask_mode_question_written: true,
+        ask_mode_waits_without_input: true,
+        ask_mode_resumes_after_continue: true,
         outbox_messages: messages.length
       },
       null,

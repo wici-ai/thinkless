@@ -67,6 +67,56 @@ export async function drainInbox(paths: RunPaths, drainedIds: string[], cap = 8,
   return coalesceInjections(drained);
 }
 
+export async function readPendingInjections(paths: RunPaths, drainedIds: string[], kinds?: InjectionKind[]): Promise<Injection[]> {
+  if (!(await exists(paths.inbox))) return [];
+
+  const files = (await readdir(paths.inbox))
+    .filter((name) => /^inj-.+\.json$/.test(name))
+    .map((name) => join(paths.inbox, name));
+  const urgentIds = await readUrgentSentinelIds(paths);
+  const withStats = await Promise.all(
+    files.map(async (path) => {
+      const injection = validateInjection(await readJsonFile<Injection>(path));
+      return {
+        injection,
+        urgent: injection.priority === 'urgent' && urgentIds.has(injection.id),
+        mtimeMs: (await stat(path)).mtimeMs
+      };
+    })
+  );
+
+  return withStats
+    .sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.mtimeMs - b.mtimeMs)
+    .map((item) => item.injection)
+    .filter((injection) => !drainedIds.includes(injection.id))
+    .filter((injection) => !kinds || kinds.includes(injection.kind));
+}
+
+export async function drainPendingInjectionsById(paths: RunPaths, drainedIds: string[], ids: string[]): Promise<Injection[]> {
+  await ensureDir(paths.inboxDone);
+  if (!(await exists(paths.inbox))) return [];
+  const wanted = new Set(ids);
+  const files = (await readdir(paths.inbox))
+    .filter((name) => /^inj-.+\.json$/.test(name))
+    .map((name) => join(paths.inbox, name));
+  const urgentIds = await readUrgentSentinelIds(paths);
+  const drained: Injection[] = [];
+
+  for (const path of files) {
+    const injection = validateInjection(await readJsonFile<Injection>(path));
+    if (!wanted.has(injection.id)) continue;
+    if (drainedIds.includes(injection.id)) {
+      await rename(path, join(paths.inboxDone, `${injection.id}.duplicate.json`)).catch(() => undefined);
+      continue;
+    }
+    await rename(path, join(paths.inboxDone, `${injection.id}.json`));
+    drained.push({ ...injection, applied: true });
+  }
+
+  await syncUrgentSentinel(paths, urgentIds, new Set(injectionIds(drained)));
+  return drained;
+}
+
 export function injectionIds(injections: Injection[]): string[] {
   return [...new Set(injections.flatMap((item) => item.coalesced_ids ?? [item.id]))];
 }

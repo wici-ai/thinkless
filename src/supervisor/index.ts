@@ -5,7 +5,7 @@ import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.
 import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, RunOptions, WiCiConfig } from '../shared/types.js';
 import { hashFile, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
-import { applyInjections, drainInbox, injectionIds } from './inbox.js';
+import { applyInjections, drainInbox, drainPendingInjectionsById, injectionIds, readPendingInjections } from './inbox.js';
 import { runExecutorStep } from './executor.js';
 import { lockEvalScripts, runInitialPlanner, runPlanDiff, unlockEvalScripts, verifyEvalHashes } from './planner.js';
 import { nextExecutableStep, readPlan, setPlanStepStatus } from './plan.js';
@@ -51,6 +51,7 @@ import { formatPrimaryMetricTransition, primaryMetricTag } from './metricFormat.
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
 const ACCEPTANCE_SPEC_WAIT_REASON = 'awaiting acceptance criteria clarification';
+const STOP_ANSWER_WAIT_REASON = 'awaiting stop answer';
 
 export interface SupervisorResult {
   state: 'STOP' | 'FAILED' | 'RUNNING';
@@ -120,6 +121,12 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       safety: config.safety.container_hint,
       tools: toolHealth
     });
+
+    const stopAnswer = await handlePendingStopQuestion(paths, checkpoint, events);
+    checkpoint = stopAnswer.checkpoint;
+    if (stopAnswer.action !== 'proceed') {
+      return { state: 'STOP', reason: stopAnswer.reason, iter: checkpoint.iter };
+    }
 
     if (config.evaluation.lock_mode === 'manual' && !(await exists(paths.baseline))) {
       ({ goal, checkpoint } = await drainEvalLockAnswers(paths, goal, checkpoint, events));
@@ -961,6 +968,63 @@ async function drainEvalLockAnswers(
   return { goal: applied.goal, checkpoint: nextCheckpoint };
 }
 
+async function handlePendingStopQuestion(
+  paths: ReturnType<typeof runPaths>,
+  checkpoint: Checkpoint,
+  events: EventWriter
+): Promise<{ action: 'proceed' | 'wait' | 'stop'; reason: string; checkpoint: Checkpoint }> {
+  if (checkpoint.supervisor_state !== 'STOP') return { action: 'proceed', reason: 'not stopped', checkpoint };
+  const pending = await pendingStopQuestion(paths);
+  if (!pending?.reply_key) return { action: 'proceed', reason: 'no pending stop question', checkpoint };
+
+  const questionTs = Date.parse(pending.ts);
+  const pendingInputs = (await readPendingInjections(paths, checkpoint.drained_inbox, ['answer', 'add_requirement', 'steer']))
+    .filter((item) => Date.parse(item.ts) > questionTs)
+    .filter((item) => item.kind !== 'answer' || item.reply_to === pending.reply_key);
+
+  if (pendingInputs.length === 0) {
+    await events.emit('STOP', STOP_ANSWER_WAIT_REASON, { reply_key: pending.reply_key, outbox_id: pending.id });
+    const next = { ...checkpoint, events_seq: events.seq };
+    await saveCheckpoint(paths, next);
+    return { action: 'wait', reason: STOP_ANSWER_WAIT_REASON, checkpoint: next };
+  }
+
+  const first = pendingInputs[0];
+  if (first.kind === 'answer' && isStopApproval(first.text)) {
+    const drained = await drainPendingInjectionsById(paths, checkpoint.drained_inbox, [first.id]);
+    const marked = await markOutboxAnswered(paths, pending.reply_key, first.text);
+    await events.emit('OUTBOX_ANSWERED', `Applied stop answer for ${pending.reply_key}`, {
+      reply_to: pending.reply_key,
+      outbox_id: marked?.id ?? null
+    });
+    await events.emit(
+      'INJECTION_DRAINED',
+      `Applied ${drained.length} stop answer(s)`,
+      drained.map((item) => ({ id: item.id, kind: item.kind, reply_to: item.reply_to }))
+    );
+    const next = {
+      ...checkpoint,
+      drained_inbox: [...checkpoint.drained_inbox, ...injectionIds(drained)],
+      events_seq: events.seq
+    };
+    await saveCheckpoint(paths, next);
+    const reason = `User accepted stop candidate: ${first.text}`;
+    await writeOutbox(paths, { kind: 'info', text: reason, data: { reply_key: pending.reply_key, outbox_id: pending.id } });
+    await events.emit('STOP', reason);
+    return { action: 'stop', reason, checkpoint: { ...next, events_seq: events.seq } };
+  }
+
+  const marked = await markOutboxAnswered(paths, pending.reply_key, `${first.kind}: ${first.text}`);
+  await events.emit('OUTBOX_ANSWERED', `Resuming from stop question ${pending.reply_key}`, {
+    reply_to: pending.reply_key,
+    outbox_id: marked?.id ?? null,
+    via: first.kind
+  });
+  const next = { ...checkpoint, events_seq: events.seq };
+  await saveCheckpoint(paths, next);
+  return { action: 'proceed', reason: `resume requested via ${first.kind}`, checkpoint: next };
+}
+
 async function ensureEvalLockQuestion(paths: ReturnType<typeof runPaths>, events: EventWriter): Promise<void> {
   const pending = await pendingEvalLockQuestion(paths);
   if (pending) {
@@ -1018,6 +1082,14 @@ async function ensureAcceptanceSpecQuestion(paths: ReturnType<typeof runPaths>, 
 
 async function pendingEvalLockQuestion(paths: ReturnType<typeof runPaths>) {
   return (await readOutbox(paths, 50)).find((message) => message.reply_key === EVAL_LOCK_REPLY_KEY && !message.answered);
+}
+
+async function pendingStopQuestion(paths: ReturnType<typeof runPaths>) {
+  return (await readOutbox(paths, 50)).find((message) => message.reply_key?.startsWith('stop-') && !message.answered);
+}
+
+function isStopApproval(text: string): boolean {
+  return /\b(stop|stopped|approve|approved|yes|ok|accept|accepted)\b/i.test(text);
 }
 
 function hasEvalLockApproval(goal: GoalFile): boolean {
