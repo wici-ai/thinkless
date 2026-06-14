@@ -280,6 +280,32 @@ Internally sequenced to de-risk, but **M1 delivers the working three-pane TUI dr
 5. **Hot-reload (M4):** mid-run, type a new requirement in Chat → internal goal version bumps, `GOAL.md` updates, GoalPane shows the plan diff, and the very next `codex exec resume` prompt carries the steer — all without a process restart.
 6. **Self-update (M5):** with a pending `codex` update, confirm the supervisor refuses to start a long run and updates only between runs (`codex update` → version bump recorded in checkpoint).
 
+### Release tag gate: real interactive generalization canary
+
+Every release tag (`0.x.y`, `v*`, or any tag meant for a human to try) must be created **only after** a real interactive WiCi run proves the end-to-end path on a task that was not custom-built for the current implementation. If the canary is not complete, the tag is not cut. If a tag was already cut before this evidence exists, treat that tag as unverified and cut the next patch only after the evidence is attached.
+
+**Generalization canary shape.** Use the local TUI as the only operator surface. Start with empty Goal/Execution panes, type one natural-language Chat message, and let WiCi produce `GOAL.md`, run Claude plan mode, materialize `PLAN.md`/`.opt/*`, and drive Codex execution. The operator may answer Chat questions, but must not manually SSH, manually inspect models, manually write benchmark scripts, or manually perform deployment steps outside WiCi. Deployment, discovery, benchmarking, and remediation must be planned and executed by the agents through the target artifacts.
+
+**Task pool, not one golden fixture.** For each tag, choose one canary from a rotating pool and record the chosen seed/task in the release notes or tag evidence:
+
+- **Remote throughput task:** "听说 diffusionGemma 很强，在 `<ssh command>` 上试试，要求达到 `700 token/s` 以上." The SSH command may include a port forward such as `ssh -p 23276 root@116.127.115.18 -L 8080:localhost:8080`, but WiCi must decide how to discover/install/run/measure the model.
+- **Unknown repo performance task:** point WiCi at a fresh, non-fixture local repository with a working test suite and ask for a measurable speedup without naming the hot path.
+- **Service latency task:** point WiCi at a small service repo and ask for p95/p99 latency under a realistic load tool, with the planner selecting the benchmark.
+- **Correctness-preserving CLI throughput task:** point WiCi at a CLI/data-processing repo and ask for a throughput target on a workload the planner must define and lock.
+
+The selected task must differ from the immediately previous release's canary by domain or target, and must not be implemented as a bespoke verifier that knows the expected solution. Fixture/stub verifiers are still required, but they do not satisfy the release tag gate.
+
+**Pass evidence required before tagging.**
+
+- A terminal transcript or saved run log showing the interactive TUI was started and the first Chat message was the canary goal.
+- Generated `GOAL.md`, `PLAN.md`, `.opt/benchmark.json`, `.opt/checks.sh`, `.opt/measure.sh`, and `baseline.json` from that run.
+- `events.jsonl` evidence for `PLAN_START`, `PLAN_DONE`, execution, evaluation, and either a committed improvement or a documented stop/failure reason.
+- `ledger.jsonl` with the measured metric, unit, samples/repetitions, and pass/fail against the task target.
+- For remote tasks, proof that connection/deployment/benchmarking was performed by the executor's plan/scripts, not by an out-of-band manual shell.
+- A clean target git status or a recorded rollback command showing how to return to the best accepted state.
+
+**Release rule.** Run the usual automated gates first (`npm run verify:v1-slice`, `npm run verify:tui-chat-intake`, `npm run verify:demo-tui`, `npm run verify:bin`, `npm run verify:docs-sync`, `npm run typecheck`, plus any touched-area verifier). Then run the real interactive generalization canary. Only after both are complete may a tag be created and pushed.
+
 ---
 
 ## 13. Prior art & deltas (open-source learnings)
