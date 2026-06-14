@@ -50,6 +50,7 @@ npm run verify:claude-probe
 npm run verify:manual-lock
 npm run verify:benchmark-manifest
 npm run verify:metaproductivity
+npm run verify:mann-whitney
 npm run verify:heldout
 npm run verify:scorer-selftest
 npm run verify:prescreen

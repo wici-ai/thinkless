@@ -59,6 +59,7 @@ async function main(): Promise<void> {
   assert(ledger.length === 1, `expected exactly one v1 ledger row, got ${ledger.length}`);
   assert(ledger[0].status === 'keep', `expected accepted v1 row, got ${ledger[0].status}`);
   assert((ledger[0].delta_pct ?? 0) > 0.5, `expected substantial deterministic improvement, got ${ledger[0].delta_pct}`);
+  assert(typeof ledger[0].p_value === 'number' && ledger[0].p_value < 0.05, `accepted v1 row missing significant p-value: ${ledger[0].p_value}`);
   assert(ledger[0].commit, 'accepted v1 ledger row missing commit');
   assert(ledger[0].cost.wall_ms !== undefined, 'accepted v1 ledger row missing wall clock cost');
 
@@ -79,6 +80,9 @@ async function main(): Promise<void> {
   ]) {
     assert(events.some((event) => event.type === type), `missing v1 event ${type}`);
   }
+  const commitEvent = events.find((event) => event.type === 'COMMIT');
+  const commitData = commitEvent?.data as { p_value?: number } | undefined;
+  assert(typeof commitData?.p_value === 'number' && commitData.p_value < 0.05, `COMMIT event missing significant p-value: ${JSON.stringify(commitEvent)}`);
 
   const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
   assert(checkpoint.supervisor_state === 'STOP', `expected STOP checkpoint, got ${checkpoint.supervisor_state}`);

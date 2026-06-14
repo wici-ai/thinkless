@@ -402,7 +402,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           heldout_p99: evaluation.heldoutMetric?.p99,
           delta_pct: evaluation.deltaPct,
           heldout_delta_pct: evaluation.heldoutDeltaPct,
-          confidence: evaluation.confidence
+          confidence: evaluation.confidence,
+          p_value: evaluation.pValue
         });
       } else {
         checkpoint.supervisor_state = 'REVERT';
@@ -413,7 +414,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           prescreen_delta_pct: evaluation.prescreenDeltaPct,
           heldout_p99: evaluation.heldoutMetric?.p99,
           heldout_delta_pct: evaluation.heldoutDeltaPct,
-          confidence: evaluation.confidence
+          confidence: evaluation.confidence,
+          p_value: evaluation.pValue
         }, 'warn');
         await revertToBest(paths, baseline.best_commit);
         await setPlanStepStatus(paths, step.id, 'pending');

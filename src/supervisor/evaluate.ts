@@ -28,6 +28,7 @@ export interface CandidateEvaluation {
   confidence: string;
   ciLow?: number | null;
   ciHigh?: number | null;
+  pValue?: number | null;
   reason: string;
 }
 
@@ -150,6 +151,7 @@ export async function evaluateCandidate(paths: RunPaths, goal: GoalFile, baselin
       confidence: decision.confidence,
       ciLow: decision.ciLow,
       ciHigh: decision.ciHigh,
+      pValue: decision.pValue,
       reason: decision.reason
     };
   }
@@ -172,6 +174,7 @@ export async function evaluateCandidate(paths: RunPaths, goal: GoalFile, baselin
       confidence: 'heldout-regression',
       ciLow: decision.ciLow,
       ciHigh: decision.ciHigh,
+      pValue: decision.pValue,
       reason: heldoutDecision.reason
     };
   }
@@ -190,6 +193,7 @@ export async function evaluateCandidate(paths: RunPaths, goal: GoalFile, baselin
     confidence: decision.confidence,
     ciLow: decision.ciLow,
     ciHigh: decision.ciHigh,
+    pValue: decision.pValue,
     reason: decision.reason
   };
 }
@@ -232,7 +236,7 @@ export function ledgerFromEvaluation(args: {
     confidence: args.evaluation?.confidence ?? 'none',
     ci_low: args.evaluation?.ciLow ?? null,
     ci_high: args.evaluation?.ciHigh ?? null,
-    p_value: null,
+    p_value: args.evaluation?.pValue ?? null,
     cost: ledgerCost(args.wallMs, args.usage),
     guards: {
       checks: args.evaluation?.checks.ok ?? false,
@@ -329,12 +333,13 @@ function numberField(fields: Map<string, string>, key: string): number {
   return value;
 }
 
-function decideImprovement(baseline: MetricStats, candidate: MetricStats, goal: GoalFile, config: WiCiConfig): {
+export function decideImprovement(baseline: MetricStats, candidate: MetricStats, goal: GoalFile, config: WiCiConfig): {
   improved: boolean;
   deltaPct: number;
   confidence: string;
   ciLow?: number | null;
   ciHigh?: number | null;
+  pValue?: number | null;
   reason: string;
 } {
   const direction = goal.metric.direction;
@@ -352,13 +357,37 @@ function decideImprovement(baseline: MetricStats, candidate: MetricStats, goal: 
   if ((baseline.samples?.length ?? 0) >= config.evaluation.min_reps && (candidate.samples?.length ?? 0) >= config.evaluation.min_reps) {
     const ci = bootstrapDeltaPct(baseline.samples!, candidate.samples!, direction, config.evaluation.bootstrap_resamples);
     const excludesZero = ci.low > 0 || ci.high < 0;
+    const pValue = mannWhitneyPValue(baseline.samples!, candidate.samples!);
+    if (excludesZero) {
+      return {
+        improved: true,
+        deltaPct,
+        confidence: 'bootstrap-ci-excludes-zero',
+        ciLow: ci.low,
+        ciHigh: ci.high,
+        pValue,
+        reason: `accepted by bootstrap CI; Mann-Whitney p=${formatPValue(pValue)}`
+      };
+    }
+    if (pValue < 0.05) {
+      return {
+        improved: true,
+        deltaPct,
+        confidence: 'mann-whitney-p<0.05',
+        ciLow: ci.low,
+        ciHigh: ci.high,
+        pValue,
+        reason: `accepted by Mann-Whitney p=${formatPValue(pValue)}`
+      };
+    }
     return {
-      improved: excludesZero,
+      improved: false,
       deltaPct,
-      confidence: excludesZero ? 'bootstrap-ci-excludes-zero' : 'bootstrap-ci-overlaps-zero',
+      confidence: 'bootstrap-ci-overlaps-zero',
       ciLow: ci.low,
       ciHigh: ci.high,
-      reason: excludesZero ? 'accepted by bootstrap CI' : 'bootstrap CI overlaps zero'
+      pValue,
+      reason: `bootstrap CI overlaps zero and Mann-Whitney p=${formatPValue(pValue)}`
     };
   }
 
@@ -381,6 +410,44 @@ function metricDeltaPct(base: number, next: number, direction: GoalFile['metric'
   return direction === 'minimize' ? (base - next) / base : (next - base) / Math.abs(base);
 }
 
+export function mannWhitneyPValue(left: number[], right: number[]): number {
+  const a = left.filter((value) => Number.isFinite(value));
+  const b = right.filter((value) => Number.isFinite(value));
+  const n1 = a.length;
+  const n2 = b.length;
+  if (n1 === 0 || n2 === 0) return 1;
+
+  const combined = [
+    ...a.map((value) => ({ value, sample: 0 as const })),
+    ...b.map((value) => ({ value, sample: 1 as const }))
+  ].sort((x, y) => x.value - y.value);
+
+  let rankSumA = 0;
+  let tieCorrection = 0;
+  for (let i = 0; i < combined.length; ) {
+    let j = i + 1;
+    while (j < combined.length && combined[j].value === combined[i].value) j++;
+    const averageRank = (i + 1 + j) / 2;
+    for (let k = i; k < j; k++) {
+      if (combined[k].sample === 0) rankSumA += averageRank;
+    }
+    const tieSize = j - i;
+    if (tieSize > 1) tieCorrection += tieSize ** 3 - tieSize;
+    i = j;
+  }
+
+  const u1 = rankSumA - (n1 * (n1 + 1)) / 2;
+  const u2 = n1 * n2 - u1;
+  const u = Math.min(u1, u2);
+  const n = n1 + n2;
+  const mean = (n1 * n2) / 2;
+  const variance = (n1 * n2 * ((n + 1) - tieCorrection / (n * (n - 1)))) / 12;
+  if (!Number.isFinite(variance) || variance <= 0) return 1;
+
+  const z = Math.max(0, Math.abs(u - mean) - 0.5) / Math.sqrt(variance);
+  return clamp01(2 * (1 - normalCdf(z)));
+}
+
 function bootstrapDeltaPct(base: number[], next: number[], direction: GoalFile['metric']['direction'], resamples: number): { low: number; high: number } {
   const rng = mulberry32(0x57494349);
   const deltas: number[] = [];
@@ -394,6 +461,34 @@ function bootstrapDeltaPct(base: number[], next: number[], direction: GoalFile['
     low: percentile(deltas, 0.025),
     high: percentile(deltas, 0.975)
   };
+}
+
+function normalCdf(value: number): number {
+  return 0.5 * (1 + erf(value / Math.SQRT2));
+}
+
+function erf(value: number): number {
+  const sign = value < 0 ? -1 : 1;
+  const x = Math.abs(value);
+  const a1 = 0.254829592;
+  const a2 = -0.284496736;
+  const a3 = 1.421413741;
+  const a4 = -1.453152027;
+  const a5 = 1.061405429;
+  const p = 0.3275911;
+  const t = 1 / (1 + p * x);
+  const y = 1 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x));
+  return sign * y;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(1, Math.max(0, value));
+}
+
+function formatPValue(value: number): string {
+  if (value < 0.001) return value.toExponential(2);
+  return value.toFixed(4);
 }
 
 function sampleWithReplacement(values: number[], rng: () => number): number[] {

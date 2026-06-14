@@ -39,6 +39,7 @@
     "verify:acceptance-spec": "tsx src/verify/acceptance-spec.ts",
     "verify:diversity-archive": "tsx src/verify/diversity-archive.ts",
     "verify:metaproductivity": "tsx src/verify/metaproductivity.ts",
+    "verify:mann-whitney": "tsx src/verify/mann-whitney.ts",
     "verify:heldout": "tsx src/verify/heldout.ts",
     "verify:scorer-selftest": "tsx src/verify/scorer-selftest.ts",
     "verify:prescreen": "tsx src/verify/prescreen.ts",
