@@ -17,6 +17,7 @@
     "verify:resume-iteration": "tsx src/verify/resume-iteration.ts",
     "verify:commit-idempotency": "tsx src/verify/commit-idempotency.ts",
     "verify:hotreload": "tsx src/verify/hotreload.ts",
+    "verify:inbox-backpressure": "tsx src/verify/inbox-backpressure.ts",
     "verify:tamper": "tsx src/verify/tamper.ts",
     "verify:stuck": "tsx src/verify/stuck.ts",
     "verify:real-mode": "tsx src/verify/real-mode.ts",

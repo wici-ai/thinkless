@@ -5,7 +5,7 @@ import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.
 import type { BaselineFile, CheckpointSnapshot, GoalFile, RunOptions, WiCiConfig } from '../shared/types.js';
 import { hashFile, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
-import { applyInjections, drainInbox } from './inbox.js';
+import { applyInjections, drainInbox, injectionIds } from './inbox.js';
 import { runExecutorStep } from './executor.js';
 import { lockEvalScripts, runInitialPlanner, runPlanDiff, unlockEvalScripts, verifyEvalHashes } from './planner.js';
 import { nextExecutableStep, readPlan, setPlanStepStatus } from './plan.js';
@@ -185,7 +185,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         const applied = applyInjections(goal, injections);
         goal = applied.goal;
         steerText = applied.steerText;
-        checkpoint.drained_inbox = [...checkpoint.drained_inbox, ...injections.map((item) => item.id)];
+        const drainedIds = injectionIds(injections);
+        checkpoint.drained_inbox = [...checkpoint.drained_inbox, ...drainedIds];
         checkpoint.goal_version = goal.version;
         for (const answer of injections.filter((item) => item.kind === 'answer' && item.reply_to)) {
           const marked = await markOutboxAnswered(paths, answer.reply_to!, answer.text);
@@ -195,7 +196,11 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           });
         }
         await atomicWriteJson(paths.goal, goal);
-        await events.emit('INJECTION_DRAINED', `Applied ${injections.length} chat injection(s)`, injections.map((item) => ({ id: item.id, kind: item.kind })));
+        await events.emit(
+          'INJECTION_DRAINED',
+          `Applied ${drainedIds.length} chat injection(s)`,
+          injections.map((item) => ({ id: item.id, ids: item.coalesced_ids ?? [item.id], kind: item.kind }))
+        );
         if (applied.aborted) {
           checkpoint.supervisor_state = 'STOP';
           await saveCheckpoint(paths, checkpoint);
@@ -720,7 +725,7 @@ async function drainEvalLockAnswers(
   const applied = fresh.length > 0 ? applyInjections(goal, fresh) : { goal, steerText: undefined, aborted: false };
   const nextCheckpoint = {
     ...checkpoint,
-    drained_inbox: [...checkpoint.drained_inbox, ...injections.map((item) => item.id)],
+    drained_inbox: [...checkpoint.drained_inbox, ...injectionIds(injections)],
     goal_version: applied.goal.version
   };
   for (const answer of fresh) {

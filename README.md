@@ -30,6 +30,7 @@ npm run smoke
 npm run verify:durability
 npm run verify:commit-idempotency
 npm run verify:hotreload
+npm run verify:inbox-backpressure
 npm run verify:tamper
 npm run verify:stuck
 npm run verify:real-mode

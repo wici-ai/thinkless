@@ -56,6 +56,7 @@ export interface Injection {
   priority?: 'normal' | 'urgent';
   reply_to?: string;
   applied?: boolean;
+  coalesced_ids?: string[];
 }
 
 export type OutboxKind = 'info' | 'question' | 'stop_verdict' | 'error';

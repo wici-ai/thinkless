@@ -1,7 +1,7 @@
-import { readdir, rename, stat } from 'node:fs/promises';
+import { readFile, readdir, rename, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { atomicWriteJson, ensureDir, exists, readJsonFile } from '../shared/atomic.js';
+import { atomicWriteFile, atomicWriteJson, ensureDir, exists, readJsonFile, removeIfExists } from '../shared/atomic.js';
 import type { GoalFile, Injection, InjectionKind } from '../shared/types.js';
 import type { RunPaths } from '../shared/paths.js';
 
@@ -19,6 +19,9 @@ export async function writeInjection(paths: RunPaths, input: { kind: InjectionKi
     applied: false
   };
   await atomicWriteJson(join(paths.inbox, `${injection.id}.json`), injection);
+  if (injection.priority === 'urgent') {
+    await recordUrgentSentinel(paths, injection.id);
+  }
   return injection;
 }
 
@@ -30,17 +33,24 @@ export async function drainInbox(paths: RunPaths, drainedIds: string[], cap = 8,
     .filter((name) => /^inj-.+\.json$/.test(name))
     .map((name) => join(paths.inbox, name));
 
+  const urgentIds = await readUrgentSentinelIds(paths);
   const withStats = await Promise.all(
-    files.map(async (path) => ({
-      path,
-      mtimeMs: (await stat(path)).mtimeMs
-    }))
+    files.map(async (path) => {
+      const injection = validateInjection(await readJsonFile<Injection>(path));
+      return {
+        path,
+        injection,
+        urgent: injection.priority === 'urgent' && urgentIds.has(injection.id),
+        mtimeMs: (await stat(path)).mtimeMs
+      };
+    })
   );
 
   const drained: Injection[] = [];
-  for (const item of withStats.sort((a, b) => a.mtimeMs - b.mtimeMs)) {
+  for (const item of withStats.sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.mtimeMs - b.mtimeMs)) {
     if (drained.length >= cap) break;
-    const injection = validateInjection(await readJsonFile<Injection>(item.path));
+    const injection = item.injection;
+    if (injection.kind === 'abort' && !urgentIds.has(injection.id)) continue;
     if (kinds && !kinds.includes(injection.kind)) continue;
     if (replyTo && injection.reply_to !== replyTo) continue;
     if (drainedIds.includes(injection.id)) {
@@ -52,7 +62,13 @@ export async function drainInbox(paths: RunPaths, drainedIds: string[], cap = 8,
     drained.push({ ...injection, applied: true });
   }
 
+  await syncUrgentSentinel(paths, urgentIds, new Set(injectionIds(drained)));
+
   return coalesceInjections(drained);
+}
+
+export function injectionIds(injections: Injection[]): string[] {
+  return [...new Set(injections.flatMap((item) => item.coalesced_ids ?? [item.id]))];
 }
 
 export function applyInjections(goal: GoalFile, injections: Injection[]): { goal: GoalFile; steerText: string | undefined; aborted: boolean } {
@@ -117,15 +133,75 @@ function validateInjection(injection: Injection): Injection {
   return injection;
 }
 
+async function recordUrgentSentinel(paths: RunPaths, id: string): Promise<void> {
+  const ids = await readUrgentSentinelIds(paths);
+  ids.add(id);
+  await writeUrgentSentinelIds(paths, ids);
+}
+
+async function readUrgentSentinelIds(paths: RunPaths): Promise<Set<string>> {
+  if (!(await exists(paths.urgentSentinel))) return new Set();
+  const raw = await readFile(paths.urgentSentinel, 'utf8');
+  return new Set(
+    raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+  );
+}
+
+async function writeUrgentSentinelIds(paths: RunPaths, ids: Set<string>): Promise<void> {
+  if (ids.size === 0) {
+    await removeIfExists(paths.urgentSentinel);
+    return;
+  }
+  await atomicWriteFile(paths.urgentSentinel, `${[...ids].sort().join('\n')}\n`);
+}
+
+async function syncUrgentSentinel(paths: RunPaths, urgentIds: Set<string>, drainedIds: Set<string>): Promise<void> {
+  if (urgentIds.size === 0) return;
+  const pending = await pendingInjectionIds(paths);
+  const remaining = new Set([...urgentIds].filter((id) => !drainedIds.has(id) && pending.has(id)));
+  await writeUrgentSentinelIds(paths, remaining);
+}
+
+async function pendingInjectionIds(paths: RunPaths): Promise<Set<string>> {
+  if (!(await exists(paths.inbox))) return new Set();
+  const names = (await readdir(paths.inbox)).filter((name) => /^inj-.+\.json$/.test(name));
+  const ids = new Set<string>();
+  for (const name of names) {
+    const injection = validateInjection(await readJsonFile<Injection>(join(paths.inbox, name)));
+    ids.add(injection.id);
+  }
+  return ids;
+}
+
 function coalesceInjections(injections: Injection[]): Injection[] {
-  const steer = injections.filter((item) => item.kind === 'steer');
-  const rest = injections.filter((item) => item.kind !== 'steer');
-  if (steer.length <= 1) return injections;
-  return [
-    ...rest,
-    {
-      ...steer[steer.length - 1],
-      text: steer.map((item) => item.text).join('\n')
+  const result: Injection[] = [];
+  for (const injection of injections) {
+    if (!isCoalescable(injection.kind)) {
+      result.push(injection);
+      continue;
     }
-  ];
+
+    const previous = result.at(-1);
+    if (!previous || previous.kind !== injection.kind) {
+      result.push({ ...injection, coalesced_ids: injectionIds([injection]) });
+      continue;
+    }
+
+    result[result.length - 1] = {
+      ...previous,
+      id: injection.id,
+      ts: injection.ts,
+      text: `${previous.text}\n${injection.text}`,
+      priority: previous.priority === 'urgent' || injection.priority === 'urgent' ? 'urgent' : previous.priority,
+      coalesced_ids: injectionIds([previous, injection])
+    };
+  }
+  return result;
+}
+
+function isCoalescable(kind: InjectionKind): boolean {
+  return kind === 'add_requirement' || kind === 'steer';
 }

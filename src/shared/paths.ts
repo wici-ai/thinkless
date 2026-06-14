@@ -13,6 +13,7 @@ export interface RunPaths {
   wici: string;
   inbox: string;
   inboxDone: string;
+  urgentSentinel: string;
   outbox: string;
   artifacts: string;
   checkpoints: string;
@@ -52,6 +53,7 @@ export function runPaths(target: string): RunPaths {
     wici,
     inbox: join(wici, 'inbox'),
     inboxDone: join(wici, 'inbox', 'done'),
+    urgentSentinel: join(wici, 'inbox', 'URGENT'),
     outbox: join(wici, 'outbox'),
     artifacts: join(wici, 'artifacts'),
     checkpoints: join(wici, 'checkpoints'),
