@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { atomicWriteFile, atomicWriteJson, ensureDir, exists, lineCount, readJsonFileMaybe, removeIfExists } from '../shared/atomic.js';
 import type { Checkpoint, CheckpointSnapshot, GoalFile } from '../shared/types.js';
 import type { RunPaths } from '../shared/paths.js';
+import { saveGoalFiles } from './goalDoc.js';
 
 export async function hashFile(path: string): Promise<string | null> {
   if (!(await exists(path))) return null;
@@ -54,6 +55,7 @@ export async function saveIterationSnapshot(
     head_commit: input.headCommit,
     best_commit: input.bestCommit ?? null,
     files: {
+      goal_doc: await readTextMaybe(paths.goalDoc),
       lessons: await readTextMaybe(paths.lessons),
       skills_index: await readTextMaybe(paths.skillsIndex),
       skills: await readTextDirectory(paths.skills),
@@ -84,7 +86,8 @@ export async function loadIterationSnapshot(paths: RunPaths, iter: number): Prom
 }
 
 export async function restoreSnapshotRunFiles(paths: RunPaths, snapshot: CheckpointSnapshot): Promise<void> {
-  await atomicWriteJson(paths.goal, snapshot.goal);
+  await saveGoalFiles(paths, snapshot.goal);
+  if (snapshot.files.goal_doc !== undefined) await restoreTextFile(paths.goalDoc, snapshot.files.goal_doc);
   await restoreTextFile(paths.lessons, snapshot.files.lessons);
   await restoreTextFile(paths.skillsIndex, snapshot.files.skills_index);
   await restoreTextDirectory(paths.skills, snapshot.files.skills);

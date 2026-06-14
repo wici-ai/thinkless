@@ -69,11 +69,11 @@ function buildAcceptanceSpec(goal: GoalFile): AcceptanceSpec {
 
 function acceptanceClarificationReason(goal: GoalFile): string | null {
   const active = goal.requirements.filter((req) => req.status === 'active');
-  if (active.length === 0) return 'No active requirements are present in goal.json.';
-  if (goal.acceptance_criteria.length === 0) return 'No machine-checkable acceptance criteria are present in goal.json.';
+  if (active.length === 0) return 'No active requirements are present in GOAL.md.';
+  if (goal.acceptance_criteria.length === 0) return 'No machine-checkable acceptance criteria are present in GOAL.md.';
   const incomplete = goal.acceptance_criteria.find((criterion) => !criterion.id || !criterion.text || !criterion.check);
   if (incomplete) return `Acceptance criterion ${incomplete.id || '<missing-id>'} is missing id, text, or check.`;
-  if (!goal.metric.name || !goal.metric.direction) return 'The metric in goal.json is incomplete.';
+  if (!goal.metric.name || !goal.metric.direction) return 'The metric in GOAL.md is incomplete.';
   return null;
 }
 

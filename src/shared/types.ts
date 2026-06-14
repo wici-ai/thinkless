@@ -304,6 +304,7 @@ export interface CheckpointSnapshot {
   head_commit: string;
   best_commit: string | null;
   files: {
+    goal_doc?: string;
     lessons?: string;
     skills_index?: string;
     skills?: Record<string, string>;
@@ -377,7 +378,6 @@ export interface WiCiConfig {
     planner: {
       command: string;
       effort: string;
-      dangerouslySkipPermissions: boolean;
     };
     executor: {
       command: string;

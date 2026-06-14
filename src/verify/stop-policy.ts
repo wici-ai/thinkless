@@ -138,7 +138,7 @@ function config(): WiCiConfig {
   return {
     tools: {
       mode: 'stub',
-      planner: { command: 'claude', effort: 'max', dangerouslySkipPermissions: true },
+      planner: { command: 'claude', effort: 'max' },
       executor: { command: 'codex', dangerouslyBypassApprovalsAndSandbox: true }
     },
     budget: { max_iters: 3, max_cost_usd: 50, deadline: null },

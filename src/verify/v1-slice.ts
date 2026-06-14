@@ -28,6 +28,7 @@ async function main(): Promise<void> {
   assert(result.iter === 1, `expected one v1 iteration, got ${result.iter}`);
 
   const paths = runPaths(target);
+  await assertExists(paths.goalDoc, 'GOAL.md');
   await assertExists(paths.plan, 'PLAN.md');
   await assertExists(paths.acceptanceSpec, 'acceptance.spec.json');
   await assertExists(paths.benchmarkManifest, '.opt/benchmark.json');
@@ -41,6 +42,8 @@ async function main(): Promise<void> {
   await assertExists(`${paths.artifacts}/iter-1.prompt.txt`, '.wici/artifacts/iter-1.prompt.txt');
 
   const acceptance = await readJsonFile<AcceptanceSpec>(paths.acceptanceSpec);
+  const goalDoc = await readFile(paths.goalDoc, 'utf8');
+  assert(goalDoc.includes('# GOAL') && goalDoc.includes('v1 vertical slice'), `GOAL.md missing initial goal text:\n${goalDoc}`);
   assert(acceptance.criteria.some((criterion) => criterion.check === './.opt/checks.sh'), 'acceptance spec missing checks criterion');
   assert(acceptance.criteria.some((criterion) => criterion.check === './.opt/measure.sh'), 'acceptance spec missing measure criterion');
 

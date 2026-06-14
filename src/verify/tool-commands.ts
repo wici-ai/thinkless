@@ -4,7 +4,6 @@ import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
 import { buildInitialPlannerArgs, buildPlanDiffArgs } from '../supervisor/planner.js';
 import { schemaPath } from '../shared/paths.js';
-import type { GoalFile } from '../shared/types.js';
 
 async function main(): Promise<void> {
   const planSchema = await readFile(schemaPath('plan'), 'utf8');
@@ -18,7 +17,7 @@ async function main(): Promise<void> {
   const diffArgs = buildPlanDiffArgs({
     newText: 'new requirement',
     currentPlan: '# plan',
-    goal: fakeGoal(),
+    goalText: '# GOAL\n\n## Requirements\n- [active] R1: test\n',
     sessionId: 'session-123',
     schema: diffSchema,
     systemPrompt: 'diff prompt'
@@ -42,6 +41,12 @@ async function main(): Promise<void> {
   assert(!plannerArgs.includes(schemaPath('plan')), 'initial planner must not pass schema file path to claude');
   assert(diffArgs[diffArgs.indexOf('--json-schema') + 1].trim().startsWith('{'), 'diff planner must pass JSON schema content');
   assert(!diffArgs.includes(schemaPath('plan-diff')), 'diff planner must not pass schema file path to claude');
+  assert(plannerArgs[plannerArgs.indexOf('--permission-mode') + 1] === 'plan', 'initial planner must run Claude Code in plan mode');
+  assert(diffArgs[diffArgs.indexOf('--permission-mode') + 1] === 'plan', 'diff planner must run Claude Code in plan mode');
+  assert(!plannerArgs.includes('--dangerously-skip-permissions'), 'planner must not bypass permissions outside plan mode');
+  assert(!diffArgs.includes('--dangerously-skip-permissions'), 'planner diff must not bypass permissions outside plan mode');
+  assert(diffArgs[diffArgs.indexOf('-p') + 1].includes('Current GOAL.md:'), 'planner diff must pass markdown GOAL.md text');
+  assert(!diffArgs[diffArgs.indexOf('-p') + 1].includes('"requirements"'), 'planner diff must not expose internal goal.json as the goal contract');
 
   assert(firstCodex.includes('--output-schema'), 'first codex exec missing --output-schema');
   assert(firstCodex.includes('--output-last-message'), 'first codex exec missing --output-last-message');
@@ -62,25 +67,13 @@ async function main(): Promise<void> {
       {
         ok: true,
         claude_schema_content: true,
+        claude_plan_mode: true,
         codex_resume_structured_output_flags: true
       },
       null,
       2
     )
   );
-}
-
-function fakeGoal(): GoalFile {
-  return {
-    run_id: 'tool-command-test',
-    version: 1,
-    requirements: [{ id: 'R1', text: 'test', source: 'initial', status: 'active' }],
-    acceptance_criteria: [],
-    constraints: [],
-    metric: { name: 'p99', direction: 'minimize', target: null, unit: 'ms' },
-    budget: { max_iters: 1, max_cost_usd: 1, deadline: null },
-    stop: { tau: 0.01, K: 1, N: 1, mode: 'auto' }
-  };
 }
 
 function assert(condition: unknown, message: string): asserts condition {

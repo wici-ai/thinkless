@@ -36,8 +36,7 @@ function fakeRealConfig(): WiCiConfig {
       mode: 'real',
       planner: {
         command: 'definitely-missing-claude-for-wici-test',
-        effort: 'max',
-        dangerouslySkipPermissions: true
+        effort: 'max'
       },
       executor: {
         command: 'definitely-missing-codex-for-wici-test',

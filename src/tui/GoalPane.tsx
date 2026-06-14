@@ -17,6 +17,7 @@ export interface PlanDiffView {
 export function GoalPane({ state }: { state: RunState }) {
   const { isFocused } = useFocus({ id: 'goal' });
   const goal = state.goal;
+  const goalLines = state.goalDoc.split('\n').filter(Boolean).slice(0, 12);
   const previousPlan = useRef(state.plan);
   const diff = useMemo(() => buildPlanDiffView(previousPlan.current, state.plan, 34), [state.plan]);
 
@@ -30,9 +31,9 @@ export function GoalPane({ state }: { state: RunState }) {
         热 GOAL {goal ? `v${goal.version}` : ''}{diff.changed ? ` Δ +${diff.added} -${diff.removed}` : ''}
       </Text>
       <Box flexDirection="column">
-        {(goal?.requirements ?? []).slice(-5).map((req) => (
-          <Text key={req.id} color={req.status === 'active' ? 'white' : 'gray'}>
-            {req.id} {req.status}: {req.text}
+        {goalLines.map((line, index) => (
+          <Text key={`${index}-${line}`} color={goalLineColor(line)}>
+            {line.length > 72 ? `${line.slice(0, 69)}...` : line}
           </Text>
         ))}
       </Box>
@@ -97,5 +98,13 @@ function planLineColor(line: PlanLineView): string {
   if (line.text.includes('[>]')) return 'cyan';
   if (line.text.includes('[x]')) return 'green';
   if (line.text.includes('[!]')) return 'yellow';
+  return 'white';
+}
+
+function goalLineColor(line: string): string {
+  if (line.startsWith('#')) return 'magentaBright';
+  if (line.includes('[dropped]')) return 'gray';
+  if (line.includes('[active]')) return 'white';
+  if (line.startsWith('-')) return 'gray';
   return 'white';
 }

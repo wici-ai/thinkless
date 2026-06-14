@@ -39,6 +39,8 @@ async function main(): Promise<void> {
   assertNoControlWrites('ChatPane', files.chat);
 
   assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
+  assert(files.goal.includes('state.goalDoc'), 'GoalPane must render the user-facing GOAL.md document');
+  assert(!files.goal.includes('goal?.requirements'), 'GoalPane must not use internal goal.json requirements as the primary goal UI');
   assert(files.goal.includes('buildPlanDiffView'), 'GoalPane must compute a visible PLAN diff');
   assert(files.goal.includes('Δ +'), 'GoalPane must render added/removed PLAN counts');
   assert(files.goal.includes("line.added ? '+ '"), 'GoalPane must mark added PLAN lines');
@@ -59,7 +61,7 @@ async function main(): Promise<void> {
   assert(files.header.includes('elapsedSummary'), 'Header must show elapsed run time');
 
   assert(files.state.includes("import chokidar from 'chokidar'"), 'useRunState must use chokidar for blackboard watching');
-  for (const watched of ['paths.events', 'paths.goal', 'paths.checkpoint', 'paths.baseline', 'paths.ledger', 'paths.plan', 'paths.outbox']) {
+  for (const watched of ['paths.events', 'paths.goal', 'paths.goalDoc', 'paths.checkpoint', 'paths.baseline', 'paths.ledger', 'paths.plan', 'paths.outbox']) {
     assert(files.state.includes(watched), `useRunState watcher missing ${watched}`);
   }
   assert(files.state.includes('setTimeout') && files.state.includes('30'), 'useRunState must coalesce rapid file updates');

@@ -22,6 +22,7 @@ export interface RunPaths {
   events: string;
   codexRun: string;
   goal: string;
+  goalDoc: string;
   checkpoint: string;
   lock: string;
   plan: string;
@@ -63,6 +64,7 @@ export function runPaths(target: string): RunPaths {
     events: join(wici, 'events.jsonl'),
     codexRun: join(wici, 'codex-run.jsonl'),
     goal: join(wici, 'goal.json'),
+    goalDoc: join(root, 'GOAL.md'),
     checkpoint: join(wici, 'checkpoint.json'),
     lock: join(wici, '.lock'),
     plan: join(root, 'PLAN.md'),

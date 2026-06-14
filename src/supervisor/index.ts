@@ -33,6 +33,7 @@ import { recordAvenueOutcome, selectAvenue } from './diversity.js';
 import { runScorerSelftest } from './scorerSelftest.js';
 import { combinePromptMemory, readContextForPrompt, writeContextSummary } from './context.js';
 import { maybeInterrogateGoal } from './goalInterrogation.js';
+import { ensureGoalDoc, saveGoalFiles } from './goalDoc.js';
 import { ensureBenchmarkManifest, readBenchmarkForPrompt } from './benchmark.js';
 import {
   ACCEPTANCE_CLARIFY_REPLY_KEY,
@@ -69,7 +70,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     await ensureGitIdentity(paths, config);
     await ensureTargetGitignore(paths);
 
-    let goal = await ensureGoal(paths.goal, options.goal, config);
+    let goal = await ensureGoal(paths, options.goal, config);
     const maxIters = options.maxIters ?? goal.budget.max_iters ?? config.budget.max_iters;
     let checkpoint = await loadCheckpoint(paths, goal);
     let loadedSnapshot: CheckpointSnapshot | null = null;
@@ -198,7 +199,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
             outbox_id: marked?.id ?? null
           });
         }
-        await atomicWriteJson(paths.goal, goal);
+        await saveGoalFiles(paths, goal);
         await events.emit(
           'INJECTION_DRAINED',
           `Applied ${drainedIds.length} chat injection(s)`,
@@ -326,7 +327,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
             outbox_id: marked?.id ?? null
           });
         }
-        await atomicWriteJson(paths.goal, goal);
+        await saveGoalFiles(paths, goal);
         await events.emit(
           'INJECTION_DRAINED',
           `Applied ${drainedIds.length} chat injection(s) at EVALUATE safe point`,
@@ -551,7 +552,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       const ledger = await readLedger(paths);
       const goalCheck = await maybeInterrogateGoal(paths, goal, ledger);
       if (goalCheck) {
-        await events.emit('GOAL_INTERROGATION', `Checked iteration ${goalCheck.iter} behavior against goal.json`, {
+        await events.emit('GOAL_INTERROGATION', `Checked iteration ${goalCheck.iter} behavior against GOAL.md`, {
           id: goalCheck.id,
           iter: goalCheck.iter,
           goal_version: goalCheck.goal_version,
@@ -709,9 +710,12 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
   }
 }
 
-async function ensureGoal(path: string, text: string | undefined, config: WiCiConfig): Promise<GoalFile> {
-  const existing = await readJsonFileMaybe<GoalFile>(path);
-  if (existing) return existing;
+async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | undefined, config: WiCiConfig): Promise<GoalFile> {
+  const existing = await readJsonFileMaybe<GoalFile>(paths.goal);
+  if (existing) {
+    await ensureGoalDoc(paths, existing);
+    return existing;
+  }
   const goal: GoalFile = {
     run_id: `run-${Date.now()}`,
     version: 1,
@@ -745,7 +749,7 @@ async function ensureGoal(path: string, text: string | undefined, config: WiCiCo
     budget: config.budget,
     stop: config.stop
   };
-  await atomicWriteJson(path, goal);
+  await saveGoalFiles(paths, goal);
   return goal;
 }
 
@@ -869,7 +873,7 @@ async function drainEvalLockAnswers(
       'warn'
     );
   }
-  await atomicWriteJson(paths.goal, applied.goal);
+  await saveGoalFiles(paths, applied.goal);
   await events.emit(
     'INJECTION_DRAINED',
     fresh.length > 0 ? `Applied ${fresh.length} eval lock answer(s)` : `Drained ${stale.length} stale eval lock answer(s)`,
@@ -919,12 +923,12 @@ async function ensureAcceptanceSpecQuestion(paths: ReturnType<typeof runPaths>, 
 
   const message = await writeOutbox(paths, {
     kind: 'question',
-    text: `Acceptance criteria must be machine-checkable before the loop can run. ${reason} Reply with concrete checks or update goal.json acceptance_criteria.`,
+    text: `Acceptance criteria must be machine-checkable before the loop can run. ${reason} Reply with concrete checks for GOAL.md.`,
     replyKey: ACCEPTANCE_CLARIFY_REPLY_KEY,
     data: {
       reason,
-      goal: 'goal.json',
-      expected_shape: 'acceptance_criteria: [{id,text,check}]'
+      goal: 'GOAL.md',
+      expected_shape: 'machine-checkable acceptance criteria with explicit check commands'
     }
   });
   await events.emit('ACCEPTANCE_SPEC_CLARIFY', 'Acceptance criteria need clarification before freezing acceptance.spec.json', {

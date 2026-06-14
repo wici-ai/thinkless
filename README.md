@@ -4,9 +4,9 @@ WiCi is a TypeScript + Ink three-pane TUI that supervises long-running coding op
 
 The supervisor drives:
 
-- planner: `claude -p` in real mode;
+- planner: `claude -p --permission-mode plan` in real mode;
 - executor: `codex exec` in real mode;
-- acceptance gate: frozen `acceptance.spec.json` derived from `goal.json` before planning;
+- acceptance gate: frozen `acceptance.spec.json` derived from the user-facing `GOAL.md` contract and internal `.wici/goal.json` state before planning;
 - eval gate: locked `.opt/checks.sh` before optional `.opt/prescreen.sh`, full `.opt/measure.sh`, and optional hidden `.opt/validate.sh`;
 - git gate: commit confirmed improvements and revert rejected attempts;
 - hot goal reload: TUI chat writes `.wici/inbox/inj-*.json`, drained between iterations;
@@ -18,7 +18,7 @@ The supervisor drives:
 
 ## Safety
 
-Real mode uses `codex exec --dangerously-bypass-approvals-and-sandbox` and `claude --dangerously-skip-permissions`. A disposable container or VM is recommended for isolation, but WiCi also supports running directly on a primary machine when you rely on git-backed rollback and keep the tool repo version pinned.
+Real mode uses Claude Code plan mode for planning and `codex exec --dangerously-bypass-approvals-and-sandbox` for execution. A disposable container or VM is recommended for isolation, but WiCi also supports running directly on a primary machine when you rely on git-backed rollback and keep the tool repo version pinned.
 
 ## Commands
 
@@ -62,6 +62,7 @@ npm run verify:skills
 npm run verify:curriculum
 npm run verify:context-condensation
 npm run verify:goal-interrogation
+npm run verify:goal-doc
 npm run verify:limit-artifact
 ```
 
@@ -90,7 +91,7 @@ npx tsx src/cli.tsx doctor --update
 
 Use `--mode stub`, `--mode auto`, or `--mode real` on `run`/`tui`.
 
-WiCi freezes machine-checkable `goal.json.acceptance_criteria` into `acceptance.spec.json` before planning. If the criteria are missing or incomplete, the supervisor writes an `acceptance-spec` clarification question to `outbox/` and stops before materializing `PLAN.md`.
+WiCi keeps `GOAL.md` as the user-facing goal contract and `.wici/goal.json` as internal durable state. It freezes machine-checkable acceptance criteria into `acceptance.spec.json` before planning. If the criteria are missing or incomplete, the supervisor writes an `acceptance-spec` clarification question to `outbox/` and stops before materializing `PLAN.md`.
 
 Use `--resume-iteration N` on `run`/`tui` to load `.wici/checkpoints/iter-N.json`, reset the target to that snapshot commit, restore pinned run memory, and truncate `ledger.jsonl`/`events.jsonl` back to the snapshot sequence. `--max-iters` remains a total cap, so `--resume-iteration 3 --max-iters 5` runs at most iterations 4 and 5.
 
@@ -108,7 +109,7 @@ npm run verify:v1-slice
 
 That command creates `fixture/v1-slice-target`, runs one stubbed supervisor iteration, and checks:
 
-- `PLAN.md`, `acceptance.spec.json`, `.opt/benchmark.json`, `.opt/checks.sh`, `.opt/measure.sh`, `baseline.json`, and `ledger.jsonl` are materialized;
+- `GOAL.md`, `PLAN.md`, `acceptance.spec.json`, `.opt/benchmark.json`, `.opt/checks.sh`, `.opt/measure.sh`, `baseline.json`, and `ledger.jsonl` are materialized;
 - the locked checks and measure scripts still run;
 - the target gets a `perf:` commit plus a limit-artifact commit;
 - the executor prompt contains frozen acceptance criteria and safety constraints;
@@ -118,7 +119,7 @@ That command creates `fixture/v1-slice-target`, runs one stubbed supervisor iter
 
 ## Deployment
 
-Real mode intentionally passes maximum-autonomy flags to both CLIs. The safest setup is a disposable VM or container, but direct use on a primary machine is acceptable if the target repo is under git and the WiCi checkout is versioned.
+Real mode keeps the planner in Claude Code plan mode and gives the executor maximum autonomy. The safest setup is a disposable VM or container, but direct use on a primary machine is acceptable if the target repo is under git and the WiCi checkout is versioned.
 
 ### Try V1 Locally
 

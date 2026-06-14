@@ -11,6 +11,7 @@ export interface RunState {
   checkpoint: Checkpoint | null;
   baseline: BaselineFile | null;
   ledger: LedgerEntry[];
+  goalDoc: string;
   plan: string;
   events: RunEvent[];
   outbox: OutboxMessage[];
@@ -24,6 +25,7 @@ export function useRunState(target: string): RunState {
     checkpoint: null,
     baseline: null,
     ledger: [],
+    goalDoc: '',
     plan: '',
     events: [],
     outbox: []
@@ -47,7 +49,7 @@ export function useRunState(target: string): RunState {
     };
 
     void load();
-    const watcher = chokidar.watch([paths.events, paths.goal, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox], {
+    const watcher = chokidar.watch([paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox], {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 40, pollInterval: 20 }
     });
@@ -58,18 +60,19 @@ export function useRunState(target: string): RunState {
       if (timer) clearTimeout(timer);
       void watcher.close();
     };
-  }, [paths.target, paths.events, paths.goal, paths.checkpoint, paths.baseline, paths.ledger, paths.plan]);
+  }, [paths.target, paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox]);
 
   return state;
 }
 
 async function readState(target: string): Promise<RunState> {
   const paths = runPaths(target);
-  const [goal, checkpoint, baseline, ledger, plan, events, outbox] = await Promise.all([
+  const [goal, checkpoint, baseline, ledger, goalDoc, plan, events, outbox] = await Promise.all([
     readJsonMaybe<GoalFile>(paths.goal),
     readJsonMaybe<Checkpoint>(paths.checkpoint),
     readJsonMaybe<BaselineFile>(paths.baseline),
     readJsonLinesMaybe<LedgerEntry>(paths.ledger),
+    readTextMaybe(paths.goalDoc),
     readTextMaybe(paths.plan),
     readJsonLinesMaybe<RunEvent>(paths.events),
     readOutboxMessages(paths.outbox)
@@ -80,6 +83,7 @@ async function readState(target: string): Promise<RunState> {
     checkpoint,
     baseline,
     ledger,
+    goalDoc,
     plan,
     events,
     outbox

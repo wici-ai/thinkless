@@ -57,8 +57,8 @@ function restateGoal(goal: GoalFile, active: GoalFile['requirements']): string {
 
 function goalConcerns(goal: GoalFile, active: GoalFile['requirements'], recent: LedgerEntry[]): string[] {
   const concerns: string[] = [];
-  if (active.length === 0) concerns.push('drift: goal.json has no active requirements');
-  if (goal.acceptance_criteria.length === 0) concerns.push('drift: goal.json has no acceptance criteria');
+  if (active.length === 0) concerns.push('drift: GOAL.md has no active requirements');
+  if (goal.acceptance_criteria.length === 0) concerns.push('drift: GOAL.md has no acceptance criteria');
   if (recent.length > 0 && recent.every((entry) => entry.status !== 'keep')) {
     concerns.push('progress: no accepted improvement in the latest interrogation window');
   }

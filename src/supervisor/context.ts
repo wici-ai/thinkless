@@ -23,7 +23,7 @@ export async function readContextForPrompt(paths: RunPaths): Promise<string> {
   const content = await readFile(paths.context, 'utf8');
   if (!content.trim()) return '';
   return [
-    'Condensed WiCi run context (KEEP_FIRST_GOAL is authoritative; do not treat ledger notes as a replacement for goal.json):',
+    'Condensed WiCi run context (KEEP_FIRST_GOAL / GOAL.md is authoritative; do not treat ledger notes as a replacement for the goal):',
     content.trim()
   ].join('\n');
 }
@@ -56,6 +56,7 @@ function formatContextSummary(
     '',
     '## Claim Check Paths',
     `- target: ${paths.target}`,
+    '- goal: GOAL.md',
     '- plan: PLAN.md',
     '- frozen acceptance spec: acceptance.spec.json',
     '- public ledger: ledger.jsonl',
@@ -75,7 +76,7 @@ function formatContextSummary(
     ...(latestGoalInterrogation ? formatGoalInterrogation(latestGoalInterrogation) : ['- none yet']),
     '',
     '## Guidance',
-    '- Keep goal.json and PLAN.md as the source of truth.',
+    '- Keep GOAL.md and PLAN.md as the source of truth.',
     '- Use the ledger as public history only; held-out validation details are intentionally omitted from this prompt context.',
     '- Prefer referencing large artifacts by path instead of copying their contents into prompts.',
     ''

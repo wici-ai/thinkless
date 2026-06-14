@@ -18,7 +18,7 @@
 **User decisions locked:**
 1. **Termination = diminishing-returns / cost-benefit**, not a hard 12h/budget cap. Keep optimizing while gains are worth the cost; stop when marginal improvement-per-cost is low. Budget is only a hard backstop.
 2. **Eval scripts (`measure.sh`/`checks.sh`) are planner-designed, then user-locked** (reviewed once, `chmod -w` + SHA-256 pinned; agent can't edit thereafter).
-3. **Max autonomy:** `codex exec --dangerously-bypass-approvals-and-sandbox` + `claude --dangerously-skip-permissions`. → **Isolation is recommended, but direct-host real mode on the primary machine is allowed** when the target repo is git-backed, WiCi records its own git commit in `checkpoint.json`, and rollback commands are documented (see Safety).
+3. **Max autonomy where it writes:** Codex executes with `codex exec --dangerously-bypass-approvals-and-sandbox`; the planner is Claude Code in `--permission-mode plan`. → **Isolation is recommended, but direct-host real mode on the primary machine is allowed** when the target repo is git-backed, WiCi records its own git commit in `checkpoint.json`, and rollback commands are documented (see Safety).
 4. **Three-pane TUI from day one:** `chat` + `热goal` (live editable goal/plan) + `事实执行` (execution stream) — full vertical slice, not headless-first.
 
 ---
@@ -29,7 +29,7 @@
 ┌──────────────────────────── INK TUI (one process) ─────────────────────────────┐
 │  ┌───────────────┐   ┌───────────────────────┐   ┌──────────────────────────┐   │
 │  │ CHAT          │   │ 热 GOAL               │   │ 事实执行 (EXECUTION)      │   │
-│  │ intake + Q&A  │   │ goal.json + PLAN.md    │   │ tail events.jsonl         │   │
+│  │ intake + Q&A  │   │ GOAL.md + PLAN.md      │   │ tail events.jsonl         │   │
 │  │ writes inbox/ │   │ live, diff-highlighted │   │ <Static> log + spinner    │   │
 │  │ tails outbox/ │   │ version vN, metric bar │   │ + metric header           │   │
 │  └───────┬───────┘   └───────────▲───────────┘   └────────────▲─────────────┘   │
@@ -49,7 +49,7 @@
    └───────┘   └───────────┘   └────────────┘   └────────────┘   └───────────────┘
 ```
 
-**Single-writer blackboard.** The Supervisor is the only mutator of control files and holds a `flock` singleton. The TUI is a **producer-only** (drops `inbox/*.json` via temp+rename) and **read-only tailer** (watches `events.jsonl`, `goal.json`, `PLAN.md`, `ledger.jsonl`). No lock contention with the running executor → crash-independent UI.
+**Single-writer blackboard.** The Supervisor is the only mutator of control files and holds a `flock` singleton. The TUI is a **producer-only** (drops `inbox/*.json` via temp+rename) and **read-only tailer** (watches `events.jsonl`, `GOAL.md`, `PLAN.md`, `ledger.jsonl`). No lock contention with the running executor → crash-independent UI.
 
 **Two distinct locations:**
 - **Tool repo** = `/Users/saprk/code/WiCi-code` (the WiCi TUI/supervisor source).
@@ -59,16 +59,16 @@
 
 ## 2. Tool-driving (exact commands)
 
-### Planner — `claude -p`, structured artifacts, then user-locked
+### Planner — `claude -p --permission-mode plan`, structured artifacts, then user-locked
 
-The planner **reads the target deeply, writes `PLAN.md` + `.opt/measure.sh` + `.opt/checks.sh`, and also returns a structured plan** (so the supervisor can verify/lock). Honors the chosen `--dangerously-skip-permissions`:
+The planner is Claude Code running in **plan mode**. It reads `GOAL.md` and the target deeply, then returns structured planning artifacts. The supervisor materializes `PLAN.md` + `.opt/measure.sh` + `.opt/checks.sh` so they can be verified and locked:
 
 ```bash
-claude -p "ULTRAPLAN for goal: $(jq -r '.requirements[].text' .wici/goal.json)" \
+claude -p "ULTRAPLAN for goal: $(cat GOAL.md)" \
   --output-format json \
   --json-schema schemas/plan.schema.json \
   --effort max \
-  --dangerously-skip-permissions \
+  --permission-mode plan \
   --disallowedTools 'Bash(git push *)' 'Bash(rm -rf *)' \
   --append-system-prompt "$(cat prompts/planner.md)"
 # capture: jq -r '.session_id' -> .wici/sessions.json ; jq '.structured_output' -> verify -> materialize/lock
@@ -81,7 +81,7 @@ claude -p "ULTRAPLAN for goal: $(jq -r '.requirements[].text' .wici/goal.json)" 
 ```bash
 claude -p "New requirement: <text>. Current PLAN.md attached. Return MINIMAL diff, preserve step IDs." \
   --resume "$PLANNER_SID" --output-format json --json-schema schemas/plan-diff.schema.json \
-  --dangerously-skip-permissions \
+  --permission-mode plan \
   --append-system-prompt "Emit {add:[{after,id,text}],modify:[{id,text}],obsolete:[ids]}. Don't rewrite completed steps."
 ```
 
@@ -152,7 +152,7 @@ Anti-thrash escape hatches: `5` consecutive reverts → forced `git reset --hard
 
 Run dir: `target/.wici/` (gitignored) + committed `target/PLAN.md`, `target/.opt/`, `target/baseline.json`.
 
-- **`goal.json`** — steerable goal; `version` bumps on every applied injection. Fields: `run_id`, `version`, `requirements[]` (`id,text,source,status`), `acceptance_criteria[]` (`id,text,check`), `constraints[]`, `metric{name,direction,target}`, `budget{max_iters,max_cost_usd,deadline}`, `stop{tau,K,N,mode:auto|ask}`.
+- **`GOAL.md`** — steerable, user-facing goal contract, formatted like a durable markdown artifact rather than a task-specific schema. The supervisor also keeps `.wici/goal.json` as internal derived state for compatibility with acceptance, stop, and checkpoint logic; `version` bumps on every applied injection.
 - **`PLAN.md`** — markdown checklist, stable IDs, machine-readable trailer: `- [>] S2 Add pooling <!-- status:active iter:5 attempts:1 -->`. Markers `[ ]` pending `[>]` active `[x]` done `[!]` blocked.
 - **`baseline.json`** — best-ever anchor (rollback target) + `eval_sha256` of the locked scripts. Committed.
 - **`ledger.jsonl`** — append-only, one experiment/line: `id,ts,commit,hypothesis,p50,p95,p99,delta_pct,confidence,ci_low,ci_high,p_value,cost,guards,status(keep|reject|revert),reflection,parent_id`. System of record for stop-policy, stall detection, resume.
@@ -175,7 +175,7 @@ Helpers: `shared/atomic.ts` (temp+rename writes), `shared/paths.ts`, `shared/typ
   <Header/>                                  {/* state, p99 vs target, cost, elapsed */}
   <Box flexGrow={1}>
     <Box width="28%" borderStyle="round"><ChatPane/></Box>     {/* intake + Q&A */}
-    <Box width="34%" borderStyle="round"><GoalPane/></Box>     {/* 热 goal: goal.json + PLAN.md, diff-highlighted, vN */}
+    <Box width="34%" borderStyle="round"><GoalPane/></Box>     {/* 热 goal: GOAL.md + PLAN.md, diff-highlighted, vN */}
     <Box flexGrow={1} borderStyle="round"><ExecPane/></Box>    {/* 事实执行: events.jsonl tail */}
   </Box>
 </Box>
@@ -184,7 +184,7 @@ Helpers: `shared/atomic.ts` (temp+rename writes), `shared/paths.ts`, `shared/typ
 - **Anti-flicker (the #1 Ink pitfall):** exactly **one `<Static>`** in the whole tree (finished log lines, stable `key`); only the live tail + spinner + status + input re-render. Never mutate an already-Static item.
 - **Streaming:** ExecPane **tails `events.jsonl`** via chokidar (decoupled from the codex subprocess; survives supervisor crashes). Coalesce updates on ~16–50ms to avoid frame thrash.
 - **Focus / non-blocking:** each pane gates `useInput` on its own `useFocus`. `Tab`/`Shift+Tab` cycle; `Esc` jumps to Chat. This is what keeps Chat responsive while EXECUTION streams.
-- **Hot-reload path:** `ChatPane.onSubmit` → `atomicWrite(inbox/inj-NNNN.json)` → returns immediately. **TUI never touches `goal.json`/`PLAN.md`/`checkpoint.json`.** GoalPane re-renders when the supervisor bumps `goal.json.version` / rewrites `PLAN.md` (diff highlight on change).
+- **Hot-reload path:** `ChatPane.onSubmit` → `atomicWrite(inbox/inj-NNNN.json)` → returns immediately. **TUI never touches `GOAL.md`/`PLAN.md`/`checkpoint.json`.** GoalPane re-renders when the supervisor updates `GOAL.md` / rewrites `PLAN.md` (diff highlight on change).
 - **Fullscreen** via `withFullScreen(<App/>)`. Caveat: alt-screen kills native scrollback → implement an in-pane scroll viewport for ExecPane history.
 
 ---
@@ -218,7 +218,7 @@ git -C <target> restore --staged --worktree . && git -C <target> clean -fd   # u
 
 1. Top of EVALUATE: list `inbox/*.json` minus `checkpoint.drained_inbox`.
 2. Oldest-first: **atomically claim** (rename → `inbox/done/`), append `INJECTION_DRAINED` event.
-3. Mutate `goal.json` in memory per `kind`, **bump `version`**, atomic write.
+3. Mutate internal goal state per `kind`, **bump `version`**, atomic write `GOAL.md` plus `.wici/goal.json`.
 4. Record drained IDs in `checkpoint.drained_inbox` (idempotency).
 5. Force EVALUATE → **REPLAN** (edge priority #1). Planner `--resume` emits a minimal plan diff; apply surgically to `PLAN.md` (in-flight/completed steps untouched unless obsoleted). The new requirement becomes the **next executor prompt** via `codex exec resume --last` → steered without a restart.
 
@@ -236,7 +236,7 @@ git -C <target> restore --staged --worktree . && git -C <target> clean -fd   # u
 
 ## 9. Safety (because autonomy is maxed)
 
-`--dangerously-bypass-approvals-and-sandbox` + `--dangerously-skip-permissions` remove the OS sandbox — the main mitigation in the research. Compensate:
+`codex exec --dangerously-bypass-approvals-and-sandbox` removes the execution sandbox, while the planner remains in Claude Code plan mode. Compensate:
 - **Recommend a disposable container/VM** (or a dedicated machine) with only the target repo mounted. **Current deployment decision:** direct-host real mode on the primary machine is acceptable when the target repo is git-backed, the WiCi checkout is pinned/recorded, and rollback commands are documented.
 - Keep **reversibility** as the backbone: every change is git-committed or revertible (`wici rollback --target <repo> --confirm`, internally `reset --hard <best>` + `clean -fd` preserving `.wici/`); no irreversible ops.
 - Record WiCi's own package version, git commit, and dirty flag in `checkpoint.json` so the orchestrator can be rolled back along with the target repo.
@@ -251,7 +251,7 @@ git -C <target> restore --staged --worktree . && git -C <target> clean -fd   # u
 Internally sequenced to de-risk, but **M1 delivers the working three-pane TUI driving a real loop**.
 
 - **M0 — Engine skeleton (headless).** `supervisor/` loop on a sample target with a known-slow function: planner writes `PLAN.md`+`.opt/*` → `codex exec` runs a step → `measure.sh` `METRIC` line → naive `>baseline` gate → commit/reset. Proves both CLIs drive headlessly with the chosen flags, JSON/result-file capture works, git gate fires.
-- **M1 — Three-pane TUI over the engine (the first ask).** Wire `App.tsx` + Chat/Goal/Exec panes; ExecPane tails `events.jsonl` (single-`<Static>`), GoalPane watches `goal.json`+`PLAN.md`, Chat writes `inbox/`. Proves flicker-free streaming + responsive Chat during a live run + live goal view.
+- **M1 — Three-pane TUI over the engine (the first ask).** Wire `App.tsx` + Chat/Goal/Exec panes; ExecPane tails `events.jsonl` (single-`<Static>`), GoalPane watches `GOAL.md`+`PLAN.md`, Chat writes `inbox/`. Proves flicker-free streaming + responsive Chat during a live run + live goal view.
 - **M2 — Real eval gate + ledger + tamper-proofing.** `baseline.json`+`ledger.jsonl`, ≥5 reps, bootstrap-CI/Mann-Whitney gate, guard metrics, correctness-then-perf order, `eval_sha256` lock + the **user-lock review flow** in GoalPane. Proves monotonic progress, no noise commits.
 - **M3 — Durable supervisor + diminishing-returns stop.** Full state machine, `checkpoint.json`, append-log truncation, `codex exec resume --last`, the **value-stop policy + LLM worth-it verdict**, hard backstops, anti-thrash. `kill -9` mid-run → clean resume, no double-work. Proves 12h-class durability + the cost-benefit termination.
 - **M4 — Hot goal-reload.** Chat `onSubmit` → inbox → drain at EVALUATE → goal `version` bump → planner `--resume` minimal diff → executor next-prompt steer; `drained_inbox[]` idempotency, coalescing/cap, URGENT/abort. Proves mid-run re-plan + steer without killing the session.
@@ -277,7 +277,7 @@ Internally sequenced to de-risk, but **M1 delivers the working three-pane TUI dr
 2. **M1 UI:** `npm run dev` → three panes render; type in Chat while Exec streams (no flicker, input stays responsive); GoalPane shows the plan and updates when the supervisor rewrites it.
 3. **Eval integrity (M2):** edit `measure.sh` after lock → next iteration aborts on `eval_sha256` mismatch. Feed a no-op change → gate rejects (no commit). Feed a real speedup → exactly one `perf:` commit with the metric delta in the message; `ledger.jsonl` gets a `keep` row.
 4. **Durability (M3):** `kill -9` the supervisor mid-iteration, restart → resumes from `checkpoint.json` with no double-commit; `drained_inbox[]` respected. Verify the loop continues past target and **stops on diminishing-returns** (watch the stop-verdict in chat), not at the 12h cap.
-5. **Hot-reload (M4):** mid-run, type a new requirement in Chat → `goal.json.version` bumps, GoalPane shows the plan diff, and the very next `codex exec resume` prompt carries the steer — all without a process restart.
+5. **Hot-reload (M4):** mid-run, type a new requirement in Chat → internal goal version bumps, `GOAL.md` updates, GoalPane shows the plan diff, and the very next `codex exec resume` prompt carries the steer — all without a process restart.
 6. **Self-update (M5):** with a pending `codex` update, confirm the supervisor refuses to start a long run and updates only between runs (`codex update` → version bump recorded in checkpoint).
 
 ---
@@ -310,9 +310,9 @@ A 2025–2026 sweep of open-source agents, mined for **goal accuracy** and **lon
 - **[§6, M2] Metric-surface split** (ShinkaEvolve): the held-out validation score is computed by the supervisor and **never enters any planner/executor prompt**. `chmod -w` + SHA-pin stops *tampering*; invisibility stops *gaming*. Treat lockfiles as a complement, not the whole defense.
 - **[§6, M0] Scorer self-test** (METR): at startup, run a known-good and a known-bad patch through `measure.sh`/`checks.sh` and assert the verdicts before any iteration.
 - **[§6, M2] Cascade pre-screen** (OpenEvolve): one cheap rep / profiler sniff kills obvious non-improvements **before** the full ≥5-reps + bootstrap-CI/Mann-Whitney battery — major compute saver on a 12h run.
-- **[§4, M5] `goal.json` → frozen acceptance-criteria spec** (Spec Kit): machine-checkable criteria + an upfront clarify pass; the loop re-reads this artifact each iteration, not the rolling chat.
+- **[§4, M5] `GOAL.md` → frozen acceptance-criteria spec** (Spec Kit): machine-checkable criteria + an upfront clarify pass; the loop re-reads this artifact each iteration, not the rolling chat.
 - **[§3 REFLECT, M3] Reflection-as-memory** (Reflexion): only on a *measured* REVERT, Claude writes a compact lesson fed into the next REPLAN prompt — never on Codex's self-claim.
-- **[§3, M3] Periodic goal-interrogation** (goal-drift-evals): restate-and-check goal vs `goal.json` on long runs; keep the goal pinned in condensation `keep_first`.
+- **[§3, M3] Periodic goal-interrogation** (goal-drift-evals): restate-and-check behavior vs `GOAL.md` on long runs; keep the goal pinned in condensation `keep_first`.
 
 ### Long-horizon deltas
 - **[§3, M3] Diversity archive of stepping stones** (DGM / A-Evolve): keep accepted (+ a few rejected-but-interesting) commits tagged `perf/<metric>-<sha>`; REPLAN may **branch from any archived commit**, not only `reset --hard` to best.

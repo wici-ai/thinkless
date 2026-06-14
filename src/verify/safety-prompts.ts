@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   const diffArgs = buildPlanDiffArgs({
     newText: 'new safety-sensitive requirement',
     currentPlan: '# plan',
-    goal: goal(),
+    goalText: '# GOAL\n\n## Requirements\n- [active] R1: Optimize without unsafe actions\n',
     sessionId: 'session-1',
     schema: await readFile(schemaPath('plan-diff'), 'utf8'),
     systemPrompt: 'diff-system',
@@ -93,7 +93,7 @@ function testConfig(): WiCiConfig {
   return {
     tools: {
       mode: 'stub',
-      planner: { command: 'claude', effort: 'max', dangerouslySkipPermissions: true },
+      planner: { command: 'claude', effort: 'max' },
       executor: { command: 'codex', dangerouslyBypassApprovalsAndSandbox: true }
     },
     budget: { max_iters: 1, max_cost_usd: 1, deadline: null },

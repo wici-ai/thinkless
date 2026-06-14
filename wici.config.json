@@ -3,8 +3,7 @@
     "mode": "auto",
     "planner": {
       "command": "claude",
-      "effort": "max",
-      "dangerouslySkipPermissions": true
+      "effort": "max"
     },
     "executor": {
       "command": "codex",

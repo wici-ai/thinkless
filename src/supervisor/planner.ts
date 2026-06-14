@@ -49,10 +49,11 @@ export async function runInitialPlanner(paths: RunPaths, goal: GoalFile, config:
       const systemPrompt = await readFile(promptPath('planner'), 'utf8');
       const schema = await readFile(schemaPath('plan'), 'utf8');
       const safetyText = formatSafetyForPrompt(config);
+      const goalText = await readPlannerGoalText(paths, goal);
       const result = await execa(
         config.tools.planner.command,
         buildInitialPlannerArgs({
-          goalText: requirementText(goal),
+          goalText,
           schema,
           effort: config.tools.planner.effort,
           systemPrompt,
@@ -92,12 +93,13 @@ export async function runPlanDiff(paths: RunPaths, goal: GoalFile, plannerSessio
       const plan = await readFile(paths.plan, 'utf8');
       const schema = await readFile(schemaPath('plan-diff'), 'utf8');
       const safetyText = formatSafetyForPrompt(config);
+      const goalText = await readPlannerGoalText(paths, goal);
       const result = await execa(
         config.tools.planner.command,
         buildPlanDiffArgs({
           newText,
           currentPlan: plan,
-          goal,
+          goalText,
           sessionId: plannerSessionId,
           schema,
           systemPrompt,
@@ -136,7 +138,8 @@ export function buildInitialPlannerArgs(input: { goalText: string; schema: strin
     input.schema,
     '--effort',
     input.effort,
-    '--dangerously-skip-permissions',
+    '--permission-mode',
+    'plan',
     '--disallowedTools',
     'Bash(git push *)',
     'Bash(rm -rf *)',
@@ -148,7 +151,7 @@ export function buildInitialPlannerArgs(input: { goalText: string; schema: strin
 export function buildPlanDiffArgs(input: {
   newText: string;
   currentPlan: string;
-  goal: GoalFile;
+  goalText: string;
   sessionId: string;
   schema: string;
   systemPrompt: string;
@@ -156,17 +159,22 @@ export function buildPlanDiffArgs(input: {
 }): string[] {
   return [
     '-p',
-    `New requirement: ${input.newText}\n\nCurrent PLAN.md:\n${input.currentPlan}\n\nCurrent goal:\n${JSON.stringify(input.goal, null, 2)}`,
+    `New requirement: ${input.newText}\n\nCurrent GOAL.md:\n${input.goalText}\n\nCurrent PLAN.md:\n${input.currentPlan}`,
     '--resume',
     input.sessionId,
     '--output-format',
     'json',
     '--json-schema',
     input.schema,
-    '--dangerously-skip-permissions',
+    '--permission-mode',
+    'plan',
     '--append-system-prompt',
     appendSafety(input.systemPrompt, input.safetyText ?? '')
   ];
+}
+
+async function readPlannerGoalText(paths: RunPaths, goal: GoalFile): Promise<string> {
+  return (await exists(paths.goalDoc)) ? readFile(paths.goalDoc, 'utf8') : requirementText(goal);
 }
 
 async function materializePlannerOutput(paths: RunPaths, output: PlannerOutput): Promise<void> {

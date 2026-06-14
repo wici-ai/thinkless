@@ -16,7 +16,7 @@ const goal: GoalFile = {
 const config: WiCiConfig = {
   tools: {
     mode: 'stub',
-    planner: { command: 'claude', effort: 'low', dangerouslySkipPermissions: false },
+    planner: { command: 'claude', effort: 'low' },
     executor: { command: 'codex', dangerouslyBypassApprovalsAndSandbox: false }
   },
   budget: { max_iters: 1, max_cost_usd: 0, deadline: null },
