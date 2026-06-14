@@ -12,6 +12,7 @@
     "dev": "tsx src/cli.tsx tui --target fixture/slow-target",
     "run": "tsx src/cli.tsx run --target fixture/slow-target --goal \"Reduce p99 latency of the hot path while preserving output correctness\"",
     "smoke": "tsx src/cli.tsx smoke",
+    "verify:v1-slice": "tsx src/verify/v1-slice.ts",
     "sample": "tsx src/cli.tsx sample --target fixture/slow-target --force",
     "verify:durability": "tsx src/verify/durability.ts",
     "verify:resume-iteration": "tsx src/verify/resume-iteration.ts",

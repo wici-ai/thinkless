@@ -27,6 +27,7 @@ npm install
 npm run typecheck
 npm run build
 npm run smoke
+npm run verify:v1-slice
 npm run verify:durability
 npm run verify:commit-idempotency
 npm run verify:hotreload
@@ -83,3 +84,99 @@ WiCi freezes machine-checkable `goal.json.acceptance_criteria` into `acceptance.
 Use `--resume-iteration N` on `run`/`tui` to load `.wici/checkpoints/iter-N.json`, reset the target to that snapshot commit, restore pinned run memory, and truncate `ledger.jsonl`/`events.jsonl` back to the snapshot sequence. `--max-iters` remains a total cap, so `--resume-iteration 3 --max-iters 5` runs at most iterations 4 and 5.
 
 Use `--lock-mode manual` to stop after `PLAN.md`, `.opt/benchmark.json`, and `.opt/*.sh` are generated. Review them, then answer the `lock-eval` question in the TUI with `/answer lock-eval approved`; the next run initializes and pins `baseline.json`.
+
+## V1 Acceptance
+
+V1 is the first usable vertical slice: a human can install WiCi, run a deterministic stubbed optimization, inspect the generated target artifacts, and open the three-pane TUI over the same run state.
+
+Run the automated V1 gate:
+
+```bash
+npm run verify:v1-slice
+```
+
+That command creates `fixture/v1-slice-target`, runs one stubbed supervisor iteration, and checks:
+
+- `PLAN.md`, `acceptance.spec.json`, `.opt/benchmark.json`, `.opt/checks.sh`, `.opt/measure.sh`, `baseline.json`, and `ledger.jsonl` are materialized;
+- the locked checks and measure scripts still run;
+- the target gets a `perf:` commit plus a limit-artifact commit;
+- the executor prompt contains frozen acceptance criteria and safety constraints;
+- the non-fullscreen TUI can render the Chat, Goal, and Execution panes over the run state.
+
+## Deployment
+
+Use a disposable VM or container for real runs. Real mode intentionally passes maximum-autonomy flags to both CLIs, so the supported deployment is an isolated machine with only the target repository mounted.
+
+### Try V1 Locally
+
+```bash
+git clone https://github.com/wici-ai/WiCi-code.git
+cd WiCi-code
+git checkout 0.1.0
+npm install
+npm run verify:v1-slice
+```
+
+Open the TUI over a fresh sample target:
+
+```bash
+npm run sample
+npm run dev
+```
+
+Run a headless stub optimization over the fixture:
+
+```bash
+npm run sample
+npx tsx src/cli.tsx run \
+  --target fixture/slow-target \
+  --goal "Reduce p99 latency while preserving correctness" \
+  --max-iters 1 \
+  --mode stub
+```
+
+### Real Mode
+
+Install and authenticate the two agent CLIs on the isolated host:
+
+```bash
+claude --version
+codex --version
+npx tsx src/cli.tsx doctor --deep
+```
+
+Set any provider-specific environment variables in the shell or container runtime. Keep credentials out of the repository and out of committed config files.
+
+Run with automatic fallback to stub only when a CLI is missing:
+
+```bash
+npx tsx src/cli.tsx run \
+  --target /workspace/target-repo \
+  --goal "Reduce p99 latency while preserving correctness" \
+  --mode auto
+```
+
+Require real CLIs and fail instead of falling back:
+
+```bash
+npx tsx src/cli.tsx run \
+  --target /workspace/target-repo \
+  --goal "Reduce p99 latency while preserving correctness" \
+  --mode real
+```
+
+For eval review before the loop starts:
+
+```bash
+npx tsx src/cli.tsx tui \
+  --target /workspace/target-repo \
+  --goal "Reduce p99 latency while preserving correctness" \
+  --mode real \
+  --lock-mode manual
+```
+
+When `--lock-mode manual` asks for approval, review `PLAN.md`, `.opt/benchmark.json`, `.opt/checks.sh`, and `.opt/measure.sh`, then answer in Chat:
+
+```text
+/answer lock-eval approved
+```

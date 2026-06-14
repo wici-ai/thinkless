@@ -38,3 +38,4 @@ fixture/context-target/
 fixture/goal-interrogation-target/
 fixture/limit-artifact-target/
 fixture/limit-artifact-deadline-target/
+fixture/v1-slice-target/
