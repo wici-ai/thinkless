@@ -37,6 +37,7 @@ npm run verify:tamper
 npm run verify:stuck
 npm run verify:real-mode
 npm run verify:safety-prompts
+npm run verify:rollback
 npm run verify:outbox
 npm run verify:tool-version
 npm run verify:ask-stop
@@ -196,10 +197,11 @@ When `--lock-mode manual` asks for approval, review `PLAN.md`, `.opt/benchmark.j
 If a direct-host real run goes wrong, stop the supervisor first. The target repo can be restored to the best accepted commit recorded by WiCi:
 
 ```bash
-cd /workspace/target-repo
-git reset --hard "$(jq -r .best_commit baseline.json)"
-git clean -fd
+npx tsx src/cli.tsx rollback --target /workspace/target-repo
+npx tsx src/cli.tsx rollback --target /workspace/target-repo --confirm
 ```
+
+The first command is a non-destructive preview. The second command runs `git reset --hard` to `wici/best` when available, otherwise to `baseline.json.best_commit`, then runs `git clean -fd` while preserving `.wici/`.
 
 To restore the WiCi orchestrator version that started the run:
 

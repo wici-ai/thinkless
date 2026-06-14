@@ -9,6 +9,8 @@ import { runSupervisor } from './supervisor/index.js';
 import { createSampleTarget } from './sample.js';
 import type { ToolMode } from './shared/types.js';
 import { loadConfig } from './shared/config.js';
+import { runPaths } from './shared/paths.js';
+import { previewRollback, rollbackTarget } from './supervisor/rollback.js';
 import { checkToolHealth, updateToolsBetweenRuns } from './supervisor/selfupdate.js';
 
 const program = new Command();
@@ -109,6 +111,17 @@ program
     const report = options.update ? await updateToolsBetweenRuns(config) : await checkToolHealth(config, { probeClaude: options.deep });
     console.log(JSON.stringify(report, null, 2));
     process.exitCode = report.codex.available && report.claude.available && !report.codex.error && !report.claude.error ? 0 : 1;
+  });
+
+program
+  .command('rollback')
+  .description('Preview or execute target rollback to the best WiCi commit')
+  .requiredOption('--target <path>', 'target repository')
+  .option('--confirm', 'execute git reset --hard and git clean -fd for the target', false)
+  .action(async (options: { target: string; confirm: boolean }) => {
+    const paths = runPaths(resolve(options.target));
+    const result = options.confirm ? await rollbackTarget(paths) : await previewRollback(paths);
+    console.log(JSON.stringify(result, null, 2));
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
