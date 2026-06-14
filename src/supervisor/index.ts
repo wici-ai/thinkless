@@ -311,6 +311,102 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         continue;
       }
 
+      const safePointInjections = await drainInbox(paths, checkpoint.drained_inbox);
+      if (safePointInjections.length > 0) {
+        const applied = applyInjections(goal, safePointInjections);
+        goal = applied.goal;
+        steerText = applied.steerText;
+        const drainedIds = injectionIds(safePointInjections);
+        checkpoint.drained_inbox = [...checkpoint.drained_inbox, ...drainedIds];
+        checkpoint.goal_version = goal.version;
+        for (const answer of safePointInjections.filter((item) => item.kind === 'answer' && item.reply_to)) {
+          const marked = await markOutboxAnswered(paths, answer.reply_to!, answer.text);
+          await events.emit('OUTBOX_ANSWERED', `Applied answer for ${answer.reply_to}`, {
+            reply_to: answer.reply_to,
+            outbox_id: marked?.id ?? null
+          });
+        }
+        await atomicWriteJson(paths.goal, goal);
+        await events.emit(
+          'INJECTION_DRAINED',
+          `Applied ${drainedIds.length} chat injection(s) at EVALUATE safe point`,
+          safePointInjections.map((item) => ({ id: item.id, ids: item.coalesced_ids ?? [item.id], kind: item.kind, safe_point: 'evaluate' }))
+        );
+
+        await revertToBest(paths, baseline.best_commit);
+        await setPlanStepStatus(paths, step.id, 'pending');
+        const ledgerEntry = ledgerFromEvaluation({
+          iter: nextIter,
+          stepId: step.id,
+          status: 'revert',
+          hypothesis: step.text,
+          commit: null,
+          baseline: baseline.best_metric,
+          evaluation: null,
+          wallMs: Date.now() - iterationStarted,
+          usage: iterResult.invocation.usage,
+          reflection: 'superseded by chat injection at EVALUATE safe point; reverted before evaluation',
+          parentId,
+          avenue: activeAvenue
+        });
+        await appendLedger(paths, ledgerEntry);
+        await appendLessonFromLedger(paths, ledgerEntry, config);
+        await refreshContextSummary(paths, goal, events);
+        checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
+
+        if (applied.aborted) {
+          checkpoint = {
+            ...checkpoint,
+            supervisor_state: 'STOP',
+            ledger_seq: await lineCount(paths.ledger),
+            events_seq: events.seq,
+            plan_hash: await hashFile(paths.plan)
+          };
+          await saveCheckpoint(paths, checkpoint);
+          await writeOutbox(paths, { kind: 'info', text: 'Urgent abort injection requested stop' });
+          await events.emit('STOP', 'Urgent abort injection requested stop', undefined, 'warn');
+          return { state: 'STOP', reason: 'urgent abort injection', iter: checkpoint.iter };
+        }
+
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'PLAN',
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq,
+          plan_hash: await hashFile(paths.plan)
+        };
+        await saveCheckpoint(paths, checkpoint);
+        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, withLessons(steerText ?? '', memoryText), config);
+        checkpoint.sessions.planner = diff.sessionId ?? checkpoint.sessions.planner;
+        checkpoint.plan_hash = await hashFile(paths.plan);
+        if (await hasChanges(paths)) {
+          const commit = await commitAll(paths, `chore: apply WiCi goal v${goal.version} plan update`);
+          baseline = {
+            ...baseline,
+            best_commit: commit,
+            plan_hash: checkpoint.plan_hash ?? baseline.plan_hash,
+            updated_at: new Date().toISOString()
+          };
+          await atomicWriteJson(paths.baseline, baseline);
+          if (await hasChanges(paths)) {
+            await commitAll(paths, `chore: record WiCi goal v${goal.version} baseline anchor`);
+          }
+          await tagBest(paths);
+        }
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'EXECUTE',
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq,
+          plan_hash: await hashFile(paths.plan)
+        };
+        await saveCheckpoint(paths, checkpoint);
+        await saveStableIterationSnapshot(paths, goal, checkpoint, baseline);
+        await events.emit('PLAN_DIFF_APPLIED', 'Planner applied a minimal plan diff for new input at EVALUATE safe point', { steerText, safe_point: 'evaluate' });
+        if (options.once) break;
+        continue;
+      }
+
       checkpoint.supervisor_state = 'EVALUATE';
       await saveCheckpoint(paths, checkpoint);
       await events.emit('EVALUATE_START', `Running locked checks and measure for ${step.id}`);

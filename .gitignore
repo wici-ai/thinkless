@@ -7,6 +7,7 @@ fixture/slow-target/
 fixture/resume-iteration-target/
 fixture/commit-idempotency-target/
 fixture/hotreload-target/
+fixture/hotreload-safe-point-target/
 fixture/tamper-target/
 fixture/tamper-guard-target/
 fixture/tamper-validate-target/
