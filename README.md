@@ -31,6 +31,7 @@ npm run verify:v1-slice
 npm run verify:tui-structure
 npm run verify:tui-live
 npm run verify:durability
+npm run verify:resume-iteration
 npm run verify:commit-idempotency
 npm run verify:hotreload
 npm run verify:inbox-backpressure
@@ -49,13 +50,19 @@ npm run verify:clarify
 npm run verify:claude-probe
 npm run verify:manual-lock
 npm run verify:benchmark-manifest
+npm run verify:acceptance-spec
+npm run verify:diversity-archive
 npm run verify:metaproductivity
 npm run verify:mann-whitney
 npm run verify:heldout
 npm run verify:scorer-selftest
 npm run verify:prescreen
 npm run verify:lessons
+npm run verify:skills
 npm run verify:curriculum
+npm run verify:context-condensation
+npm run verify:goal-interrogation
+npm run verify:limit-artifact
 ```
 
 Open the TUI over the fixture target:
