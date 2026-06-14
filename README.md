@@ -45,6 +45,7 @@ npm run verify:tool-version
 npm run verify:ask-stop
 npm run verify:stop-policy
 npm run verify:tool-commands
+npm run verify:executor-contract
 npm run verify:codex-run-usage
 npm run verify:clarify
 npm run verify:claude-probe

@@ -19,6 +19,7 @@ async function main(): Promise<void> {
 
   const openItems = plan.slice(plan.indexOf('## Open items'));
   assert(openItems.includes('verified by `npm run verify:tool-commands`'), 'PLAN open items should record verified Codex resume flags');
+  assert(openItems.includes('`npm run verify:executor-contract`'), 'PLAN open items should record the executor contract canary');
   assert(openItems.includes('covered by `npm run verify:outbox`, `npm run verify:clarify`, `npm run verify:manual-lock`, and `npm run verify:ask-stop`'), 'PLAN open items should record implemented two-way intake');
   assert(!openItems.includes('does not advertise `--json`/`--output-schema`'), 'PLAN open items still contain stale Codex resume help assumption');
   assert(!openItems.includes('M1 ships fire-and-forget injection'), 'PLAN open items still describe chat intake as fire-and-forget only');

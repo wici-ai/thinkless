@@ -31,6 +31,7 @@
     "verify:ask-stop": "tsx src/verify/ask-stop.ts",
     "verify:stop-policy": "tsx src/verify/stop-policy.ts",
     "verify:tool-commands": "tsx src/verify/tool-commands.ts",
+    "verify:executor-contract": "tsx src/verify/executor-contract.ts",
     "verify:codex-run-usage": "tsx src/verify/codex-run-usage.ts",
     "verify:clarify": "tsx src/verify/clarify.ts",
     "verify:claude-probe": "tsx src/verify/claude-probe.ts",

@@ -113,7 +113,7 @@ codex exec resume --last \
 
 - `--dangerously-bypass-approvals-and-sandbox` = the "yolo" requested (no `--yolo` flag exists in 0.139.0). Never blocks on approvals.
 - **`resume --last` from the fixed per-run cwd** sidesteps the known gap that `codex exec --json` doesn't print a usable session id (openai/codex#3817). Do not harvest `~/.codex/sessions/` under rapid iteration.
-- **Resume structured-output fallback (verify in M0):** `codex exec resume`'s help does not advertise `--json`/`--output-schema`/`--output-last-message`. **Robust design: the executor always writes `.wici/artifacts/iter-N.json` itself** (instructed in the prompt) and the supervisor reads that file — independent of whether `--json` is honored on resume. Parse `.wici/codex-run.jsonl` events (`turn.completed{usage}`, `turn.failed`, `error`, `item.completed`) for progress/cost; treat top-level `error`/`turn.failed` as stop/retry.
+- **Resume structured-output contract:** `codex exec resume --help` advertises `--json`/`--output-schema`/`--output-last-message` locally, and WiCi still instructs the executor to write `.wici/artifacts/iter-N.json` itself. The supervisor reads that file as the source of truth and parses `.wici/codex-run.jsonl` events (`turn.completed{usage}`, `turn.failed`, `error`, `item.completed`) for progress/cost; treat top-level `error`/`turn.failed` as stop/retry.
 - Keep MCP servers `required=false` so a transient MCP failure never aborts the unattended run.
 
 ---
@@ -335,7 +335,7 @@ A 2025–2026 sweep of open-source agents, mined for **goal accuracy** and **lon
 
 ## Open items (small, non-blocking)
 
-- **Codex resume structured-output canary:** local CLI support is verified by `npm run verify:tool-commands`: `codex exec resume --help` advertises `--json`/`--output-schema`/`--output-last-message`, and the executor passes those flags. Keep the executor-writes-its-own `.wici/artifacts/iter-N.json` instruction as the runtime fallback. Next hardening is an optional real-mode canary against a disposable local fixture.
+- **Codex resume structured-output canary:** local CLI support is verified by `npm run verify:tool-commands`, and the executor's non-stub contract is covered without invoking real Codex by `npm run verify:executor-contract`: it exercises first-run/resume args, the executor-written `.wici/artifacts/iter-N.json` fallback, `--output-last-message`, steering prompt propagation, and transcript usage parsing. Next hardening is an optional real-mode canary against a disposable local fixture.
 - **Benchmark tool per goal** is planner's choice inside `measure.sh` (hyperfine for whole-command, k6/wrk for service p99, pytest-benchmark/criterion in-process) — selected during planning, locked on review.
 - **Stop thresholds** `τ/K/N` start as `wici.config.json` defaults; tune after M3.
 - **Chat intake UX:** the two-way file path is implemented through `outbox/` and `/answer`, covered by `npm run verify:outbox`, `npm run verify:clarify`, `npm run verify:manual-lock`, and `npm run verify:ask-stop`. Remaining work is richer prompt grouping and operator ergonomics, not the transport.
