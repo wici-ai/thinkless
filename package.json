@@ -14,6 +14,7 @@
     "smoke": "tsx src/cli.tsx smoke",
     "verify:v1-slice": "tsx src/verify/v1-slice.ts",
     "verify:tui-structure": "tsx src/verify/tui-structure.ts",
+    "verify:tui-live": "tsx src/verify/tui-live.ts",
     "sample": "tsx src/cli.tsx sample --target fixture/slow-target --force",
     "verify:durability": "tsx src/verify/durability.ts",
     "verify:resume-iteration": "tsx src/verify/resume-iteration.ts",

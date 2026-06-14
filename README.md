@@ -29,6 +29,7 @@ npm run build
 npm run smoke
 npm run verify:v1-slice
 npm run verify:tui-structure
+npm run verify:tui-live
 npm run verify:durability
 npm run verify:commit-idempotency
 npm run verify:hotreload
@@ -104,6 +105,8 @@ That command creates `fixture/v1-slice-target`, runs one stubbed supervisor iter
 - the target gets a `perf:` commit plus a limit-artifact commit;
 - the executor prompt contains frozen acceptance criteria and safety constraints;
 - the non-fullscreen TUI can render the Chat, Goal, and Execution panes over the run state.
+
+`npm run verify:tui-live` starts the `tui` command itself with the supervisor enabled and verifies that the live execution stream reaches the TUI while the target run commits and stops cleanly.
 
 ## Deployment
 
