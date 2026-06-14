@@ -4,13 +4,15 @@ import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
 import { atomicWriteJson } from '../shared/atomic.js';
-import type { GoalFile, OutboxMessage, RunEvent } from '../shared/types.js';
+import type { GoalFile, LedgerEntry, OutboxMessage, RunEvent } from '../shared/types.js';
 
 const maxTarget = resolve('fixture/limit-artifact-target');
+const costTarget = resolve('fixture/limit-artifact-cost-target');
 const deadlineTarget = resolve('fixture/limit-artifact-deadline-target');
 
 async function main(): Promise<void> {
   await verifyMaxIterArtifact();
+  await verifyCostArtifact();
   await verifyDeadlineArtifact();
 }
 
@@ -42,6 +44,43 @@ async function verifyMaxIterArtifact(): Promise<void> {
 
   const status = await git(maxTarget, ['status', '--short']);
   assert(status.trim() === '', `max target dirty after limit artifact run:\n${status}`);
+}
+
+async function verifyCostArtifact(): Promise<void> {
+  await createSampleTarget(costTarget, true);
+  await writeDeterministicMeasure(costTarget);
+  const paths = runPaths(costTarget);
+
+  const first = await run(costTarget, ['--goal', 'Commit the best artifact when cost is exhausted', '--max-iters', '1', '--mode', 'stub']);
+  assert(first.exitCode === 0, `cost setup run failed:\n${first.all}`);
+
+  const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
+  assert(ledger.length === 1, `expected one setup ledger row, got ${ledger.length}`);
+  ledger[0].cost.usd = 0.02;
+  await writeFile(paths.ledger, `${ledger.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+
+  const goal = JSON.parse(await readFile(paths.goal, 'utf8')) as GoalFile;
+  goal.budget.max_cost_usd = 0.01;
+  goal.budget.max_iters = 5;
+  await atomicWriteJson(paths.goal, goal);
+
+  const result = await run(costTarget, ['--max-iters', '5', '--mode', 'stub']);
+  assert(result.exitCode !== 0, 'cost hard backstop should return a failed process');
+  assert((result.all ?? '').includes('Hard cost backstop exhausted'), `cost result missing hard backstop reason:\n${result.all}`);
+
+  const artifact = await readFile(`${costTarget}/wici-limit-artifact.md`, 'utf8');
+  assert(artifact.includes('Reason: Hard cost backstop exhausted: 0.0200 >= 0.01'), 'cost artifact missing reason');
+  assert(artifact.includes('Accepted rows: 1'), 'cost artifact missing accepted row count');
+
+  const events = await readJsonLines<RunEvent>(paths.events);
+  assert(events.some((event) => event.type === 'LIMIT_ARTIFACT_COMMIT'), 'missing cost LIMIT_ARTIFACT_COMMIT event');
+  assert(events.some((event) => event.type === 'FAILED' && event.message.includes('Hard cost backstop exhausted')), 'missing cost FAILED event');
+
+  const outbox = await readOutbox(paths.outbox);
+  assert(outbox.some((message) => message.text.includes('Hard cost backstop exhausted') && message.data), 'missing cost outbox artifact data');
+
+  const status = await git(costTarget, ['status', '--short']);
+  assert(status.trim() === '', `cost target dirty after limit artifact run:\n${status}`);
 }
 
 async function verifyDeadlineArtifact(): Promise<void> {
@@ -83,8 +122,10 @@ async function verifyDeadlineArtifact(): Promise<void> {
       {
         ok: true,
         max_target: maxTarget,
+        cost_target: costTarget,
         deadline_target: deadlineTarget,
         max_artifact_idempotent: true,
+        cost_artifact_committed: true,
         deadline_artifact_committed: true
       },
       null,
