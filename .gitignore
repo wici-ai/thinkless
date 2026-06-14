@@ -18,6 +18,7 @@ fixture/ask-stop-target/
 fixture/clarify-target/
 fixture/manual-lock-target/
 fixture/manual-lock-preapprove-target/
+fixture/benchmark-target/
 fixture/acceptance-spec-target/
 fixture/acceptance-clarify-target/
 fixture/diversity-archive-target/

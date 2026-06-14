@@ -33,6 +33,7 @@ import { recordAvenueOutcome, selectAvenue } from './diversity.js';
 import { runScorerSelftest } from './scorerSelftest.js';
 import { combinePromptMemory, readContextForPrompt, writeContextSummary } from './context.js';
 import { maybeInterrogateGoal } from './goalInterrogation.js';
+import { ensureBenchmarkManifest, readBenchmarkForPrompt } from './benchmark.js';
 import {
   ACCEPTANCE_CLARIFY_REPLY_KEY,
   ensureAcceptanceSpec,
@@ -173,10 +174,11 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       const ledgerBeforeIteration = await readLedger(paths);
       const acceptanceSpec = await verifyAcceptanceSpec(paths, goal);
       const acceptanceText = formatAcceptanceSpecForPrompt(acceptanceSpec);
+      const benchmarkText = await readBenchmarkForPrompt(paths);
       const skillText = formatSkillsForPrompt(await retrieveSkills(paths, skillQuery(goal, ledgerBeforeIteration)));
       const lessonsText = formatLessonsForPrompt(await readRecentLessons(paths));
       const contextText = await readContextForPrompt(paths);
-      const memoryText = combinePromptMemory(acceptanceText, skillText, contextText, lessonsText);
+      const memoryText = combinePromptMemory(acceptanceText, benchmarkText, skillText, contextText, lessonsText);
       const parentId = checkpoint.active_avenue?.parent_id ?? lastAccepted(ledgerBeforeIteration)?.id ?? null;
       const activeAvenue = checkpoint.active_avenue?.name;
 
@@ -667,10 +669,29 @@ async function ensurePlanAndBaseline(
     await events.emit('PLAN_START', 'Planner is materializing PLAN.md and locked eval scripts');
     const result = await runInitialPlanner(paths, goal, config);
     await events.emit('PLAN_DONE', result.stdout ?? 'planner completed', { sessionId: result.sessionId });
+    const benchmark = await ensureBenchmarkManifest(paths, goal);
+    await events.emit('BENCHMARK_SELECTED', 'Recorded benchmark selection in .opt/benchmark.json', {
+      tool: benchmark.manifest.tool,
+      command: benchmark.manifest.command,
+      metric: benchmark.manifest.metric,
+      created: benchmark.created
+    });
     createdSetup = true;
-  } else if (await exists(paths.baseline)) {
-    await chmod(paths.measure, 0o555).catch(() => undefined);
-    await chmod(paths.checks, 0o555).catch(() => undefined);
+  } else {
+    const benchmark = await ensureBenchmarkManifest(paths, goal);
+    if (benchmark.created) {
+      await events.emit('BENCHMARK_SELECTED', 'Recorded benchmark selection in .opt/benchmark.json', {
+        tool: benchmark.manifest.tool,
+        command: benchmark.manifest.command,
+        metric: benchmark.manifest.metric
+      });
+      createdSetup = true;
+    }
+    if (await exists(paths.baseline)) {
+      await chmod(paths.measure, 0o555).catch(() => undefined);
+      await chmod(paths.checks, 0o555).catch(() => undefined);
+      await chmod(paths.benchmarkManifest, 0o555).catch(() => undefined);
+    }
   }
 
   let baseline: BaselineFile | null = await readJsonFileMaybe<BaselineFile>(paths.baseline);
@@ -765,10 +786,11 @@ async function ensureEvalLockQuestion(paths: ReturnType<typeof runPaths>, events
 
   const message = await writeOutbox(paths, {
     kind: 'question',
-    text: 'Review PLAN.md and .opt/*.sh, then answer lock-eval with approved to lock eval and initialize baseline.',
+    text: 'Review PLAN.md, .opt/benchmark.json, and .opt/*.sh, then answer lock-eval with approved to lock eval and initialize baseline.',
     replyKey: EVAL_LOCK_REPLY_KEY,
     data: {
       plan: 'PLAN.md',
+      benchmark: '.opt/benchmark.json',
       acceptance_spec: 'acceptance.spec.json',
       eval_scripts: ['.opt/checks.sh', '.opt/measure.sh']
     }

@@ -87,6 +87,7 @@ export interface MetricStats {
 export interface EvalSha256 {
   measure: string;
   checks: string;
+  benchmark_manifest?: string;
   acceptance_spec?: string;
   prescreen?: string;
   validate?: string;
@@ -114,6 +115,22 @@ export interface AcceptanceSpec {
   criteria: AcceptanceCriterion[];
   constraints: string[];
   metric: MetricGoal;
+}
+
+export interface BenchmarkManifest {
+  version: 1;
+  goal_run_id: string;
+  selected_at: string;
+  tool: string;
+  command: string;
+  metric: string;
+  min_reps: number;
+  warmup_discarded: number;
+  reason: string;
+  alternatives?: Array<{
+    tool: string;
+    reason?: string;
+  }>;
 }
 
 export type LedgerStatus = 'keep' | 'reject' | 'revert' | 'checks_failed' | 'crash';

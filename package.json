@@ -28,6 +28,7 @@
     "verify:clarify": "tsx src/verify/clarify.ts",
     "verify:claude-probe": "tsx src/verify/claude-probe.ts",
     "verify:manual-lock": "tsx src/verify/manual-lock.ts",
+    "verify:benchmark-manifest": "tsx src/verify/benchmark-manifest.ts",
     "verify:acceptance-spec": "tsx src/verify/acceptance-spec.ts",
     "verify:diversity-archive": "tsx src/verify/diversity-archive.ts",
     "verify:metaproductivity": "tsx src/verify/metaproductivity.ts",

@@ -6,6 +6,7 @@ import { atomicWriteFile, atomicWriteJson, exists, makeReadOnly, makeWritable } 
 import { promptPath, schemaPath, type RunPaths } from '../shared/paths.js';
 import type { EvalSha256, GoalFile, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
 import { applyPlanDiff } from './plan.js';
+import { type PlannerBenchmark, writeBenchmarkManifest } from './benchmark.js';
 
 interface PlannerOutput {
   session_id?: string;
@@ -14,10 +15,12 @@ interface PlannerOutput {
     planMarkdown: string;
     measureSh: string;
     checksSh: string;
+    benchmark?: PlannerBenchmark;
   };
   planMarkdown?: string;
   measureSh?: string;
   checksSh?: string;
+  benchmark?: PlannerBenchmark;
 }
 
 async function commandExists(command: string): Promise<boolean> {
@@ -168,6 +171,7 @@ async function materializePlannerOutput(paths: RunPaths, output: PlannerOutput):
   await atomicWriteFile(paths.plan, ensureTrailingNewline(structured.planMarkdown));
   await atomicWriteFile(paths.measure, ensureScript(structured.measureSh), 0o755);
   await atomicWriteFile(paths.checks, ensureScript(structured.checksSh), 0o755);
+  await writeBenchmarkManifest(paths, await readGoalForPlanner(paths), structured.benchmark ?? output.benchmark);
   await chmod(paths.measure, 0o755);
   await chmod(paths.checks, 0o755);
 }
@@ -198,6 +202,14 @@ node measure.mjs
   await atomicWriteFile(paths.plan, plan);
   await atomicWriteFile(paths.measure, checksExecutable(measure), 0o755);
   await atomicWriteFile(paths.checks, checksExecutable(checks), 0o755);
+  await writeBenchmarkManifest(paths, goal, {
+    tool: 'node',
+    command: './.opt/measure.sh',
+    metric: goal.metric.name,
+    min_reps: 5,
+    warmup_discarded: 2,
+    reason: 'Fixture target uses a deterministic Node workload through .opt/measure.sh; it emits WiCi p99 METRIC samples for the locked gate.'
+  });
   await chmod(paths.measure, 0o755);
   await chmod(paths.checks, 0o755);
 }
@@ -219,6 +231,7 @@ export async function lockEvalScripts(paths: RunPaths): Promise<EvalSha256> {
   const hashes = await evalHashes(paths);
   await makeReadOnly(paths.measure);
   await makeReadOnly(paths.checks);
+  if (await exists(paths.benchmarkManifest)) await makeReadOnly(paths.benchmarkManifest);
   if (await exists(paths.acceptanceSpec)) await makeReadOnly(paths.acceptanceSpec);
   if (await exists(paths.prescreen)) await makeReadOnly(paths.prescreen);
   if (await exists(paths.validate)) await makeReadOnly(paths.validate);
@@ -233,6 +246,7 @@ export async function lockEvalScripts(paths: RunPaths): Promise<EvalSha256> {
 export async function unlockEvalScripts(paths: RunPaths): Promise<void> {
   if (await exists(paths.measure)) await makeWritable(paths.measure);
   if (await exists(paths.checks)) await makeWritable(paths.checks);
+  if (await exists(paths.benchmarkManifest)) await makeWritable(paths.benchmarkManifest);
   if (await exists(paths.acceptanceSpec)) await makeWritable(paths.acceptanceSpec);
   if (await exists(paths.prescreen)) await makeWritable(paths.prescreen);
   if (await exists(paths.validate)) await makeWritable(paths.validate);
@@ -249,6 +263,7 @@ export async function evalHashes(paths: RunPaths): Promise<EvalSha256> {
   return {
     measure: await sha256File(paths.measure),
     checks: await sha256File(paths.checks),
+    ...((await exists(paths.benchmarkManifest)) ? { benchmark_manifest: await sha256File(paths.benchmarkManifest) } : {}),
     ...((await exists(paths.acceptanceSpec)) ? { acceptance_spec: await sha256File(paths.acceptanceSpec) } : {}),
     ...((await exists(paths.prescreen)) ? { prescreen: await sha256File(paths.prescreen) } : {}),
     ...((await exists(paths.validate)) ? { validate: await sha256File(paths.validate) } : {}),
@@ -270,6 +285,11 @@ export async function verifyEvalHashes(paths: RunPaths, expected: EvalSha256): P
   }
   if (actual.validate !== expected.validate) {
     throw new Error(`eval_sha256 mismatch for validate.sh: expected ${expected.validate ?? 'missing'}, got ${actual.validate ?? 'missing'}`);
+  }
+  if (actual.benchmark_manifest !== expected.benchmark_manifest) {
+    throw new Error(
+      `eval_sha256 mismatch for .opt/benchmark.json: expected ${expected.benchmark_manifest ?? 'missing'}, got ${actual.benchmark_manifest ?? 'missing'}`
+    );
   }
   if (actual.acceptance_spec !== expected.acceptance_spec) {
     throw new Error(
@@ -294,6 +314,10 @@ export async function verifyEvalHashes(paths: RunPaths, expected: EvalSha256): P
       throw new Error(`eval_sha256 mismatch for ${file}: expected ${hash}, got ${actual.files?.[file] ?? 'missing'}`);
     }
   }
+}
+
+async function readGoalForPlanner(paths: RunPaths): Promise<GoalFile> {
+  return JSON.parse(await readFile(paths.goal, 'utf8')) as GoalFile;
 }
 
 async function discoverGuardFiles(paths: RunPaths): Promise<string[]> {

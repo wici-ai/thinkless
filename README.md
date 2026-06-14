@@ -41,6 +41,7 @@ npm run verify:tool-commands
 npm run verify:clarify
 npm run verify:claude-probe
 npm run verify:manual-lock
+npm run verify:benchmark-manifest
 npm run verify:metaproductivity
 npm run verify:heldout
 npm run verify:scorer-selftest
@@ -78,4 +79,4 @@ WiCi freezes machine-checkable `goal.json.acceptance_criteria` into `acceptance.
 
 Use `--resume-iteration N` on `run`/`tui` to load `.wici/checkpoints/iter-N.json`, reset the target to that snapshot commit, restore pinned run memory, and truncate `ledger.jsonl`/`events.jsonl` back to the snapshot sequence. `--max-iters` remains a total cap, so `--resume-iteration 3 --max-iters 5` runs at most iterations 4 and 5.
 
-Use `--lock-mode manual` to stop after `PLAN.md` and `.opt/*.sh` are generated. Review them, then answer the `lock-eval` question in the TUI with `/answer lock-eval approved`; the next run initializes and pins `baseline.json`.
+Use `--lock-mode manual` to stop after `PLAN.md`, `.opt/benchmark.json`, and `.opt/*.sh` are generated. Review them, then answer the `lock-eval` question in the TUI with `/answer lock-eval approved`; the next run initializes and pins `baseline.json`.

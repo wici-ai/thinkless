@@ -61,6 +61,7 @@ function formatContextSummary(
     '- public ledger: ledger.jsonl',
     '- executor artifacts: .wici/artifacts/',
     '- locked eval scripts: .opt/checks.sh and .opt/measure.sh',
+    '- benchmark selection: .opt/benchmark.json',
     '- periodic goal checks: .wici/goal-interrogations.jsonl',
     '- automatic curriculum: .wici/curriculum.jsonl',
     '',

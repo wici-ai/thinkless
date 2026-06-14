@@ -31,7 +31,7 @@ export async function runExecutorStep(
         iter === 1 ? `Execute plan step ${stepId} from PLAN.md.` : `Continue with plan step ${stepId} from PLAN.md.`,
         steerText ? `NOTE new requirement or steering input: ${steerText}` : '',
         `Use the target repository as the only workspace.`,
-        `Do not edit .opt/checks.sh or .opt/measure.sh.`,
+        `Do not edit .opt/checks.sh, .opt/measure.sh, or .opt/benchmark.json.`,
         lessonsText ? lessonsText : '',
         `Write result JSON to .wici/artifacts/iter-${iter}.json with shape {step_done,tests_pass,notes,changed_files,next}.`
       ]

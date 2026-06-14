@@ -29,6 +29,7 @@ export interface RunPaths {
   opt: string;
   measure: string;
   checks: string;
+  benchmarkManifest: string;
   prescreen: string;
   validate: string;
   selftestGoodPatch: string;
@@ -69,6 +70,7 @@ export function runPaths(target: string): RunPaths {
     opt,
     measure: join(opt, 'measure.sh'),
     checks: join(opt, 'checks.sh'),
+    benchmarkManifest: join(opt, 'benchmark.json'),
     prescreen: join(opt, 'prescreen.sh'),
     validate: join(opt, 'validate.sh'),
     selftestGoodPatch: join(opt, 'selftest-good.patch'),
