@@ -17,6 +17,7 @@ export interface RunPaths {
   artifacts: string;
   checkpoints: string;
   skills: string;
+  curriculum: string;
   events: string;
   codexRun: string;
   goal: string;
@@ -55,6 +56,7 @@ export function runPaths(target: string): RunPaths {
     artifacts: join(wici, 'artifacts'),
     checkpoints: join(wici, 'checkpoints'),
     skills: join(wici, 'skills'),
+    curriculum: join(wici, 'curriculum.jsonl'),
     events: join(wici, 'events.jsonl'),
     codexRun: join(wici, 'codex-run.jsonl'),
     goal: join(wici, 'goal.json'),

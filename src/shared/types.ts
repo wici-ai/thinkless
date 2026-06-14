@@ -172,6 +172,21 @@ export interface SkillLibrary {
   entries: SkillEntry[];
 }
 
+export interface CurriculumEntry {
+  id: string;
+  ts: string;
+  iter: number;
+  goal_version: number;
+  parent_ledger_id: string | null;
+  saturated_step_id: string;
+  avenue: string;
+  stuck_reason: string;
+  attempts: number;
+  consecutive_failures: number;
+  sub_goal: string;
+  status: 'applied';
+}
+
 export interface GoalInterrogationEntry {
   id: string;
   ts: string;
@@ -255,6 +270,7 @@ export interface CheckpointSnapshot {
     lessons?: string;
     skills_index?: string;
     skills?: Record<string, string>;
+    curriculum?: string;
     context?: string;
     goal_interrogations?: string;
     archive?: string;

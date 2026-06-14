@@ -28,6 +28,7 @@ fixture/scorer-selftest-fail-target/
 fixture/prescreen-target/
 fixture/lessons-target/
 fixture/skills-target/
+fixture/curriculum-target/
 fixture/context-target/
 fixture/goal-interrogation-target/
 fixture/limit-artifact-target/

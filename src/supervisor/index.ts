@@ -42,6 +42,7 @@ import {
 import { commitLimitArtifact } from './finalArtifact.js';
 import { recordAcceptedArchiveEntry, restoreLedgerFile, selectArchiveParent } from './archive.js';
 import { formatSkillsForPrompt, recordSkillFromKeep, retrieveSkills } from './skills.js';
+import { appendCurriculumSubgoal } from './curriculum.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
@@ -492,8 +493,25 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           parent_id: branchParentId,
           selected_at: new Date().toISOString()
         };
+        const curriculum = await appendCurriculumSubgoal(paths, goal, {
+          iter: checkpoint.iter,
+          stepId: step.id,
+          avenue: avenue.name,
+          stuckReason: stuck.reason,
+          attempts: stuck.attempts,
+          consecutiveFailures: stuck.consecutiveFailures,
+          parentId: branchParentId
+        });
+        await events.emit('CURRICULUM_SUBGOAL', `Generated curriculum sub-goal for ${step.id}`, {
+          id: curriculum.id,
+          step_id: step.id,
+          avenue: avenue.name,
+          parent_id: branchParentId,
+          sub_goal: curriculum.sub_goal
+        });
+        await refreshContextSummary(paths, goal, events);
         const replanText = withLessons(
-          `${stuck.reason}. Avenue: ${avenue.name}. Try this different optimization avenue; preserve completed steps and do not rewrite locked eval scripts.`,
+          `${stuck.reason}. Avenue: ${avenue.name}. Curriculum sub-goal: ${curriculum.sub_goal} Try this different optimization avenue; preserve completed steps and do not rewrite locked eval scripts.`,
           memoryText
         );
         const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, replanText, config);

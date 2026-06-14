@@ -12,6 +12,7 @@ The supervisor drives:
 - hot goal reload: TUI chat writes `.wici/inbox/inj-*.json`, drained between iterations;
 - run memory: condensed context in `.wici/context.md` plus periodic goal checks in `.wici/goal-interrogations.jsonl`;
 - skill library: accepted patches are stored under `.wici/skills/` and retrieved into later prompts by `.wici/skills.json`;
+- automatic curriculum: stuck replans append focused sub-goals to `.wici/curriculum.jsonl`;
 - diversity archive: accepted stepping stones are archived in `.wici/archive.json`, and stuck replans may branch from archived commits;
 - limit artifact: `wici-limit-artifact.md` is committed when hard limits or `max_iters` stop the run.
 
@@ -44,6 +45,7 @@ npm run verify:heldout
 npm run verify:scorer-selftest
 npm run verify:prescreen
 npm run verify:lessons
+npm run verify:curriculum
 ```
 
 Open the TUI over the fixture target:

@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { atomicWriteFile, exists } from '../shared/atomic.js';
 import type { RunPaths } from '../shared/paths.js';
-import type { GoalFile, GoalInterrogationEntry, LedgerEntry } from '../shared/types.js';
+import type { CurriculumEntry, GoalFile, GoalInterrogationEntry, LedgerEntry } from '../shared/types.js';
+import { readLatestCurriculumSubgoal } from './curriculum.js';
 import { readLatestGoalInterrogation } from './goalInterrogation.js';
 
 const MAX_RECENT_LEDGER = 8;
@@ -9,7 +10,8 @@ const MAX_RECENT_LEDGER = 8;
 export async function writeContextSummary(paths: RunPaths, goal: GoalFile, ledger: LedgerEntry[]): Promise<boolean> {
   if (ledger.length === 0) return false;
   const latestGoalInterrogation = await readLatestGoalInterrogation(paths);
-  const content = formatContextSummary(paths, goal, ledger, latestGoalInterrogation);
+  const latestCurriculum = await readLatestCurriculumSubgoal(paths);
+  const content = formatContextSummary(paths, goal, ledger, latestGoalInterrogation, latestCurriculum);
   const current = (await exists(paths.context)) ? await readFile(paths.context, 'utf8') : '';
   if (current === content) return false;
   await atomicWriteFile(paths.context, content);
@@ -30,7 +32,13 @@ export function combinePromptMemory(...items: string[]): string {
   return items.map((item) => item.trim()).filter(Boolean).join('\n\n');
 }
 
-function formatContextSummary(paths: RunPaths, goal: GoalFile, ledger: LedgerEntry[], latestGoalInterrogation: GoalInterrogationEntry | null): string {
+function formatContextSummary(
+  paths: RunPaths,
+  goal: GoalFile,
+  ledger: LedgerEntry[],
+  latestGoalInterrogation: GoalInterrogationEntry | null,
+  latestCurriculum: CurriculumEntry | null
+): string {
   const recent = ledger.slice(-MAX_RECENT_LEDGER);
   const lines = [
     '# WiCi Condensed Run Context',
@@ -54,9 +62,13 @@ function formatContextSummary(paths: RunPaths, goal: GoalFile, ledger: LedgerEnt
     '- executor artifacts: .wici/artifacts/',
     '- locked eval scripts: .opt/checks.sh and .opt/measure.sh',
     '- periodic goal checks: .wici/goal-interrogations.jsonl',
+    '- automatic curriculum: .wici/curriculum.jsonl',
     '',
     '## Recent Public Ledger',
     ...recent.map(formatLedgerLine),
+    '',
+    '## Latest Curriculum Sub-goal',
+    ...(latestCurriculum ? formatCurriculum(latestCurriculum) : ['- none yet']),
     '',
     '## Latest Goal Interrogation',
     ...(latestGoalInterrogation ? formatGoalInterrogation(latestGoalInterrogation) : ['- none yet']),
@@ -68,6 +80,17 @@ function formatContextSummary(paths: RunPaths, goal: GoalFile, ledger: LedgerEnt
     ''
   ];
   return `${lines.join('\n')}`;
+}
+
+function formatCurriculum(entry: CurriculumEntry): string[] {
+  return [
+    `- id: ${entry.id}`,
+    `- iter: ${entry.iter}`,
+    `- saturated_step_id: ${entry.saturated_step_id}`,
+    `- avenue: ${singleLine(entry.avenue)}`,
+    `- parent_ledger_id: ${entry.parent_ledger_id ?? 'none'}`,
+    `- sub_goal: ${singleLine(entry.sub_goal)}`
+  ];
 }
 
 function formatGoalInterrogation(entry: GoalInterrogationEntry): string[] {
