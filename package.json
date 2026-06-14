@@ -34,6 +34,7 @@
     "verify:scorer-selftest": "tsx src/verify/scorer-selftest.ts",
     "verify:prescreen": "tsx src/verify/prescreen.ts",
     "verify:lessons": "tsx src/verify/lessons.ts",
+    "verify:skills": "tsx src/verify/skills.ts",
     "verify:context-condensation": "tsx src/verify/context-condensation.ts",
     "verify:goal-interrogation": "tsx src/verify/goal-interrogation.ts",
     "verify:limit-artifact": "tsx src/verify/limit-artifact.ts"

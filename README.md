@@ -11,6 +11,7 @@ The supervisor drives:
 - git gate: commit confirmed improvements and revert rejected attempts;
 - hot goal reload: TUI chat writes `.wici/inbox/inj-*.json`, drained between iterations;
 - run memory: condensed context in `.wici/context.md` plus periodic goal checks in `.wici/goal-interrogations.jsonl`;
+- skill library: accepted patches are stored under `.wici/skills/` and retrieved into later prompts by `.wici/skills.json`;
 - diversity archive: accepted stepping stones are archived in `.wici/archive.json`, and stuck replans may branch from archived commits;
 - limit artifact: `wici-limit-artifact.md` is committed when hard limits or `max_iters` stop the run.
 

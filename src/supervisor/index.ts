@@ -41,6 +41,7 @@ import {
 } from './acceptance.js';
 import { commitLimitArtifact } from './finalArtifact.js';
 import { recordAcceptedArchiveEntry, restoreLedgerFile, selectArchiveParent } from './archive.js';
+import { formatSkillsForPrompt, recordSkillFromKeep, retrieveSkills } from './skills.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
@@ -168,12 +169,13 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
 
       const iterationStarted = Date.now();
       const nextIter = checkpoint.iter + 1;
+      const ledgerBeforeIteration = await readLedger(paths);
       const acceptanceSpec = await verifyAcceptanceSpec(paths, goal);
       const acceptanceText = formatAcceptanceSpecForPrompt(acceptanceSpec);
+      const skillText = formatSkillsForPrompt(await retrieveSkills(paths, skillQuery(goal, ledgerBeforeIteration)));
       const lessonsText = formatLessonsForPrompt(await readRecentLessons(paths));
       const contextText = await readContextForPrompt(paths);
-      const memoryText = combinePromptMemory(acceptanceText, contextText, lessonsText);
-      const ledgerBeforeIteration = await readLedger(paths);
+      const memoryText = combinePromptMemory(acceptanceText, skillText, contextText, lessonsText);
       const parentId = checkpoint.active_avenue?.parent_id ?? lastAccepted(ledgerBeforeIteration)?.id ?? null;
       const activeAvenue = checkpoint.active_avenue?.name;
 
@@ -372,6 +374,15 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           perf_commit: commit,
           archive_size: archiveState.entries.length
         });
+        const skill = await recordSkillFromKeep(paths, goal, ledgerEntry, commit);
+        if (skill) {
+          await events.emit('SKILL_RECORDED', `Stored executable skill ${skill.id}`, {
+            id: skill.id,
+            source_ledger_id: skill.source_ledger_id,
+            patch_path: skill.patch_path,
+            patch_sha256: skill.patch_sha256
+          });
+        }
         await events.emit('COMMIT', `Accepted improvement and committed ${commit.slice(0, 7)}`, {
           p99: evaluation.metric.p99,
           heldout_p99: evaluation.heldoutMetric?.p99,
@@ -879,6 +890,12 @@ async function refreshContextSummary(paths: ReturnType<typeof runPaths>, goal: G
     path: '.wici/context.md',
     ledger_rows: ledger.length
   });
+}
+
+function skillQuery(goal: GoalFile, ledger: Awaited<ReturnType<typeof readLedger>>): string {
+  const activeRequirements = goal.requirements.filter((req) => req.status === 'active').map((req) => req.text).join('\n');
+  const recent = ledger.slice(-4).map((entry) => `${entry.step_id} ${entry.hypothesis} ${entry.reflection}`).join('\n');
+  return `${goal.metric.name}\n${activeRequirements}\n${recent}`;
 }
 
 async function hardBackstop(paths: ReturnType<typeof runPaths>, goal: GoalFile): Promise<string | null> {

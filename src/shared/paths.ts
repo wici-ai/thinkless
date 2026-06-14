@@ -16,6 +16,7 @@ export interface RunPaths {
   outbox: string;
   artifacts: string;
   checkpoints: string;
+  skills: string;
   events: string;
   codexRun: string;
   goal: string;
@@ -33,6 +34,7 @@ export interface RunPaths {
   baseline: string;
   ledger: string;
   lessons: string;
+  skillsIndex: string;
   context: string;
   goalInterrogations: string;
   avenues: string;
@@ -52,6 +54,7 @@ export function runPaths(target: string): RunPaths {
     outbox: join(wici, 'outbox'),
     artifacts: join(wici, 'artifacts'),
     checkpoints: join(wici, 'checkpoints'),
+    skills: join(wici, 'skills'),
     events: join(wici, 'events.jsonl'),
     codexRun: join(wici, 'codex-run.jsonl'),
     goal: join(wici, 'goal.json'),
@@ -69,6 +72,7 @@ export function runPaths(target: string): RunPaths {
     baseline: join(root, 'baseline.json'),
     ledger: join(root, 'ledger.jsonl'),
     lessons: join(wici, 'lessons.jsonl'),
+    skillsIndex: join(wici, 'skills.json'),
     context: join(wici, 'context.md'),
     goalInterrogations: join(wici, 'goal-interrogations.jsonl'),
     avenues: join(wici, 'avenues.json'),
@@ -85,6 +89,7 @@ export async function ensureRunDirs(paths: RunPaths): Promise<void> {
     ensureDir(paths.outbox),
     ensureDir(paths.artifacts),
     ensureDir(paths.checkpoints),
+    ensureDir(paths.skills),
     ensureDir(paths.opt)
   ]);
 }

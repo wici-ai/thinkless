@@ -152,6 +152,26 @@ export interface LessonEntry {
   lesson: string;
 }
 
+export interface SkillEntry {
+  id: string;
+  ts: string;
+  source_ledger_id: string;
+  step_id: string;
+  title: string;
+  summary: string;
+  tags: string[];
+  patch_path: string;
+  patch_sha256: string;
+  commit: string;
+  delta_pct: number | null;
+  uses: number;
+}
+
+export interface SkillLibrary {
+  version: number;
+  entries: SkillEntry[];
+}
+
 export interface GoalInterrogationEntry {
   id: string;
   ts: string;
@@ -233,6 +253,8 @@ export interface CheckpointSnapshot {
   best_commit: string | null;
   files: {
     lessons?: string;
+    skills_index?: string;
+    skills?: Record<string, string>;
     context?: string;
     goal_interrogations?: string;
     archive?: string;
