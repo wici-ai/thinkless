@@ -102,8 +102,8 @@ console.log(\`METRIC p50=\${p50.toFixed(3)} p95=\${p95.toFixed(3)} p99=\${p99.to
     if (force || !(await exists(file))) await writeFile(file, content);
   }
 
-  const isRepo = await execa('git', ['-C', root, 'rev-parse', '--is-inside-work-tree'], { reject: false });
-  if (isRepo.exitCode !== 0) {
+  const repoTop = await execa('git', ['-C', root, 'rev-parse', '--show-toplevel'], { reject: false });
+  if (repoTop.exitCode !== 0 || resolve(repoTop.stdout.trim()) !== root) {
     await execa('git', ['-C', root, 'init']);
     await execa('git', ['-C', root, 'config', 'user.name', 'WiCi Fixture']);
     await execa('git', ['-C', root, 'config', 'user.email', 'fixture@example.invalid']);

@@ -104,6 +104,12 @@ async function runStubExecutor(paths: RunPaths, _goal: GoalFile, stepId: string,
       result.tests_pass = true;
       result.notes = `Stub executor completed ${stepId}: replaced quadratic unique sort with Set-based implementation.`;
       result.changed_files = ['src/hotpath.js'];
+    } else if ((await exists(join(paths.wici, 'stub-two-keeps'))) && !current.includes('wici-stub-v2')) {
+      await writeFile(hotPath, `${current.trimEnd()}\n// wici-stub-v2\n`);
+      result.step_done = false;
+      result.tests_pass = true;
+      result.notes = `Stub executor completed ${stepId}: added fixture marker for a second accepted stepping stone.`;
+      result.changed_files = ['src/hotpath.js'];
     } else {
       result.step_done = true;
       result.tests_pass = true;

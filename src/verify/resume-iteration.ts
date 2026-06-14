@@ -60,7 +60,12 @@ async function main(): Promise<void> {
   assert(checkpoint.ledger_seq === 1, `expected checkpoint ledger_seq=1 after restore, got ${checkpoint.ledger_seq}`);
 
   const head = (await git(['rev-parse', 'HEAD'])).trim();
-  assert(head === iter1.head_commit, `HEAD ${head} did not reset to iter-1 snapshot ${iter1.head_commit}`);
+  const headMessage = (await git(['log', '-1', '--format=%s'])).trim();
+  if (head !== iter1.head_commit) {
+    const parent = (await git(['rev-parse', 'HEAD^'])).trim();
+    assert(headMessage.startsWith('chore: record WiCi limit artifact'), `HEAD ${head} was not restored snapshot or limit artifact: ${headMessage}`);
+    assert(parent === iter1.head_commit, `limit artifact parent ${parent} did not reset to iter-1 snapshot ${iter1.head_commit}`);
+  }
 
   const context = await readFile(paths.context, 'utf8');
   assert(context.includes('iter-1'), 'restored context missing iter-1');
@@ -82,7 +87,8 @@ async function main(): Promise<void> {
         target,
         restored_iteration: 1,
         ledger_rows: restoredLedger.length,
-        head
+        head,
+        head_message: headMessage
       },
       null,
       2

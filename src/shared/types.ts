@@ -166,6 +166,25 @@ export interface GoalInterrogationEntry {
   concerns: string[];
 }
 
+export interface ArchiveEntry {
+  ledger_id: string;
+  ts: string;
+  kind: 'accepted' | 'interesting_reject';
+  step_id: string;
+  commit: string;
+  perf_commit?: string | null;
+  metric: MetricStats | null;
+  delta_pct: number | null;
+  parent_id?: string | null;
+  branch_count?: number;
+  last_branched_at?: string;
+}
+
+export interface ArchiveState {
+  version: number;
+  entries: ArchiveEntry[];
+}
+
 export type SupervisorState =
   | 'INTAKE'
   | 'PLAN'
@@ -216,6 +235,7 @@ export interface CheckpointSnapshot {
     lessons?: string;
     context?: string;
     goal_interrogations?: string;
+    archive?: string;
     avenues?: string;
   };
   created_at: string;

@@ -40,6 +40,7 @@ import {
   verifyAcceptanceSpec
 } from './acceptance.js';
 import { commitLimitArtifact } from './finalArtifact.js';
+import { recordAcceptedArchiveEntry, restoreLedgerFile, selectArchiveParent } from './archive.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
@@ -364,6 +365,13 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         }
         await tagPerf(paths, `perf/p99-${Math.round(evaluation.metric.p99)}${evaluation.metric.unit}-${commit.slice(0, 7)}`);
         await tagBest(paths);
+        const archiveState = await recordAcceptedArchiveEntry(paths, ledgerEntry, await currentCommit(paths), commit);
+        await events.emit('ARCHIVE_RECORD', `Archived accepted stepping stone ${ledgerEntry.id}`, {
+          ledger_id: ledgerEntry.id,
+          commit: await currentCommit(paths),
+          perf_commit: commit,
+          archive_size: archiveState.entries.length
+        });
         await events.emit('COMMIT', `Accepted improvement and committed ${commit.slice(0, 7)}`, {
           p99: evaluation.metric.p99,
           heldout_p99: evaluation.heldoutMetric?.p99,
@@ -451,8 +459,22 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       const stuck = shouldReplanStuckStep(ledger, step.id, config.retry);
       if (stuck.stuck) {
         checkpoint.supervisor_state = 'PLAN';
+        const archiveParent = await selectArchiveParent(paths, baseline.best_commit);
+        const branchParentId = archiveParent?.entry.ledger_id ?? lastAccepted(ledger)?.id ?? parentId;
+        if (archiveParent) {
+          await resetToCommit(paths, archiveParent.entry.commit);
+          await atomicWriteJson(paths.baseline, baseline);
+          await restoreLedgerFile(paths, ledger);
+          await events.emit('ARCHIVE_BRANCH_CHECKOUT', `Branched from archived ${archiveParent.entry.ledger_id}`, {
+            ledger_id: archiveParent.entry.ledger_id,
+            commit: archiveParent.entry.commit,
+            perf_commit: archiveParent.entry.perf_commit,
+            archive_size: archiveParent.archiveSize,
+            non_best: archiveParent.nonBest,
+            best_commit: baseline.best_commit
+          }, archiveParent.nonBest ? 'warn' : 'info');
+        }
         await setPlanStepStatus(paths, step.id, 'blocked', checkpoint.iter);
-        const branchParentId = lastAccepted(ledger)?.id ?? parentId;
         const avenue = await selectAvenue(paths, config, branchParentId);
         checkpoint.active_avenue = {
           name: avenue.name,
@@ -468,17 +490,19 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         checkpoint.plan_hash = await hashFile(paths.plan);
         if (await hasChanges(paths)) {
           const commit = await commitAll(paths, `chore: replan after stalled ${step.id}`);
-          baseline = {
-            ...baseline,
-            best_commit: commit,
-            plan_hash: checkpoint.plan_hash ?? baseline.plan_hash,
-            updated_at: new Date().toISOString()
-          };
-          await atomicWriteJson(paths.baseline, baseline);
-          if (await hasChanges(paths)) {
-            await commitAll(paths, `chore: record stalled ${step.id} baseline anchor`);
+          if (!archiveParent || !archiveParent.nonBest) {
+            baseline = {
+              ...baseline,
+              best_commit: commit,
+              plan_hash: checkpoint.plan_hash ?? baseline.plan_hash,
+              updated_at: new Date().toISOString()
+            };
+            await atomicWriteJson(paths.baseline, baseline);
+            if (await hasChanges(paths)) {
+              await commitAll(paths, `chore: record stalled ${step.id} baseline anchor`);
+            }
+            await tagBest(paths);
           }
-          await tagBest(paths);
         }
         checkpoint = {
           ...checkpoint,

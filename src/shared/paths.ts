@@ -36,6 +36,7 @@ export interface RunPaths {
   context: string;
   goalInterrogations: string;
   avenues: string;
+  archive: string;
   config: string;
 }
 
@@ -71,6 +72,7 @@ export function runPaths(target: string): RunPaths {
     context: join(wici, 'context.md'),
     goalInterrogations: join(wici, 'goal-interrogations.jsonl'),
     avenues: join(wici, 'avenues.json'),
+    archive: join(wici, 'archive.json'),
     config: join(TOOL_ROOT, 'wici.config.json')
   };
 }

@@ -20,6 +20,7 @@ fixture/manual-lock-target/
 fixture/manual-lock-preapprove-target/
 fixture/acceptance-spec-target/
 fixture/acceptance-clarify-target/
+fixture/diversity-archive-target/
 fixture/metaproductivity-target/
 fixture/heldout-target/
 fixture/scorer-selftest-target/

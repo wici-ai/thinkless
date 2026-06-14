@@ -57,6 +57,7 @@ export async function saveIterationSnapshot(
       lessons: await readTextMaybe(paths.lessons),
       context: await readTextMaybe(paths.context),
       goal_interrogations: await readTextMaybe(paths.goalInterrogations),
+      archive: await readTextMaybe(paths.archive),
       avenues: await readTextMaybe(paths.avenues)
     },
     created_at: createdAt
@@ -84,6 +85,7 @@ export async function restoreSnapshotRunFiles(paths: RunPaths, snapshot: Checkpo
   await restoreTextFile(paths.lessons, snapshot.files.lessons);
   await restoreTextFile(paths.context, snapshot.files.context);
   await restoreTextFile(paths.goalInterrogations, snapshot.files.goal_interrogations);
+  await restoreTextFile(paths.archive, snapshot.files.archive);
   await restoreTextFile(paths.avenues, snapshot.files.avenues);
 }
 
