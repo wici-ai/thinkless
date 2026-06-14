@@ -1,12 +1,14 @@
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { atomicWriteFile, ensureDir, exists } from './atomic.js';
 
 const thisFile = fileURLToPath(import.meta.url);
 
 export const SRC_ROOT = resolve(dirname(thisFile), '..');
-export const TOOL_ROOT = resolve(SRC_ROOT, '..');
+const candidateToolRoot = resolve(SRC_ROOT, '..');
+export const TOOL_ROOT = existsSync(join(candidateToolRoot, 'package.json')) ? candidateToolRoot : resolve(candidateToolRoot, '..');
 
 export interface RunPaths {
   target: string;

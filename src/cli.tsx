@@ -4,18 +4,20 @@ import { render } from 'ink';
 import { withFullScreen } from 'fullscreen-ink';
 import { Command } from 'commander';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { App } from './tui/App.js';
 import { runSupervisor } from './supervisor/index.js';
 import { createSampleTarget } from './sample.js';
 import type { ToolMode } from './shared/types.js';
 import { loadConfig } from './shared/config.js';
-import { runPaths } from './shared/paths.js';
+import { runPaths, TOOL_ROOT } from './shared/paths.js';
 import { previewRollback, rollbackTarget } from './supervisor/rollback.js';
 import { checkToolHealth, updateToolsBetweenRuns } from './supervisor/selfupdate.js';
 
 const program = new Command();
+const DEFAULT_DEMO_TARGET = 'fixture/demo-target';
 
-program.name('wici').description('Autonomous long-horizon coding TUI orchestrator').version('0.1.0');
+program.name('wici').description('Autonomous long-horizon coding TUI orchestrator').version(readPackageVersionSync());
 
 program
   .command('sample')
@@ -63,27 +65,39 @@ program
   .option('--no-supervisor', 'do not start the supervisor loop')
   .option('--no-fullscreen', 'render without fullscreen mode')
   .action((options: { target: string; goal?: string; maxIters?: number; resumeIteration?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; supervisor: boolean; fullscreen: boolean }) => {
-    const target = resolve(options.target);
-    const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-    const tree = (
-      <App
-        target={target}
-        interactive={interactive}
-        supervisor={{
-          enabled: options.supervisor,
-          initialGoal: options.goal,
-          maxIters: options.maxIters,
-          resumeIteration: options.resumeIteration,
-          mode: options.mode,
-          lockMode: options.lockMode
-        }}
-      />
-    );
-    if (options.fullscreen && interactive) {
-      void withFullScreen(tree, { interactive: true }).start();
-    } else {
-      render(tree, { interactive });
-    }
+    renderTui({
+      target: resolve(options.target),
+      goal: options.goal,
+      maxIters: options.maxIters,
+      resumeIteration: options.resumeIteration,
+      mode: options.mode,
+      lockMode: options.lockMode,
+      supervisor: options.supervisor,
+      fullscreen: options.fullscreen
+    });
+  });
+
+program
+  .command('demo')
+  .description('Create a fresh sample target and open the Chat-first TUI')
+  .option('--target <path>', 'target directory', DEFAULT_DEMO_TARGET)
+  .option('--fresh', 'recreate the target before opening; default for fixture/demo-target', false)
+  .option('--max-iters <n>', 'max iterations', (value) => Number(value))
+  .option('--mode <mode>', 'tool mode: real, auto, or stub', 'stub')
+  .option('--lock-mode <mode>', 'eval lock mode: auto or manual')
+  .option('--no-fullscreen', 'render without fullscreen mode')
+  .action(async (options: { target: string; fresh: boolean; maxIters?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; fullscreen: boolean }) => {
+    const targetArg = options.target || DEFAULT_DEMO_TARGET;
+    const force = options.fresh || resolve(targetArg) === resolve(DEFAULT_DEMO_TARGET);
+    const target = await createSampleTarget(targetArg, force);
+    renderTui({
+      target,
+      maxIters: options.maxIters,
+      mode: options.mode,
+      lockMode: options.lockMode,
+      supervisor: true,
+      fullscreen: options.fullscreen
+    });
   });
 
 program
@@ -138,4 +152,44 @@ function parseNonNegativeInteger(value: string): number {
     throw new Error(`Expected a non-negative integer, got ${value}`);
   }
   return parsed;
+}
+
+function renderTui(options: {
+  target: string;
+  goal?: string;
+  maxIters?: number;
+  resumeIteration?: number;
+  mode?: ToolMode;
+  lockMode?: 'auto' | 'manual';
+  supervisor: boolean;
+  fullscreen: boolean;
+}): void {
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const tree = (
+    <App
+      target={options.target}
+      interactive={interactive}
+      supervisor={{
+        enabled: options.supervisor,
+        initialGoal: options.goal,
+        maxIters: options.maxIters,
+        resumeIteration: options.resumeIteration,
+        mode: options.mode,
+        lockMode: options.lockMode
+      }}
+    />
+  );
+  if (options.fullscreen && interactive) {
+    void withFullScreen(tree, { interactive: true }).start();
+  } else {
+    render(tree, { interactive });
+  }
+}
+
+function readPackageVersionSync(): string {
+  try {
+    return (JSON.parse(readFileSync(`${TOOL_ROOT}/package.json`, 'utf8')) as { version?: string }).version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
 }

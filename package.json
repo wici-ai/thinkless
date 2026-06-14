@@ -1,20 +1,22 @@
 {
   "name": "wici",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "bin": {
-    "wici": "./dist/cli.js"
+    "wici": "./dist/src/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev": "tsx src/cli.tsx tui --target fixture/slow-target",
+    "dev": "tsx src/cli.tsx demo",
     "run": "tsx src/cli.tsx run --target fixture/slow-target --goal \"Reduce p99 latency of the hot path while preserving output correctness\"",
     "smoke": "tsx src/cli.tsx smoke",
     "verify:v1-slice": "tsx src/verify/v1-slice.ts",
     "verify:tui-structure": "tsx src/verify/tui-structure.ts",
     "verify:tui-chat-intake": "tsx src/verify/tui-chat-intake.ts",
+    "verify:demo-tui": "tsx src/verify/demo-tui.ts",
+    "verify:bin": "tsx src/verify/bin.ts",
     "verify:tui-live": "tsx src/verify/tui-live.ts",
     "sample": "tsx src/cli.tsx sample --target fixture/slow-target --force",
     "verify:durability": "tsx src/verify/durability.ts",

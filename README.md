@@ -32,6 +32,8 @@ npm run smoke
 npm run verify:v1-slice
 npm run verify:tui-structure
 npm run verify:tui-chat-intake
+npm run verify:demo-tui
+npm run verify:bin
 npm run verify:tui-live
 npm run verify:durability
 npm run verify:resume-iteration
@@ -74,10 +76,9 @@ npm run verify:docs-sync
 npm run verify:limit-artifact
 ```
 
-Open the TUI over the fixture target:
+Open a fresh local demo target in the Chat-first TUI:
 
 ```bash
-npm run sample
 npm run dev
 ```
 
@@ -136,15 +137,14 @@ Real mode keeps the planner in Claude Code plan mode and gives the executor maxi
 ```bash
 git clone https://github.com/wici-ai/WiCi-code.git
 cd WiCi-code
-git checkout 0.1.1
+git checkout 0.1.2
 npm install
 npm run verify:v1-slice
 ```
 
-Open the TUI over a fresh sample target:
+Open a fresh sample target in the Chat-first TUI:
 
 ```bash
-npm run sample
 npm run dev
 ```
 

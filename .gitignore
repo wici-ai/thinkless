@@ -4,6 +4,8 @@ dist/
 *.log
 fixture/resume-target/
 fixture/slow-target/
+fixture/demo-target/
+fixture/demo-tui-target/
 fixture/resume-iteration-target/
 fixture/commit-idempotency-target/
 fixture/hotreload-target/
