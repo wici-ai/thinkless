@@ -28,6 +28,7 @@ npm run typecheck
 npm run build
 npm run smoke
 npm run verify:v1-slice
+npm run verify:tui-structure
 npm run verify:durability
 npm run verify:commit-idempotency
 npm run verify:hotreload
