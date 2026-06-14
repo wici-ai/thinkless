@@ -1,0 +1,57 @@
+{
+  "name": "wici",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "wici": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/cli.tsx tui --target fixture/slow-target",
+    "run": "tsx src/cli.tsx run --target fixture/slow-target --goal \"Reduce p99 latency of the hot path while preserving output correctness\"",
+    "smoke": "tsx src/cli.tsx smoke",
+    "sample": "tsx src/cli.tsx sample --target fixture/slow-target --force",
+    "verify:durability": "tsx src/verify/durability.ts",
+    "verify:resume-iteration": "tsx src/verify/resume-iteration.ts",
+    "verify:commit-idempotency": "tsx src/verify/commit-idempotency.ts",
+    "verify:hotreload": "tsx src/verify/hotreload.ts",
+    "verify:tamper": "tsx src/verify/tamper.ts",
+    "verify:stuck": "tsx src/verify/stuck.ts",
+    "verify:real-mode": "tsx src/verify/real-mode.ts",
+    "verify:outbox": "tsx src/verify/outbox.ts",
+    "verify:tool-version": "tsx src/verify/tool-version.ts",
+    "verify:ask-stop": "tsx src/verify/ask-stop.ts",
+    "verify:tool-commands": "tsx src/verify/tool-commands.ts",
+    "verify:clarify": "tsx src/verify/clarify.ts",
+    "verify:claude-probe": "tsx src/verify/claude-probe.ts",
+    "verify:manual-lock": "tsx src/verify/manual-lock.ts",
+    "verify:acceptance-spec": "tsx src/verify/acceptance-spec.ts",
+    "verify:metaproductivity": "tsx src/verify/metaproductivity.ts",
+    "verify:heldout": "tsx src/verify/heldout.ts",
+    "verify:scorer-selftest": "tsx src/verify/scorer-selftest.ts",
+    "verify:prescreen": "tsx src/verify/prescreen.ts",
+    "verify:lessons": "tsx src/verify/lessons.ts",
+    "verify:context-condensation": "tsx src/verify/context-condensation.ts",
+    "verify:goal-interrogation": "tsx src/verify/goal-interrogation.ts",
+    "verify:limit-artifact": "tsx src/verify/limit-artifact.ts"
+  },
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "chokidar": "^4.0.3",
+    "commander": "^14.0.2",
+    "execa": "^9.6.0",
+    "fullscreen-ink": "^0.1.0",
+    "ink": "^7.0.6",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

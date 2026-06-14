@@ -1,0 +1,56 @@
+{
+  "tools": {
+    "mode": "auto",
+    "planner": {
+      "command": "claude",
+      "effort": "max",
+      "dangerouslySkipPermissions": true
+    },
+    "executor": {
+      "command": "codex",
+      "dangerouslyBypassApprovalsAndSandbox": true
+    }
+  },
+  "budget": {
+    "max_iters": 20,
+    "max_cost_usd": 50,
+    "deadline": null
+  },
+  "stop": {
+    "tau": 0.01,
+    "K": 3,
+    "N": 4,
+    "mode": "auto"
+  },
+  "retry": {
+    "max_attempts_per_step": 2,
+    "reverts_before_reset": 5,
+    "stall_replan_after": 3
+  },
+  "diversity": {
+    "avenues": [
+      "algorithmic complexity",
+      "data structure change",
+      "caching or memoization",
+      "batching or I/O reduction",
+      "concurrency or parallelism"
+    ]
+  },
+  "evaluation": {
+    "noise_threshold": 0.01,
+    "min_reps": 5,
+    "bootstrap_resamples": 1000,
+    "checks_timeout_ms": 300000,
+    "measure_timeout_ms": 300000,
+    "lock_mode": "auto"
+  },
+  "git": {
+    "init_if_missing": false,
+    "user_name": "WiCi Bot",
+    "user_email": "wici@example.invalid"
+  },
+  "safety": {
+    "container_hint": "Supported deployment is a disposable container or VM with only the target repo mounted.",
+    "forbidden_actions": ["git push", "rm -rf outside workspace", "production credentials"]
+  }
+}

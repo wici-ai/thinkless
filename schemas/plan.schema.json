@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WiCiPlannerOutput",
+  "type": "object",
+  "required": ["planMarkdown", "measureSh", "checksSh", "steps"],
+  "properties": {
+    "summary": { "type": "string" },
+    "planMarkdown": { "type": "string" },
+    "measureSh": { "type": "string" },
+    "checksSh": { "type": "string" },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "validation"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^S[0-9]+$" },
+          "text": { "type": "string" },
+          "experiments": { "type": "array", "items": { "type": "string" } },
+          "validation": { "type": "string" },
+          "environment": { "type": "string" }
+        }
+      }
+    }
+  },
+  "additionalProperties": true
+}

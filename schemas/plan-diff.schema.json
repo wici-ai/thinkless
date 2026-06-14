@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WiCiPlanDiff",
+  "type": "object",
+  "properties": {
+    "add": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["after", "id", "text"],
+        "properties": {
+          "after": { "type": "string" },
+          "id": { "type": "string" },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "modify": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" }
+        }
+      }
+    },
+    "obsolete": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}
