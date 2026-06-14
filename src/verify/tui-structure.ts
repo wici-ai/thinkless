@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { RunEvent } from '../shared/types.js';
 import { visibleEvents } from '../tui/ExecPane.js';
+import { buildPlanDiffView } from '../tui/GoalPane.js';
 
 const tuiRoot = join(TOOL_ROOT, 'src', 'tui');
 
@@ -37,6 +38,9 @@ async function main(): Promise<void> {
   assertNoControlWrites('ChatPane', files.chat);
 
   assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
+  assert(files.goal.includes('buildPlanDiffView'), 'GoalPane must compute a visible PLAN diff');
+  assert(files.goal.includes('Δ +'), 'GoalPane must render added/removed PLAN counts');
+  assert(files.goal.includes("line.added ? '+ '"), 'GoalPane must mark added PLAN lines');
   assertNoControlWrites('GoalPane', files.goal);
 
   assert(files.exec.includes("useFocus({ id: 'exec'"), 'ExecPane must be focusable for scroll controls');
@@ -60,6 +64,7 @@ async function main(): Promise<void> {
   assert(files.cli.includes(".option('--no-fullscreen'"), 'tui command must support non-fullscreen rendering for verification');
 
   verifyVisibleEvents();
+  verifyGoalPlanDiff();
 
   console.log(
     JSON.stringify(
@@ -68,6 +73,7 @@ async function main(): Promise<void> {
         single_static_owner: 'ExecPane',
         esc_focuses_chat: true,
         exec_scroll_viewport: true,
+        goal_plan_diff: true,
         chat_writes_only_inbox: true,
         goal_and_exec_read_only: true,
         watcher_covers_blackboard: true
@@ -76,6 +82,18 @@ async function main(): Promise<void> {
       2
     )
   );
+}
+
+function verifyGoalPlanDiff(): void {
+  const previous = ['# Plan', '- [ ] S1 Keep duplicate', '- [ ] S1 Keep duplicate', '- [ ] S2 Old'].join('\n');
+  const current = ['# Plan', '- [ ] S1 Keep duplicate', '- [ ] S3 New'].join('\n');
+  const diff = buildPlanDiffView(previous, current, 10);
+  assert(diff.changed === true, 'GoalPane diff should mark changed plans');
+  assert(diff.added === 1, `GoalPane diff should count one added line, got ${diff.added}`);
+  assert(diff.removed === 2, `GoalPane diff should count removed duplicate and old line, got ${diff.removed}`);
+  assert(diff.lines.find((line) => line.text.includes('S3 New'))?.added === true, 'GoalPane diff should mark new line as added');
+  assert(diff.lines.find((line) => line.text.includes('S1 Keep duplicate'))?.added === false, 'GoalPane diff should not mark retained duplicate as added');
+  assert(buildPlanDiffView(current, current, 10).changed === false, 'GoalPane diff should be stable when plan is unchanged');
 }
 
 async function source(name: string): Promise<string> {
