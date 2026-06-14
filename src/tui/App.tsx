@@ -9,11 +9,12 @@ import { useRunState } from './useRunState.js';
 export function App({ target, interactive = true }: { target: string; interactive?: boolean }) {
   const state = useRunState(target);
   const { stdout } = useStdout();
-  const { focusNext, focusPrevious } = useFocusManager();
+  const { focus, focusNext, focusPrevious } = useFocusManager();
   const height = stdout.rows || 32;
 
   useInput((_input, key) => {
-    if (key.tab && key.shift) focusPrevious();
+    if (key.escape) focus('chat');
+    else if (key.tab && key.shift) focusPrevious();
     else if (key.tab) focusNext();
   }, { isActive: interactive });
 

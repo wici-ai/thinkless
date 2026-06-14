@@ -1,14 +1,15 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useFocus } from 'ink';
 import type { RunState } from './useRunState.js';
 
 export function GoalPane({ state }: { state: RunState }) {
+  const { isFocused } = useFocus({ id: 'goal' });
   const goal = state.goal;
   const planLines = state.plan.split('\n').filter(Boolean).slice(0, 34);
 
   return (
     <Box flexDirection="column" height="100%" paddingX={1}>
-      <Text bold color="magenta">
+      <Text bold color={isFocused ? 'magentaBright' : 'magenta'}>
         热 GOAL {goal ? `v${goal.version}` : ''}
       </Text>
       <Box flexDirection="column">

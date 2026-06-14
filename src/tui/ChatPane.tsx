@@ -6,7 +6,7 @@ import { writeInjection } from '../supervisor/inbox.js';
 import type { OutboxMessage } from '../shared/types.js';
 
 export function ChatPane({ target, interactive = true, outbox = [] }: { target: string; interactive?: boolean; outbox?: OutboxMessage[] }) {
-  const { isFocused } = useFocus({ autoFocus: true, isActive: interactive });
+  const { isFocused } = useFocus({ id: 'chat', autoFocus: true, isActive: interactive });
   const [value, setValue] = useState('');
   const [lines, setLines] = useState<string[]>([]);
 

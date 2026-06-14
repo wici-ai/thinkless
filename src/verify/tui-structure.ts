@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
+import type { RunEvent } from '../shared/types.js';
+import { visibleEvents } from '../tui/ExecPane.js';
 
 const tuiRoot = join(TOOL_ROOT, 'src', 'tui');
 
@@ -23,8 +25,10 @@ async function main(): Promise<void> {
   assert(files.exec.includes('items={stable}'), 'ExecPane Static must render stable finished events');
 
   assert(files.app.includes('useInput') && files.app.includes('useFocusManager'), 'App must keep keyboard focus management at the top level');
+  assert(files.app.includes("focus('chat')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat pane');
   assert(files.app.includes('<ChatPane') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render the three V1 panes');
 
+  assert(files.chat.includes("useFocus({ id: 'chat'"), 'ChatPane must have a stable focus id');
   assert(files.chat.includes('writeInjection'), 'ChatPane must write chat input through writeInjection');
   assert(files.chat.includes("kind: 'add_requirement'"), 'ChatPane must default text input to add_requirement injections');
   assert(files.chat.includes("kind: 'answer'"), 'ChatPane must support outbox answers');
@@ -32,7 +36,15 @@ async function main(): Promise<void> {
   assert(files.chat.includes("kind: 'abort'"), 'ChatPane must support urgent abort injections');
   assertNoControlWrites('ChatPane', files.chat);
 
+  assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
   assertNoControlWrites('GoalPane', files.goal);
+
+  assert(files.exec.includes("useFocus({ id: 'exec'"), 'ExecPane must be focusable for scroll controls');
+  assert(files.exec.includes('useInput') && files.exec.includes('isActive: isFocused'), 'ExecPane input must be gated on focus');
+  for (const key of ['upArrow', 'downArrow', 'pageUp', 'pageDown', 'home', 'end']) {
+    assert(files.exec.includes(`key.${key}`), `ExecPane missing ${key} scroll binding`);
+  }
+  assert(files.exec.includes('visibleEvents') && files.exec.includes('scrollOffset'), 'ExecPane must render an in-pane scroll viewport');
   assertNoControlWrites('ExecPane', files.exec);
   assert(!files.goal.includes('writeInjection'), 'GoalPane must not write inbox injections');
   assert(!files.exec.includes('writeInjection'), 'ExecPane must not write inbox injections');
@@ -47,11 +59,15 @@ async function main(): Promise<void> {
   assert(files.cli.includes(".option('--no-supervisor'"), 'tui command must support read-only/manual launch without supervisor');
   assert(files.cli.includes(".option('--no-fullscreen'"), 'tui command must support non-fullscreen rendering for verification');
 
+  verifyVisibleEvents();
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         single_static_owner: 'ExecPane',
+        esc_focuses_chat: true,
+        exec_scroll_viewport: true,
         chat_writes_only_inbox: true,
         goal_and_exec_read_only: true,
         watcher_covers_blackboard: true
@@ -92,6 +108,24 @@ function assertNoControlWrites(label: string, text: string): void {
   ]) {
     assert(!text.includes(forbidden), `${label} must not write or directly mutate supervisor-owned control state via ${forbidden}`);
   }
+}
+
+function verifyVisibleEvents(): void {
+  const events = Array.from({ length: 10 }, (_, index) => fakeEvent(index + 1));
+  assert(visibleEvents(events, 0, 4).events.map((event) => event.seq).join(',') === '7,8,9,10', 'tail viewport should show newest events');
+  assert(visibleEvents(events, 2, 4).events.map((event) => event.seq).join(',') === '5,6,7,8', 'scrolled viewport should move into history');
+  assert(visibleEvents(events, 999, 4).events.map((event) => event.seq).join(',') === '1,2,3,4', 'viewport should clamp at oldest events');
+  assert(visibleEvents([], 0, 4).events.length === 0, 'empty viewport should be empty');
+}
+
+function fakeEvent(seq: number): RunEvent {
+  return {
+    seq,
+    ts: '2026-06-14T00:00:00.000Z',
+    type: `E${seq}`,
+    level: 'info',
+    message: `event ${seq}`
+  };
 }
 
 function assert(condition: unknown, message: string): asserts condition {
