@@ -39,6 +39,7 @@ fixture/curriculum-target/
 fixture/context-target/
 fixture/goal-interrogation-target/
 fixture/goal-doc-target/
+fixture/goal-metric-target/
 fixture/limit-artifact-target/
 fixture/limit-artifact-cost-target/
 fixture/limit-artifact-deadline-target/

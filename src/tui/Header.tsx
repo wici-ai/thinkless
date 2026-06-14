@@ -25,11 +25,12 @@ export function Header({ state }: { state: RunState }) {
 }
 
 export function metricSummary(goal: GoalFile | null, bestP99: number | undefined, unit: string | undefined): string {
+  const metricName = goal?.metric.name ?? 'p99';
   const metricUnit = unit ?? goal?.metric.unit ?? '';
   const best = bestP99 === undefined ? 'pending' : `${formatNumber(bestP99)}${metricUnit}`;
-  if (goal?.metric.target === undefined || goal.metric.target === null) return `best p99 ${best}`;
+  if (goal?.metric.target === undefined || goal.metric.target === null) return `best ${metricName} ${best}`;
   const op = goal.metric.direction === 'minimize' ? '<=' : '>=';
-  return `p99 ${best} target ${op}${formatNumber(goal.metric.target)}${metricUnit}`;
+  return `${metricName} ${best} target ${op}${formatNumber(goal.metric.target)}${metricUnit}`;
 }
 
 export function costSummary(ledger: LedgerEntry[]): string {

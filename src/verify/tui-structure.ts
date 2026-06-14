@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   assert(!files.goal.includes('writeInjection'), 'GoalPane must not write inbox injections');
   assert(!files.exec.includes('writeInjection'), 'ExecPane must not write inbox injections');
 
-  assert(files.header.includes('metricSummary'), 'Header must show p99 against the target threshold');
+  assert(files.header.includes('metricSummary'), 'Header must show the configured metric against the target threshold');
   assert(files.header.includes('costSummary'), 'Header must show cumulative run cost');
   assert(files.header.includes('elapsedSummary'), 'Header must show elapsed run time');
 
@@ -116,7 +116,7 @@ function verifyHeaderSummaries(): void {
     budget: { max_iters: 1, max_cost_usd: 1, deadline: null },
     stop: { tau: 0.01, K: 1, N: 1, mode: 'auto' }
   };
-  assert(metricSummary(goal, 812.345, 'tok/s') === 'p99 812.35tok/s target <=700tok/s', 'Header metric summary should include best p99 and target');
+  assert(metricSummary(goal, 812.345, 'tok/s') === 'p99 812.35tok/s target <=700tok/s', 'Header metric summary should include best metric and target');
   assert(metricSummary(null, undefined, undefined) === 'best p99 pending', 'Header metric summary should handle missing baseline');
   assert(costSummary([{ ...ledgerRow(), cost: { wall_ms: 1000, tokens_input: 200, tokens_output: 300 } }]) === 'cost 500 tok', 'Header cost summary should prefer token cost');
   assert(costSummary([{ ...ledgerRow(), cost: { wall_ms: 1000, usd: 0.125 } }]) === 'cost $0.1250', 'Header cost summary should prefer usd cost');

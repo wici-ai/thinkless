@@ -716,13 +716,15 @@ async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | und
     await ensureGoalDoc(paths, existing);
     return existing;
   }
+  const initialText = text ?? 'Reduce p99 latency while preserving correctness.';
+  const inferred = inferInitialMetric(initialText);
   const goal: GoalFile = {
     run_id: `run-${Date.now()}`,
     version: 1,
     requirements: [
       {
         id: 'R1',
-        text: text ?? 'Reduce p99 latency while preserving correctness.',
+        text: initialText,
         source: 'initial',
         status: 'active'
       }
@@ -735,22 +737,59 @@ async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | und
       },
       {
         id: 'A2',
-        text: 'A candidate is committed only when p99 improves beyond the configured gate.',
+        text: inferred.acceptanceText,
         check: './.opt/measure.sh'
       }
     ],
     constraints: ['Do not edit .opt/checks.sh or .opt/measure.sh after lock.', 'Commit confirmed improvements and revert regressions.'],
+    metric: inferred.metric,
+    budget: config.budget,
+    stop: config.stop
+  };
+  await saveGoalFiles(paths, goal);
+  return goal;
+}
+
+function inferInitialMetric(text: string): { metric: GoalFile['metric']; acceptanceText: string } {
+  const throughput = inferTokenThroughput(text);
+  if (throughput) {
+    return {
+      metric: {
+        name: 'token throughput',
+        direction: 'maximize',
+        target: throughput,
+        unit: 'token/s'
+      },
+      acceptanceText: `Measured token throughput reaches or exceeds ${throughput}token/s and accepted candidates improve beyond the configured gate.`
+    };
+  }
+
+  return {
     metric: {
       name: 'p99 latency',
       direction: 'minimize',
       target: null,
       unit: 'ms'
     },
-    budget: config.budget,
-    stop: config.stop
+    acceptanceText: 'A candidate is committed only when p99 latency improves beyond the configured gate.'
   };
-  await saveGoalFiles(paths, goal);
-  return goal;
+}
+
+function inferTokenThroughput(text: string): number | null {
+  const normalized = text.replace(/，|。|、/g, ' ');
+  const patterns = [
+    /(\d+(?:\.\d+)?)\s*(?:tokens?\s*\/\s*s|tok\s*\/\s*s|tps)\b/i,
+    /(\d+(?:\.\d+)?)\s*tokens?\s*(?:per|\/)?\s*(?:sec|second)\b/i,
+    /(\d+(?:\.\d+)?)\s*(?:token|tokens|tok)\s*\/\s*秒/i,
+    /每秒\s*(\d+(?:\.\d+)?)\s*(?:token|tokens|tok)/i
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(normalized);
+    if (!match) continue;
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
 }
 
 async function ensurePlanAndBaseline(
