@@ -46,6 +46,7 @@ import { recordAcceptedArchiveEntry, restoreLedgerFile, selectArchiveParent } fr
 import { formatSkillsForPrompt, recordSkillFromKeep, retrieveSkills } from './skills.js';
 import { appendCurriculumSubgoal } from './curriculum.js';
 import { codexUsageFromError } from './codexRun.js';
+import { formatPrimaryMetricTransition, primaryMetricTag } from './metricFormat.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
@@ -446,7 +447,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         await setPlanStepStatus(paths, step.id, iterResult.step_done ? 'done' : 'pending', nextIter);
         const planHash = (await hashFile(paths.plan)) ?? '';
         const shortDelta = evaluation.deltaPct === null ? 'n/a' : `${(evaluation.deltaPct * 100).toFixed(1)}%`;
-        const message = `perf: ${step.text} | p99 ${previousMetric.p99}->${evaluation.metric.p99}${evaluation.metric.unit} (${shortDelta}) | guards ok`;
+        const message = `perf: ${step.text} | ${formatPrimaryMetricTransition(goal, previousMetric, evaluation.metric)} (${shortDelta}) | guards ok`;
         const commitKey = `run:${goal.run_id}:iter:${nextIter}:step:${step.id}`;
         const committed = await commitAllWithKey(paths, message, commitKey);
         const commit = committed.commit;
@@ -477,7 +478,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         if (await hasChanges(paths)) {
           await commitAll(paths, `chore: record WiCi baseline and ledger for ${commit.slice(0, 7)}`);
         }
-        await tagPerf(paths, `perf/p99-${Math.round(evaluation.metric.p99)}${evaluation.metric.unit}-${commit.slice(0, 7)}`);
+        await tagPerf(paths, `perf/${primaryMetricTag(goal, evaluation.metric)}-${commit.slice(0, 7)}`);
         await tagBest(paths);
         const archiveState = await recordAcceptedArchiveEntry(paths, ledgerEntry, await currentCommit(paths), commit);
         await events.emit('ARCHIVE_RECORD', `Archived accepted stepping stone ${ledgerEntry.id}`, {

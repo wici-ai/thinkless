@@ -8,6 +8,7 @@ import type { EvalSha256, GoalFile, ToolInvocationResult, WiCiConfig } from '../
 import { applyPlanDiff } from './plan.js';
 import { type PlannerBenchmark, writeBenchmarkManifest } from './benchmark.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
+import { primaryMetricName } from './metricFormat.js';
 
 interface PlannerOutput {
   session_id?: string;
@@ -191,6 +192,7 @@ async function materializePlannerOutput(paths: RunPaths, output: PlannerOutput):
 }
 
 async function materializeStubPlan(paths: RunPaths, goal: GoalFile): Promise<void> {
+  const metricName = primaryMetricName(goal);
   const plan = `# WiCi Optimization Plan
 
 Goal: ${requirementText(goal) || 'Optimize the target metric while preserving correctness.'}
@@ -198,7 +200,7 @@ Goal: ${requirementText(goal) || 'Optimize the target metric while preserving co
 - [ ] S1 Replace avoidable quadratic hot-path work with a linear implementation
   - Experiment: inspect the hot path and remove nested scans or redundant recomputation.
   - Validation: ./.opt/checks.sh && ./.opt/measure.sh
-- [ ] S2 Re-run measurement and commit only if p99 improves beyond the configured noise gate
+- [ ] S2 Re-run measurement and commit only if ${metricName} improves beyond the configured noise gate
   - Experiment: validate the optimized path against the locked metric.
   - Validation: ./.opt/checks.sh && ./.opt/measure.sh
 `;
@@ -222,7 +224,7 @@ node measure.mjs
     metric: goal.metric.name,
     min_reps: 5,
     warmup_discarded: 2,
-    reason: 'Fixture target uses a deterministic Node workload through .opt/measure.sh; it emits WiCi p99 METRIC samples for the locked gate.'
+    reason: `Fixture target uses a deterministic Node workload through .opt/measure.sh; it emits WiCi ${metricName} METRIC samples for the locked gate.`
   });
   await chmod(paths.measure, 0o755);
   await chmod(paths.checks, 0o755);

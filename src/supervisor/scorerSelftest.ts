@@ -6,6 +6,7 @@ import { exists } from '../shared/atomic.js';
 import { runPaths, type RunPaths } from '../shared/paths.js';
 import type { BaselineFile, GoalFile, MetricStats, WiCiConfig } from '../shared/types.js';
 import { runChecks, runMeasure } from './evaluate.js';
+import { formatPrimaryMetric } from './metricFormat.js';
 
 export interface ScorerSelftestScenario {
   name: 'good' | 'bad';
@@ -31,15 +32,15 @@ export async function runScorerSelftest(paths: RunPaths, goal: GoalFile, baselin
 
   const good = await runScenario(paths, goal, baseline, config, 'good', paths.selftestGoodPatch);
   if (!good.patch_applied || good.verdict !== 'accept') {
-    throw new Error(`Scorer self-test failed: known-good patch was not accepted (${describeScenario(good)})`);
+    throw new Error(`Scorer self-test failed: known-good patch was not accepted (${describeScenario(goal, good)})`);
   }
 
   const bad = await runScenario(paths, goal, baseline, config, 'bad', paths.selftestBadPatch);
   if (!bad.patch_applied) {
-    throw new Error(`Scorer self-test failed: known-bad patch could not be applied (${describeScenario(bad)})`);
+    throw new Error(`Scorer self-test failed: known-bad patch could not be applied (${describeScenario(goal, bad)})`);
   }
   if (bad.verdict !== 'reject') {
-    throw new Error(`Scorer self-test failed: known-bad patch was accepted (${describeScenario(bad)})`);
+    throw new Error(`Scorer self-test failed: known-bad patch was accepted (${describeScenario(goal, bad)})`);
   }
 
   return { good, bad };
@@ -106,8 +107,8 @@ function metricDeltaPct(base: number, next: number, direction: GoalFile['metric'
   return direction === 'minimize' ? (base - next) / base : (next - base) / Math.abs(base);
 }
 
-function describeScenario(scenario: ScorerSelftestScenario): string {
-  const metric = scenario.metric ? `p99=${scenario.metric.p99}${scenario.metric.unit}` : 'no metric';
+function describeScenario(goal: GoalFile, scenario: ScorerSelftestScenario): string {
+  const metric = scenario.metric ? formatPrimaryMetric(goal, scenario.metric) : 'no metric';
   const delta = scenario.delta_pct === null ? 'delta=n/a' : `delta=${(scenario.delta_pct * 100).toFixed(2)}%`;
   return `${scenario.name} patch_applied=${scenario.patch_applied} checks_ok=${scenario.checks_ok} ${metric} ${delta} verdict=${scenario.verdict}`;
 }

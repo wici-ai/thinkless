@@ -68,6 +68,7 @@ npm run verify:context-condensation
 npm run verify:goal-interrogation
 npm run verify:goal-doc
 npm run verify:goal-metric
+npm run verify:metric-labels
 npm run verify:setup-state
 npm run verify:docs-sync
 npm run verify:limit-artifact
@@ -80,7 +81,7 @@ npm run sample
 npm run dev
 ```
 
-In an interactive TUI with no existing run and no `--goal`, the Goal and Execution panes stay empty until the first natural-language Chat message. That message becomes the initial planner input. After the run exists, later Chat messages are drained through `.wici/inbox/` as hot requirements or steering.
+In an interactive TUI with no existing run and no `--goal`, the Goal and Execution panes stay empty until the first natural-language Chat message. Chat is the initial intake and output surface: if the goal is concrete enough to freeze acceptance criteria, the supervisor starts Claude Code plan mode; if not, it asks for clarification in Chat before materializing `PLAN.md`. After the run exists, later Chat messages are drained through `.wici/inbox/` as hot requirements or steering.
 
 Run headlessly over a target:
 

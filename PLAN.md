@@ -172,7 +172,7 @@ Helpers: `shared/atomic.ts` (temp+rename writes), `shared/paths.ts`, `shared/typ
 ```tsx
 // src/tui/App.tsx
 <Box flexDirection="column" height={stdout.rows}>
-  <Header/>                                  {/* state, p99 vs target, cost, elapsed */}
+  <Header/>                                  {/* state, metric vs target, cost, elapsed */}
   <Box flexGrow={1}>
     <Box width="28%" borderStyle="round"><ChatPane/></Box>     {/* intake + Q&A */}
     <Box width="34%" borderStyle="round"><GoalPane/></Box>     {/* 热 goal: GOAL.md + PLAN.md, diff-highlighted, vN */}

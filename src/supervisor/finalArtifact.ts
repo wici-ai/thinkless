@@ -3,6 +3,7 @@ import { atomicWriteFile } from '../shared/atomic.js';
 import type { RunPaths } from '../shared/paths.js';
 import type { BaselineFile, GoalFile, LedgerEntry } from '../shared/types.js';
 import { commitAllWithKey } from './gitgate.js';
+import { formatPrimaryMetric } from './metricFormat.js';
 
 export interface LimitArtifactResult {
   path: string;
@@ -41,7 +42,7 @@ function formatLimitArtifact(goal: GoalFile, baseline: BaselineFile, ledger: Led
     `Run ID: ${goal.run_id}`,
     `Goal version: ${goal.version}`,
     `Best commit: ${baseline.best_commit}`,
-    `Best p99: ${baseline.best_metric.p99}${baseline.best_metric.unit}`,
+    `Best ${formatPrimaryMetric(goal, baseline.best_metric)}`,
     `Ledger rows: ${ledger.length}`,
     `Accepted rows: ${keeps.length}`,
     `Rejected rows: ${rejects.length}`,
@@ -54,13 +55,13 @@ function formatLimitArtifact(goal: GoalFile, baseline: BaselineFile, ledger: Led
     ...goal.acceptance_criteria.map((criterion) => `- ${criterion.id}: ${criterion.text} (${criterion.check})`),
     '',
     '## Recent Ledger',
-    ...ledger.slice(-8).map(formatLedgerLine),
+    ...ledger.slice(-8).map((entry) => formatLedgerLine(goal, entry)),
     ''
   ].join('\n');
 }
 
-function formatLedgerLine(entry: LedgerEntry): string {
-  const metric = entry.metric ? `p99=${entry.metric.p99}${entry.metric.unit}` : 'p99=n/a';
+function formatLedgerLine(goal: GoalFile, entry: LedgerEntry): string {
+  const metric = entry.metric ? formatPrimaryMetric(goal, entry.metric) : `${goal.metric.name || 'metric'}=n/a`;
   const delta = typeof entry.delta_pct === 'number' ? ` delta=${(entry.delta_pct * 100).toFixed(2)}%` : '';
   return `- ${entry.id}: ${entry.status} ${metric}${delta} confidence=${entry.confidence}`;
 }

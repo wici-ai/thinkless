@@ -4,6 +4,7 @@ import type { RunPaths } from '../shared/paths.js';
 import type { CurriculumEntry, GoalFile, GoalInterrogationEntry, LedgerEntry } from '../shared/types.js';
 import { readLatestCurriculumSubgoal } from './curriculum.js';
 import { readLatestGoalInterrogation } from './goalInterrogation.js';
+import { formatPrimaryMetric } from './metricFormat.js';
 
 const MAX_RECENT_LEDGER = 8;
 
@@ -67,7 +68,7 @@ function formatContextSummary(
     '- automatic curriculum: .wici/curriculum.jsonl',
     '',
     '## Recent Public Ledger',
-    ...recent.map(formatLedgerLine),
+    ...recent.map((entry) => formatLedgerLine(goal, entry)),
     '',
     '## Latest Curriculum Sub-goal',
     ...(latestCurriculum ? formatCurriculum(latestCurriculum) : ['- none yet']),
@@ -108,8 +109,8 @@ function formatGoalInterrogation(entry: GoalInterrogationEntry): string[] {
   ];
 }
 
-function formatLedgerLine(entry: LedgerEntry): string {
-  const metric = entry.metric ? `p99=${entry.metric.p99}${entry.metric.unit}` : 'p99=n/a';
+function formatLedgerLine(goal: GoalFile, entry: LedgerEntry): string {
+  const metric = entry.metric ? formatPrimaryMetric(goal, entry.metric) : `${goal.metric.name || 'metric'}=n/a`;
   const delta = typeof entry.delta_pct === 'number' ? `delta=${(entry.delta_pct * 100).toFixed(2)}%` : 'delta=n/a';
   const guards = publicGuardSummary(entry.guards);
   const guardText = guards.length > 0 ? ` guards=${guards.join(',')}` : '';

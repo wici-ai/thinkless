@@ -52,6 +52,7 @@
     "verify:goal-interrogation": "tsx src/verify/goal-interrogation.ts",
     "verify:goal-doc": "tsx src/verify/goal-doc.ts",
     "verify:goal-metric": "tsx src/verify/goal-metric.ts",
+    "verify:metric-labels": "tsx src/verify/metric-labels.ts",
     "verify:setup-state": "tsx src/verify/setup-state.ts",
     "verify:docs-sync": "tsx src/verify/docs-sync.ts",
     "verify:limit-artifact": "tsx src/verify/limit-artifact.ts"
