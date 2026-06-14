@@ -21,6 +21,7 @@
     "verify:tamper": "tsx src/verify/tamper.ts",
     "verify:stuck": "tsx src/verify/stuck.ts",
     "verify:real-mode": "tsx src/verify/real-mode.ts",
+    "verify:safety-prompts": "tsx src/verify/safety-prompts.ts",
     "verify:outbox": "tsx src/verify/outbox.ts",
     "verify:tool-version": "tsx src/verify/tool-version.ts",
     "verify:ask-stop": "tsx src/verify/ask-stop.ts",

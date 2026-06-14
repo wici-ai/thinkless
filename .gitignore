@@ -13,6 +13,7 @@ fixture/tamper-validate-target/
 fixture/tamper-prescreen-target/
 fixture/stuck-target/
 fixture/real-mode-target/
+fixture/safety-prompts-target/
 fixture/outbox-target/
 fixture/ask-stop-target/
 fixture/stop-policy-target/

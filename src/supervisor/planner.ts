@@ -7,6 +7,7 @@ import { promptPath, schemaPath, type RunPaths } from '../shared/paths.js';
 import type { EvalSha256, GoalFile, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
 import { applyPlanDiff } from './plan.js';
 import { type PlannerBenchmark, writeBenchmarkManifest } from './benchmark.js';
+import { appendSafety, formatSafetyForPrompt } from './safety.js';
 
 interface PlannerOutput {
   session_id?: string;
@@ -47,13 +48,15 @@ export async function runInitialPlanner(paths: RunPaths, goal: GoalFile, config:
     try {
       const systemPrompt = await readFile(promptPath('planner'), 'utf8');
       const schema = await readFile(schemaPath('plan'), 'utf8');
+      const safetyText = formatSafetyForPrompt(config);
       const result = await execa(
         config.tools.planner.command,
         buildInitialPlannerArgs({
           goalText: requirementText(goal),
           schema,
           effort: config.tools.planner.effort,
-          systemPrompt
+          systemPrompt,
+          safetyText
         }),
         {
           cwd: paths.target,
@@ -88,6 +91,7 @@ export async function runPlanDiff(paths: RunPaths, goal: GoalFile, plannerSessio
       const systemPrompt = await readFile(promptPath('planner-diff'), 'utf8');
       const plan = await readFile(paths.plan, 'utf8');
       const schema = await readFile(schemaPath('plan-diff'), 'utf8');
+      const safetyText = formatSafetyForPrompt(config);
       const result = await execa(
         config.tools.planner.command,
         buildPlanDiffArgs({
@@ -96,7 +100,8 @@ export async function runPlanDiff(paths: RunPaths, goal: GoalFile, plannerSessio
           goal,
           sessionId: plannerSessionId,
           schema,
-          systemPrompt
+          systemPrompt,
+          safetyText
         }),
         {
           cwd: paths.target,
@@ -121,7 +126,7 @@ export async function runPlanDiff(paths: RunPaths, goal: GoalFile, plannerSessio
   return { ok: true, sessionId: plannerSessionId ?? 'stub-planner', stdout: 'stub planner applied requirement diff' };
 }
 
-export function buildInitialPlannerArgs(input: { goalText: string; schema: string; effort: string; systemPrompt: string }): string[] {
+export function buildInitialPlannerArgs(input: { goalText: string; schema: string; effort: string; systemPrompt: string; safetyText?: string }): string[] {
   return [
     '-p',
     `ULTRAPLAN for goal:\n${input.goalText}`,
@@ -136,7 +141,7 @@ export function buildInitialPlannerArgs(input: { goalText: string; schema: strin
     'Bash(git push *)',
     'Bash(rm -rf *)',
     '--append-system-prompt',
-    input.systemPrompt
+    appendSafety(input.systemPrompt, input.safetyText ?? '')
   ];
 }
 
@@ -147,6 +152,7 @@ export function buildPlanDiffArgs(input: {
   sessionId: string;
   schema: string;
   systemPrompt: string;
+  safetyText?: string;
 }): string[] {
   return [
     '-p',
@@ -159,7 +165,7 @@ export function buildPlanDiffArgs(input: {
     input.schema,
     '--dangerously-skip-permissions',
     '--append-system-prompt',
-    input.systemPrompt
+    appendSafety(input.systemPrompt, input.safetyText ?? '')
   ];
 }
 

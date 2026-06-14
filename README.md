@@ -34,6 +34,7 @@ npm run verify:inbox-backpressure
 npm run verify:tamper
 npm run verify:stuck
 npm run verify:real-mode
+npm run verify:safety-prompts
 npm run verify:outbox
 npm run verify:tool-version
 npm run verify:ask-stop

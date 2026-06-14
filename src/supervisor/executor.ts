@@ -5,6 +5,7 @@ import { atomicWriteFile, atomicWriteJson, exists } from '../shared/atomic.js';
 import { schemaPath, type RunPaths } from '../shared/paths.js';
 import type { GoalFile, IterResult, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
 import { CodexRunError, appendCodexRunTranscript, assertCodexRunSucceeded, syntheticCodexRunEvent } from './codexRun.js';
+import { formatSafetyForPrompt } from './safety.js';
 
 async function commandExists(command: string): Promise<boolean> {
   const result = await execa('command', ['-v', command], { shell: true, reject: false });
@@ -27,11 +28,13 @@ export async function runExecutorStep(
 
   if (config.tools.mode !== 'stub' && available) {
     try {
+      const safetyText = formatSafetyForPrompt(config);
       const prompt = [
         iter === 1 ? `Execute plan step ${stepId} from PLAN.md.` : `Continue with plan step ${stepId} from PLAN.md.`,
         steerText ? `NOTE new requirement or steering input: ${steerText}` : '',
         `Use the target repository as the only workspace.`,
         `Do not edit .opt/checks.sh, .opt/measure.sh, or .opt/benchmark.json.`,
+        safetyText,
         lessonsText ? lessonsText : '',
         `Write result JSON to .wici/artifacts/iter-${iter}.json with shape {step_done,tests_pass,notes,changed_files,next}.`
       ]
@@ -70,6 +73,9 @@ export async function runExecutorStep(
   const stubPrompt = [
     `Execute plan step ${stepId} from PLAN.md.`,
     steerText ? `NOTE new requirement or steering input: ${steerText}` : '',
+    `Use the target repository as the only workspace.`,
+    `Do not edit .opt/checks.sh, .opt/measure.sh, or .opt/benchmark.json.`,
+    formatSafetyForPrompt(config),
     lessonsText ? lessonsText : '',
     `Write result JSON to .wici/artifacts/iter-${iter}.json.`
   ]
