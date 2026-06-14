@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import type { Checkpoint } from '../shared/types.js';
 import {
   assertNoActiveToolVersionDrift,
@@ -80,7 +81,8 @@ async function main(): Promise<void> {
   assertNoPendingToolUpdatesForLongRun(fakeConfig('stub'), fakeReport(true), 20);
 
   const current = await toolVersionsFromHealth(fakeConfig('stub'), null);
-  assert(current.wici?.package_version === '0.1.0', `expected WiCi package version 0.1.0, got ${current.wici?.package_version}`);
+  const packageVersion = await readPackageVersion();
+  assert(current.wici?.package_version === packageVersion, `expected WiCi package version ${packageVersion}, got ${current.wici?.package_version}`);
   assert(
     current.wici?.git_commit === null || /^[0-9a-f]{40}$/.test(current.wici?.git_commit ?? ''),
     `unexpected WiCi git commit: ${current.wici?.git_commit}`
@@ -166,6 +168,10 @@ function expectThrows(fn: () => void, expected: string): void {
     throw new Error(`Expected error containing "${expected}", got "${message}"`);
   }
   throw new Error(`Expected error containing "${expected}"`);
+}
+
+async function readPackageVersion(): Promise<string | undefined> {
+  return (JSON.parse(await readFile('package.json', 'utf8')) as { version?: string }).version;
 }
 
 await main();

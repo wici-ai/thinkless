@@ -136,7 +136,7 @@ Real mode keeps the planner in Claude Code plan mode and gives the executor maxi
 ```bash
 git clone https://github.com/wici-ai/WiCi-code.git
 cd WiCi-code
-git checkout 0.1.0
+git checkout 0.1.1
 npm install
 npm run verify:v1-slice
 ```

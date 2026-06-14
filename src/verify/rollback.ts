@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   assert(preview.source === 'wici/best', `rollback should prefer wici/best, got ${preview.source}`);
   assert(preview.rollback_commit === best.trim(), `preview rollback commit ${preview.rollback_commit} did not match wici/best ${best}`);
   assert(preview.dirty === true, 'rollback preview should report dirty target');
-  assert(preview.wici?.package_version === '0.1.0', `rollback preview missing WiCi package version: ${JSON.stringify(preview.wici)}`);
+  assert(preview.wici?.package_version === await readPackageVersion(), `rollback preview missing WiCi package version: ${JSON.stringify(preview.wici)}`);
 
   const stillDirty = await git(['status', '--short']);
   assert(stillDirty.includes('scratch.tmp'), 'rollback preview must not clean the target');
@@ -103,6 +103,10 @@ async function git(args: string[]): Promise<string> {
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+async function readPackageVersion(): Promise<string | undefined> {
+  return (JSON.parse(await readFile('package.json', 'utf8')) as { version?: string }).version;
 }
 
 await main();

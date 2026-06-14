@@ -91,12 +91,15 @@ async function main(): Promise<void> {
   assert(checkpoint.supervisor_state === 'STOP', `expected STOP checkpoint, got ${checkpoint.supervisor_state}`);
   assert(checkpoint.iter === 1, `expected checkpoint iter=1, got ${checkpoint.iter}`);
   assert(checkpoint.ledger_seq === 1, `expected checkpoint ledger_seq=1, got ${checkpoint.ledger_seq}`);
-  assert(checkpoint.tool_versions?.wici?.package_version === '0.1.0', `checkpoint missing WiCi package version: ${JSON.stringify(checkpoint.tool_versions)}`);
+  const packageVersion = await readPackageVersion();
+  const wiciVersion = checkpoint.tool_versions?.wici;
+  assert(wiciVersion !== undefined, `checkpoint missing WiCi version block: ${JSON.stringify(checkpoint.tool_versions)}`);
+  assert(wiciVersion.package_version === packageVersion, `checkpoint missing WiCi package version: ${JSON.stringify(checkpoint.tool_versions)}`);
   assert(
-    checkpoint.tool_versions.wici.git_commit === null || /^[0-9a-f]{40}$/.test(checkpoint.tool_versions.wici.git_commit ?? ''),
-    `checkpoint has invalid WiCi git commit: ${checkpoint.tool_versions.wici.git_commit}`
+    wiciVersion.git_commit === null || /^[0-9a-f]{40}$/.test(wiciVersion.git_commit ?? ''),
+    `checkpoint has invalid WiCi git commit: ${wiciVersion.git_commit}`
   );
-  assert(typeof checkpoint.tool_versions.wici.git_dirty === 'boolean' || checkpoint.tool_versions.wici.git_dirty === undefined, 'checkpoint missing WiCi dirty flag');
+  assert(typeof wiciVersion.git_dirty === 'boolean' || wiciVersion.git_dirty === undefined, 'checkpoint missing WiCi dirty flag');
 
   const hotpath = await readFile(`${target}/src/hotpath.js`, 'utf8');
   assert(hotpath.includes('new Set'), 'target hot path was not optimized by the v1 slice');
@@ -223,6 +226,10 @@ async function git(args: string[]): Promise<string> {
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+async function readPackageVersion(): Promise<string | undefined> {
+  return (JSON.parse(await readFile('package.json', 'utf8')) as { version?: string }).version;
 }
 
 await main();
