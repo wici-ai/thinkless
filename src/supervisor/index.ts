@@ -299,7 +299,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           avenue: activeAvenue
         });
         await appendLedger(paths, ledgerEntry);
-        await appendLessonFromLedger(paths, ledgerEntry);
+        await appendLessonFromLedger(paths, ledgerEntry, config);
         await refreshContextSummary(paths, goal, events);
         checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
         if (await hasChanges(paths)) {
@@ -335,7 +335,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           avenue: activeAvenue
         });
         await appendLedger(paths, ledgerEntry);
-        await appendLessonFromLedger(paths, ledgerEntry);
+        await appendLessonFromLedger(paths, ledgerEntry, config);
         checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
         if (await hasChanges(paths)) {
           await commitAll(paths, `chore: record rejected WiCi iteration ${nextIter}`);
@@ -374,7 +374,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           avenue: activeAvenue
         });
         await appendLedger(paths, ledgerEntry);
-        await appendLessonFromLedger(paths, ledgerEntry);
+        await appendLessonFromLedger(paths, ledgerEntry, config);
         checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
         if (await hasChanges(paths)) {
           await commitAll(paths, `chore: record WiCi baseline and ledger for ${commit.slice(0, 7)}`);
@@ -432,7 +432,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           avenue: activeAvenue
         });
         await appendLedger(paths, ledgerEntry);
-        await appendLessonFromLedger(paths, ledgerEntry);
+        await appendLessonFromLedger(paths, ledgerEntry, config);
         checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
         if (await hasChanges(paths)) {
           await commitAll(paths, `chore: record rejected WiCi iteration ${nextIter}`);

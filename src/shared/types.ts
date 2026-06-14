@@ -179,6 +179,8 @@ export interface LessonEntry {
   source_ledger_id: string;
   step_id: string;
   status: LedgerStatus;
+  trigger?: 'measured_reject';
+  author?: 'claude' | 'supervisor';
   lesson: string;
 }
 
