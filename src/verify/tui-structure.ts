@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
-import type { RunEvent } from '../shared/types.js';
+import type { GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
 import { visibleEvents } from '../tui/ExecPane.js';
 import { buildPlanDiffView } from '../tui/GoalPane.js';
+import { costSummary, elapsedSummary, metricSummary } from '../tui/Header.js';
 
 const tuiRoot = join(TOOL_ROOT, 'src', 'tui');
 
@@ -53,6 +54,10 @@ async function main(): Promise<void> {
   assert(!files.goal.includes('writeInjection'), 'GoalPane must not write inbox injections');
   assert(!files.exec.includes('writeInjection'), 'ExecPane must not write inbox injections');
 
+  assert(files.header.includes('metricSummary'), 'Header must show p99 against the target threshold');
+  assert(files.header.includes('costSummary'), 'Header must show cumulative run cost');
+  assert(files.header.includes('elapsedSummary'), 'Header must show elapsed run time');
+
   assert(files.state.includes("import chokidar from 'chokidar'"), 'useRunState must use chokidar for blackboard watching');
   for (const watched of ['paths.events', 'paths.goal', 'paths.checkpoint', 'paths.baseline', 'paths.ledger', 'paths.plan', 'paths.outbox']) {
     assert(files.state.includes(watched), `useRunState watcher missing ${watched}`);
@@ -65,6 +70,7 @@ async function main(): Promise<void> {
 
   verifyVisibleEvents();
   verifyGoalPlanDiff();
+  verifyHeaderSummaries();
 
   console.log(
     JSON.stringify(
@@ -74,6 +80,7 @@ async function main(): Promise<void> {
         esc_focuses_chat: true,
         exec_scroll_viewport: true,
         goal_plan_diff: true,
+        header_cost_elapsed: true,
         chat_writes_only_inbox: true,
         goal_and_exec_read_only: true,
         watcher_covers_blackboard: true
@@ -94,6 +101,43 @@ function verifyGoalPlanDiff(): void {
   assert(diff.lines.find((line) => line.text.includes('S3 New'))?.added === true, 'GoalPane diff should mark new line as added');
   assert(diff.lines.find((line) => line.text.includes('S1 Keep duplicate'))?.added === false, 'GoalPane diff should not mark retained duplicate as added');
   assert(buildPlanDiffView(current, current, 10).changed === false, 'GoalPane diff should be stable when plan is unchanged');
+}
+
+function verifyHeaderSummaries(): void {
+  const goal: GoalFile = {
+    run_id: 'header',
+    version: 1,
+    requirements: [],
+    acceptance_criteria: [],
+    constraints: [],
+    metric: { name: 'p99', direction: 'minimize', target: 700, unit: 'tok/s' },
+    budget: { max_iters: 1, max_cost_usd: 1, deadline: null },
+    stop: { tau: 0.01, K: 1, N: 1, mode: 'auto' }
+  };
+  assert(metricSummary(goal, 812.345, 'tok/s') === 'p99 812.35tok/s target <=700tok/s', 'Header metric summary should include best p99 and target');
+  assert(metricSummary(null, undefined, undefined) === 'best p99 pending', 'Header metric summary should handle missing baseline');
+  assert(costSummary([{ ...ledgerRow(), cost: { wall_ms: 1000, tokens_input: 200, tokens_output: 300 } }]) === 'cost 500 tok', 'Header cost summary should prefer token cost');
+  assert(costSummary([{ ...ledgerRow(), cost: { wall_ms: 1000, usd: 0.125 } }]) === 'cost $0.1250', 'Header cost summary should prefer usd cost');
+  assert(elapsedSummary([fakeEvent(1), { ...fakeEvent(2), ts: '2026-06-14T00:02:05.000Z' }]) === 'elapsed 2m5s', 'Header elapsed summary should format event span');
+}
+
+function ledgerRow(): LedgerEntry {
+  return {
+    id: 'iter-1',
+    ts: '2026-06-14T00:00:00.000Z',
+    iter: 1,
+    step_id: 'S1',
+    commit: null,
+    hypothesis: 'header',
+    metric: null,
+    baseline: null,
+    delta_pct: null,
+    confidence: 'header',
+    cost: {},
+    guards: {},
+    status: 'reject',
+    reflection: 'header'
+  };
 }
 
 async function source(name: string): Promise<string> {
