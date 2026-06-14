@@ -16,7 +16,7 @@
 **Greenfield.** `/Users/saprk/code/WiCi-code` is empty. Local installs verified: `claude 2.1.162`, `codex-cli 0.139.0` (standalone install, built-in updater), `node v26`, `git 2.50`.
 
 **User decisions locked:**
-1. **Termination = diminishing-returns / cost-benefit**, not a hard 12h/budget cap. Keep optimizing while gains are worth the cost; stop when marginal improvement-per-cost is low. Budget is only a hard backstop.
+1. **Termination = diminishing-returns / cost-benefit**, not a hard 12h/budget cap. Keep optimizing while gains are worth the cost; stop when marginal improvement-per-cost is low. Cost caps are disabled by default during real-mode tuning.
 2. **Eval scripts (`measure.sh`/`checks.sh`) are planner-designed, then user-locked** (reviewed once, `chmod -w` + SHA-256 pinned; agent can't edit thereafter).
 3. **Max autonomy where it writes:** Codex executes with `codex exec --dangerously-bypass-approvals-and-sandbox`; the planner is Claude Code in `--permission-mode plan`. → **Isolation is recommended, but direct-host real mode on the primary machine is allowed** when the target repo is git-backed, WiCi records its own git commit in `checkpoint.json`, and rollback commands are documented (see Safety).
 4. **Three-pane TUI from day one:** `chat` + `热goal` (live editable goal/plan) + `事实执行` (execution stream) — full vertical slice, not headless-first.
@@ -142,7 +142,7 @@ Replace the naive "stop when `p99<=target`" with a **value-stop policy** (`super
 - Enter **STOP-CANDIDATE** when: (target met **or** no accepted improvement in last `N` iters) **and** EWMA(marginal_value) `< τ` over the last `K` commits.
 - On STOP-CANDIDATE, run a cheap **LLM "worth-it?" verdict**: `claude -p` is given the ledger improvement curve + cumulative cost, returns `{continue|stop, reason}`. This encodes "和高质量对比性价比不高就停."
 - Resolve: `stop` → **STOP** (surface verdict + curve in chat). Configurable: auto-stop, or *pause-and-ask* in the chat pane.
-- **Hard backstops** (`max_iters`, `max_cost_usd`, `deadline`) remain and force **FAILED/STOP** regardless.
+- **Hard backstops** (`max_iters`, optional `max_cost_usd`, `deadline`) remain and force **FAILED/STOP** regardless. `max_cost_usd=0` disables the cost hard stop and is the current default while real-mode behavior is being tuned.
 
 Anti-thrash escape hatches: `5` consecutive reverts → forced `git reset --hard <best>`; global stall → REPLAN (bandit over optimization avenues / "try a different angle").
 

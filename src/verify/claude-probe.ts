@@ -1,4 +1,4 @@
-import { assertRealToolsReady, parseClaudeProbeError } from '../supervisor/selfupdate.js';
+import { assertRealToolsReady, buildClaudeProbeArgs, parseClaudeProbeError } from '../supervisor/selfupdate.js';
 import type { ToolHealthReport } from '../supervisor/selfupdate.js';
 import type { WiCiConfig } from '../shared/types.js';
 
@@ -12,6 +12,10 @@ function main(): void {
   assert(parseClaudeProbeError(notLoggedIn, 1)?.includes('Not logged in'), 'expected not logged in probe to be reported');
   assert(parseClaudeProbeError(JSON.stringify({ is_error: false, result: { ok: true } }), 0) === undefined, 'expected successful probe to pass');
   assert(parseClaudeProbeError('', 1)?.includes('exited with code 1'), 'expected empty non-zero probe to fail');
+  const probeArgs = buildClaudeProbeArgs('{"type":"object"}');
+  assert(probeArgs[probeArgs.indexOf('--permission-mode') + 1] === 'plan', 'Claude probe must use plan mode');
+  assert(!probeArgs.includes('--dangerously-skip-permissions'), 'Claude probe must not bypass permissions');
+  assert(!probeArgs.includes('--max-budget-usd'), 'Claude probe must avoid gateway-incompatible budget caps');
 
   expectThrows(
     () => assertRealToolsReady(fakeConfig('real'), fakeReport('Not logged in · Please run /login')),
@@ -24,7 +28,8 @@ function main(): void {
       {
         ok: true,
         not_logged_in_detected: true,
-        real_mode_rejects_unhealthy_claude: true
+        real_mode_rejects_unhealthy_claude: true,
+        probe_uses_plan_mode: true
       },
       null,
       2

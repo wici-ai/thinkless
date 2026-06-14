@@ -160,17 +160,7 @@ async function inspectClaude(command: string, probe: boolean): Promise<ToolHealt
   });
   const probeResult = await execa(
     command,
-    [
-      '-p',
-      'Return JSON with ok=true.',
-      '--output-format',
-      'json',
-      '--json-schema',
-      schema,
-      '--dangerously-skip-permissions',
-      '--max-budget-usd',
-      '0.01'
-    ],
+    buildClaudeProbeArgs(schema),
     { reject: false, all: true, timeout: 60_000, maxBuffer: 1024 * 1024 * 5 }
   );
   const probeError = parseClaudeProbeError(probeResult.stdout || probeResult.all || '', probeResult.exitCode ?? 1);
@@ -178,6 +168,19 @@ async function inspectClaude(command: string, probe: boolean): Promise<ToolHealt
     ...health,
     error: probeError ?? health.error
   };
+}
+
+export function buildClaudeProbeArgs(schema: string): string[] {
+  return [
+    '-p',
+    'Return JSON with ok=true.',
+    '--output-format',
+    'json',
+    '--json-schema',
+    schema,
+    '--permission-mode',
+    'plan'
+  ];
 }
 
 export function parseClaudeProbeError(output: string, exitCode: number): string | undefined {

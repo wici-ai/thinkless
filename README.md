@@ -20,6 +20,8 @@ The supervisor drives:
 
 Real mode uses Claude Code plan mode for planning and `codex exec --dangerously-bypass-approvals-and-sandbox` for execution. A disposable container or VM is recommended for isolation, but WiCi also supports running directly on a primary machine when you rely on git-backed rollback and keep the tool repo version pinned.
 
+WiCi does not pass CLI budget caps to Claude or Codex. The default `max_cost_usd` is `0`, which disables WiCi's own cost hard stop; use `max_iters`, `deadline`, or manual stop control while tuning real runs.
+
 ## Commands
 
 ```bash

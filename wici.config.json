@@ -12,7 +12,7 @@
   },
   "budget": {
     "max_iters": 20,
-    "max_cost_usd": 50,
+    "max_cost_usd": 0,
     "deadline": null
   },
   "stop": {
