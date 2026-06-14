@@ -161,6 +161,18 @@ export interface LedgerEntry {
   parent_id?: string | null;
 }
 
+export interface ToolUsageSummary {
+  events: number;
+  completed_turns: number;
+  completed_items: number;
+  tokens_input?: number;
+  tokens_output?: number;
+  usd?: number;
+  failed: boolean;
+  errors: string[];
+  parse_errors?: number;
+}
+
 export interface LessonEntry {
   id: string;
   ts: string;
@@ -397,4 +409,5 @@ export interface ToolInvocationResult {
   stdout?: string;
   stderr?: string;
   error?: string;
+  usage?: ToolUsageSummary;
 }

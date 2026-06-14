@@ -1,6 +1,6 @@
 import { execa } from 'execa';
 import { atomicWriteJson, exists, readJsonFileMaybe } from '../shared/atomic.js';
-import type { BaselineFile, GoalFile, LedgerEntry, MetricStats, WiCiConfig } from '../shared/types.js';
+import type { BaselineFile, GoalFile, LedgerEntry, MetricStats, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
 import type { RunPaths } from '../shared/paths.js';
 import { currentCommit } from './gitgate.js';
 import { hashFile } from './checkpoint.js';
@@ -214,6 +214,7 @@ export function ledgerFromEvaluation(args: {
   baseline: MetricStats | null;
   evaluation: CandidateEvaluation | null;
   wallMs: number;
+  usage?: ToolUsageSummary;
   reflection: string;
   parentId?: string | null;
   avenue?: string;
@@ -232,7 +233,7 @@ export function ledgerFromEvaluation(args: {
     ci_low: args.evaluation?.ciLow ?? null,
     ci_high: args.evaluation?.ciHigh ?? null,
     p_value: null,
-    cost: { wall_ms: args.wallMs },
+    cost: ledgerCost(args.wallMs, args.usage),
     guards: {
       checks: args.evaluation?.checks.ok ?? false,
       reason: args.evaluation?.reason ?? 'no evaluation',
@@ -249,6 +250,15 @@ export function ledgerFromEvaluation(args: {
     status: args.status,
     reflection: args.reflection,
     parent_id: args.parentId ?? null
+  };
+}
+
+function ledgerCost(wallMs: number, usage: ToolUsageSummary | undefined): LedgerEntry['cost'] {
+  return {
+    wall_ms: wallMs,
+    ...(usage?.tokens_input !== undefined ? { tokens_input: usage.tokens_input } : {}),
+    ...(usage?.tokens_output !== undefined ? { tokens_output: usage.tokens_output } : {}),
+    ...(usage?.usd !== undefined ? { usd: usage.usd } : {})
   };
 }
 

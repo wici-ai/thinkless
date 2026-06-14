@@ -25,6 +25,7 @@
     "verify:tool-version": "tsx src/verify/tool-version.ts",
     "verify:ask-stop": "tsx src/verify/ask-stop.ts",
     "verify:tool-commands": "tsx src/verify/tool-commands.ts",
+    "verify:codex-run-usage": "tsx src/verify/codex-run-usage.ts",
     "verify:clarify": "tsx src/verify/clarify.ts",
     "verify:claude-probe": "tsx src/verify/claude-probe.ts",
     "verify:manual-lock": "tsx src/verify/manual-lock.ts",

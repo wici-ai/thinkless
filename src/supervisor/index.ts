@@ -44,6 +44,7 @@ import { commitLimitArtifact } from './finalArtifact.js';
 import { recordAcceptedArchiveEntry, restoreLedgerFile, selectArchiveParent } from './archive.js';
 import { formatSkillsForPrompt, recordSkillFromKeep, retrieveSkills } from './skills.js';
 import { appendCurriculumSubgoal } from './curriculum.js';
+import { codexUsageFromError } from './codexRun.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
@@ -275,10 +276,12 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         await events.emit('EXECUTE_DONE', iterResult.notes, {
           step_done: iterResult.step_done,
           tests_pass: iterResult.tests_pass,
-          changed_files: iterResult.changed_files
+          changed_files: iterResult.changed_files,
+          usage: iterResult.invocation.usage
         });
       } catch (error) {
-        await events.emit('EXECUTE_FAILED', error instanceof Error ? error.message : String(error), undefined, 'error');
+        const usage = codexUsageFromError(error);
+        await events.emit('EXECUTE_FAILED', error instanceof Error ? error.message : String(error), usage ? { usage } : undefined, 'error');
         await revertToBest(paths, baseline.best_commit);
         await setPlanStepStatus(paths, step.id, 'pending');
         const ledgerEntry = ledgerFromEvaluation({
@@ -290,6 +293,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           baseline: baseline.best_metric,
           evaluation: null,
           wallMs: Date.now() - iterationStarted,
+          usage,
           reflection: 'executor crashed; reverted to best known commit',
           parentId,
           avenue: activeAvenue
@@ -325,6 +329,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           baseline: baseline.best_metric,
           evaluation,
           wallMs: Date.now() - iterationStarted,
+          usage: iterResult.invocation.usage,
           reflection: 'correctness gate failed; reverted',
           parentId,
           avenue: activeAvenue
@@ -363,6 +368,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           baseline: previousMetric,
           evaluation,
           wallMs: Date.now() - iterationStarted,
+          usage: iterResult.invocation.usage,
           reflection: evaluation.reason,
           parentId,
           avenue: activeAvenue
@@ -420,6 +426,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           baseline: baseline.best_metric,
           evaluation,
           wallMs: Date.now() - iterationStarted,
+          usage: iterResult.invocation.usage,
           reflection: evaluation.reason,
           parentId,
           avenue: activeAvenue
@@ -690,7 +697,7 @@ async function ensurePlanAndBaseline(
     if (await exists(paths.baseline)) {
       await chmod(paths.measure, 0o555).catch(() => undefined);
       await chmod(paths.checks, 0o555).catch(() => undefined);
-      await chmod(paths.benchmarkManifest, 0o555).catch(() => undefined);
+      await chmod(paths.benchmarkManifest, 0o444).catch(() => undefined);
     }
   }
 

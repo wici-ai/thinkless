@@ -1,10 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execa } from 'execa';
-import { appendFile } from 'node:fs/promises';
 import { atomicWriteFile, atomicWriteJson, exists } from '../shared/atomic.js';
 import { schemaPath, type RunPaths } from '../shared/paths.js';
 import type { GoalFile, IterResult, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
+import { CodexRunError, appendCodexRunTranscript, assertCodexRunSucceeded, syntheticCodexRunEvent } from './codexRun.js';
 
 async function commandExists(command: string): Promise<boolean> {
   const result = await execa('command', ['-v', command], { shell: true, reject: false });
@@ -50,13 +50,18 @@ export async function runExecutorStep(
 
       const result = await execa(config.tools.executor.command, args, {
         cwd: paths.target,
-        reject: true,
+        reject: false,
         all: true,
         maxBuffer: 1024 * 1024 * 50
       });
-      if (result.all) await appendFile(paths.codexRun, result.all.endsWith('\n') ? result.all : `${result.all}\n`);
+      const stdout = result.all ?? result.stdout;
+      const usage = await appendCodexRunTranscript(paths, stdout);
+      if (result.exitCode !== 0) {
+        throw new CodexRunError(`codex exec exited ${result.exitCode}:\n${stdout}`, usage);
+      }
+      assertCodexRunSucceeded(usage, 'codex exec reported failure event');
       const iterResult = await readIterResult(paths, iter);
-      return { ...iterResult, invocation: { ok: true, stdout: result.all ?? result.stdout } };
+      return { ...iterResult, invocation: { ok: true, stdout, usage } };
     } catch (error) {
       if (config.tools.mode === 'real') throw error;
     }
@@ -72,7 +77,8 @@ export async function runExecutorStep(
     .join('\n');
   await atomicWriteFile(join(paths.artifacts, `iter-${iter}.prompt.txt`), `${stubPrompt}\n`);
   const iterResult = await runStubExecutor(paths, goal, stepId, iter);
-  return { ...iterResult, invocation: { ok: true, sessionId: 'stub-executor', stdout: iterResult.notes } };
+  const usage = await appendCodexRunTranscript(paths, syntheticCodexRunEvent(iter, iterResult.notes));
+  return { ...iterResult, invocation: { ok: true, sessionId: 'stub-executor', stdout: iterResult.notes, usage } };
 }
 
 async function readIterResult(paths: RunPaths, iter: number): Promise<IterResult> {
