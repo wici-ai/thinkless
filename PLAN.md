@@ -335,7 +335,7 @@ A 2025–2026 sweep of open-source agents, mined for **goal accuracy** and **lon
 
 ## Open items (small, non-blocking)
 
-- **Resume structured-output (verify in M0/M3):** confirm whether `codex exec resume` honors `--json`/`--output-schema`; the executor-writes-its-own-`iter-N.json` fallback makes this non-blocking either way.
+- **Codex resume structured-output canary:** local CLI support is verified by `npm run verify:tool-commands`: `codex exec resume --help` advertises `--json`/`--output-schema`/`--output-last-message`, and the executor passes those flags. Keep the executor-writes-its-own `.wici/artifacts/iter-N.json` instruction as the runtime fallback. Next hardening is an optional real-mode canary against a disposable local fixture.
 - **Benchmark tool per goal** is planner's choice inside `measure.sh` (hyperfine for whole-command, k6/wrk for service p99, pytest-benchmark/criterion in-process) — selected during planning, locked on review.
 - **Stop thresholds** `τ/K/N` start as `wici.config.json` defaults; tune after M3.
-- **Chat intake direction:** M1 ships fire-and-forget injection; M5 adds two-way clarifying questions via `outbox/`.
+- **Chat intake UX:** the two-way file path is implemented through `outbox/` and `/answer`, covered by `npm run verify:outbox`, `npm run verify:clarify`, `npm run verify:manual-lock`, and `npm run verify:ask-stop`. Remaining work is richer prompt grouping and operator ergonomics, not the transport.
