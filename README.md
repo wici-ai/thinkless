@@ -18,7 +18,7 @@ The supervisor drives:
 
 ## Safety
 
-Real mode uses `codex exec --dangerously-bypass-approvals-and-sandbox` and `claude --dangerously-skip-permissions`. The supported deployment is a disposable container or VM with only the target repo mounted.
+Real mode uses `codex exec --dangerously-bypass-approvals-and-sandbox` and `claude --dangerously-skip-permissions`. A disposable container or VM is recommended for isolation, but WiCi also supports running directly on a primary machine when you rely on git-backed rollback and keep the tool repo version pinned.
 
 ## Commands
 
@@ -106,7 +106,7 @@ That command creates `fixture/v1-slice-target`, runs one stubbed supervisor iter
 
 ## Deployment
 
-Use a disposable VM or container for real runs. Real mode intentionally passes maximum-autonomy flags to both CLIs, so the supported deployment is an isolated machine with only the target repository mounted.
+Real mode intentionally passes maximum-autonomy flags to both CLIs. The safest setup is a disposable VM or container, but direct use on a primary machine is acceptable if the target repo is under git and the WiCi checkout is versioned.
 
 ### Try V1 Locally
 
@@ -138,7 +138,7 @@ npx tsx src/cli.tsx run \
 
 ### Real Mode
 
-Install and authenticate the two agent CLIs on the isolated host:
+Install and authenticate the two agent CLIs on the host:
 
 ```bash
 claude --version
@@ -147,6 +147,15 @@ npx tsx src/cli.tsx doctor --deep
 ```
 
 Set any provider-specific environment variables in the shell or container runtime. Keep credentials out of the repository and out of committed config files.
+
+Before a real run, pin the WiCi version you are using:
+
+```bash
+git -C /path/to/WiCi-code status --short
+git -C /path/to/WiCi-code rev-parse HEAD
+```
+
+The supervisor records the WiCi package version, git commit, and dirty flag in `<target>/.wici/checkpoint.json` under `tool_versions.wici`. Active runs reject WiCi/Codex/Claude version drift; update tools or change WiCi commits only between runs.
 
 Run with automatic fallback to stub only when a CLI is missing:
 
@@ -181,3 +190,23 @@ When `--lock-mode manual` asks for approval, review `PLAN.md`, `.opt/benchmark.j
 ```text
 /answer lock-eval approved
 ```
+
+### Primary Machine Rollback
+
+If a direct-host real run goes wrong, stop the supervisor first. The target repo can be restored to the best accepted commit recorded by WiCi:
+
+```bash
+cd /workspace/target-repo
+git reset --hard "$(jq -r .best_commit baseline.json)"
+git clean -fd
+```
+
+To restore the WiCi orchestrator version that started the run:
+
+```bash
+WICI_COMMIT="$(jq -r .tool_versions.wici.git_commit .wici/checkpoint.json)"
+git -C /path/to/WiCi-code checkout "$WICI_COMMIT"
+npm --prefix /path/to/WiCi-code install
+```
+
+If `tool_versions.wici.git_dirty` is `true`, the run started from a dirty WiCi checkout. Prefer a clean checkout for real runs so rollback is exact.

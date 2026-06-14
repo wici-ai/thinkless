@@ -280,6 +280,11 @@ export interface Checkpoint {
     mode: ToolMode;
     codex?: string;
     claude?: string;
+    wici?: {
+      package_version?: string;
+      git_commit?: string | null;
+      git_dirty?: boolean;
+    };
     checked_at: string;
   };
   active_avenue?: {

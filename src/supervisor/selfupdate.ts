@@ -1,4 +1,6 @@
 import { execa } from 'execa';
+import { readFile } from 'node:fs/promises';
+import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, WiCiConfig } from '../shared/types.js';
 
 export interface ToolHealth {
@@ -50,11 +52,12 @@ export function assertNoPendingToolUpdatesForLongRun(config: WiCiConfig, report:
   }
 }
 
-export function toolVersionsFromHealth(config: WiCiConfig, report: ToolHealthReport | null): NonNullable<Checkpoint['tool_versions']> {
+export async function toolVersionsFromHealth(config: WiCiConfig, report: ToolHealthReport | null): Promise<NonNullable<Checkpoint['tool_versions']>> {
   return {
     mode: config.tools.mode,
     codex: report?.codex.version,
     claude: report?.claude.version,
+    wici: await inspectWiCiVersion(),
     checked_at: new Date().toISOString()
   };
 }
@@ -68,9 +71,20 @@ export function assertNoActiveToolVersionDrift(checkpoint: Checkpoint, current: 
   if (pinned.mode !== current.mode) diffs.push(`mode ${pinned.mode} -> ${current.mode}`);
   if (pinned.codex !== current.codex) diffs.push(`codex ${pinned.codex ?? 'unknown'} -> ${current.codex ?? 'unknown'}`);
   if (pinned.claude !== current.claude) diffs.push(`claude ${pinned.claude ?? 'unknown'} -> ${current.claude ?? 'unknown'}`);
+  if (pinned.wici) {
+    if (pinned.wici.package_version !== current.wici?.package_version) {
+      diffs.push(`wici package ${pinned.wici.package_version ?? 'unknown'} -> ${current.wici?.package_version ?? 'unknown'}`);
+    }
+    if (pinned.wici.git_commit !== current.wici?.git_commit) {
+      diffs.push(`wici git ${pinned.wici.git_commit ?? 'unknown'} -> ${current.wici?.git_commit ?? 'unknown'}`);
+    }
+    if (pinned.wici.git_dirty !== current.wici?.git_dirty) {
+      diffs.push(`wici dirty ${String(pinned.wici.git_dirty)} -> ${String(current.wici?.git_dirty)}`);
+    }
+  }
 
   if (diffs.length > 0) {
-    throw new Error(`Tool version drift detected during active run; update tools only between runs: ${diffs.join('; ')}`);
+    throw new Error(`Tool version drift detected during active run; update tools only between runs or roll WiCi back to the checkpointed git commit: ${diffs.join('; ')}`);
   }
 }
 
@@ -184,4 +198,21 @@ export function parseClaudeProbeError(output: string, exitCode: number): string 
 async function commandAvailable(command: string): Promise<boolean> {
   const result = await execa('command', ['-v', command], { shell: true, reject: false });
   return result.exitCode === 0;
+}
+
+async function inspectWiCiVersion(): Promise<NonNullable<NonNullable<Checkpoint['tool_versions']>['wici']>> {
+  const packageVersion = await readPackageVersion();
+  const commit = await execa('git', ['-C', TOOL_ROOT, 'rev-parse', 'HEAD'], { reject: false, all: true });
+  const status = await execa('git', ['-C', TOOL_ROOT, 'status', '--porcelain'], { reject: false, all: true });
+  return {
+    package_version: packageVersion,
+    git_commit: commit.exitCode === 0 ? (commit.all ?? commit.stdout).trim() : null,
+    git_dirty: status.exitCode === 0 ? (status.all ?? status.stdout).trim().length > 0 : undefined
+  };
+}
+
+async function readPackageVersion(): Promise<string | undefined> {
+  const raw = await readFile(`${TOOL_ROOT}/package.json`, 'utf8').catch(() => '');
+  if (!raw) return undefined;
+  return (JSON.parse(raw) as { version?: string }).version;
 }

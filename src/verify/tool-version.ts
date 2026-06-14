@@ -2,12 +2,13 @@ import type { Checkpoint } from '../shared/types.js';
 import {
   assertNoActiveToolVersionDrift,
   assertNoPendingToolUpdatesForLongRun,
-  parseCodexUpdatePending
+  parseCodexUpdatePending,
+  toolVersionsFromHealth
 } from '../supervisor/selfupdate.js';
 import type { ToolHealthReport } from '../supervisor/selfupdate.js';
 import type { WiCiConfig } from '../shared/types.js';
 
-function main(): void {
+async function main(): Promise<void> {
   const active = checkpoint('EXECUTE', {
     mode: 'real',
     codex: 'codex-cli 0.139.0',
@@ -24,6 +25,29 @@ function main(): void {
         checked_at: new Date().toISOString()
       }),
     'Tool version drift detected during active run'
+  );
+
+  const wiciPinned = checkpoint('EXECUTE', {
+    mode: 'stub',
+    wici: {
+      package_version: '0.1.0',
+      git_commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      git_dirty: false
+    },
+    checked_at: '2026-06-14T00:00:00.000Z'
+  });
+  expectThrows(
+    () =>
+      assertNoActiveToolVersionDrift(wiciPinned, {
+        mode: 'stub',
+        wici: {
+          package_version: '0.1.0',
+          git_commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          git_dirty: false
+        },
+        checked_at: new Date().toISOString()
+      }),
+    'wici git'
   );
 
   const stopped = checkpoint('STOP', active.tool_versions!);
@@ -55,11 +79,21 @@ function main(): void {
   assertNoPendingToolUpdatesForLongRun(fakeConfig('auto'), fakeReport(true), 1);
   assertNoPendingToolUpdatesForLongRun(fakeConfig('stub'), fakeReport(true), 20);
 
+  const current = await toolVersionsFromHealth(fakeConfig('stub'), null);
+  assert(current.wici?.package_version === '0.1.0', `expected WiCi package version 0.1.0, got ${current.wici?.package_version}`);
+  assert(
+    current.wici?.git_commit === null || /^[0-9a-f]{40}$/.test(current.wici?.git_commit ?? ''),
+    `unexpected WiCi git commit: ${current.wici?.git_commit}`
+  );
+  assert(typeof current.wici?.git_dirty === 'boolean' || current.wici?.git_dirty === undefined, 'WiCi dirty flag must be boolean when git is available');
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         active_drift_rejected: true,
+        wici_drift_rejected: true,
+        wici_version_recorded: true,
         stopped_drift_allowed: true,
         unpinned_allowed: true,
         pending_update_gate_verified: true
@@ -134,4 +168,4 @@ function expectThrows(fn: () => void, expected: string): void {
   throw new Error(`Expected error containing "${expected}"`);
 }
 
-main();
+await main();

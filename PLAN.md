@@ -18,7 +18,7 @@
 **User decisions locked:**
 1. **Termination = diminishing-returns / cost-benefit**, not a hard 12h/budget cap. Keep optimizing while gains are worth the cost; stop when marginal improvement-per-cost is low. Budget is only a hard backstop.
 2. **Eval scripts (`measure.sh`/`checks.sh`) are planner-designed, then user-locked** (reviewed once, `chmod -w` + SHA-256 pinned; agent can't edit thereafter).
-3. **Max autonomy:** `codex exec --dangerously-bypass-approvals-and-sandbox` + `claude --dangerously-skip-permissions`. → **Strong recommendation: run inside a disposable container/VM**, since this removes the OS sandbox that was the main safety net (see Safety).
+3. **Max autonomy:** `codex exec --dangerously-bypass-approvals-and-sandbox` + `claude --dangerously-skip-permissions`. → **Isolation is recommended, but direct-host real mode on the primary machine is allowed** when the target repo is git-backed, WiCi records its own git commit in `checkpoint.json`, and rollback commands are documented (see Safety).
 4. **Three-pane TUI from day one:** `chat` + `热goal` (live editable goal/plan) + `事实执行` (execution stream) — full vertical slice, not headless-first.
 
 ---
@@ -237,8 +237,9 @@ git -C <target> restore --staged --worktree . && git -C <target> clean -fd   # u
 ## 9. Safety (because autonomy is maxed)
 
 `--dangerously-bypass-approvals-and-sandbox` + `--dangerously-skip-permissions` remove the OS sandbox — the main mitigation in the research. Compensate:
-- **Strongly recommend running the orchestrator in a disposable container/VM** (or a dedicated machine) with only the target repo mounted. Document this as the supported deployment.
+- **Recommend a disposable container/VM** (or a dedicated machine) with only the target repo mounted. **Current deployment decision:** direct-host real mode on the primary machine is acceptable when the target repo is git-backed, the WiCi checkout is pinned/recorded, and rollback commands are documented.
 - Keep **reversibility** as the backbone: every change is git-committed or revertible (`reset --hard <best>`); no irreversible ops.
+- Record WiCi's own package version, git commit, and dirty flag in `checkpoint.json` so the orchestrator can be rolled back along with the target repo.
 - **Forbidden-action list** in the planner/executor system prompts (no `git push`, no `rm -rf` outside workspace, no prod credentials); `--disallowedTools 'Bash(git push *)'` on the planner.
 - Eval scripts + tests stay `chmod -w` + SHA-pinned regardless of autonomy.
 - Indirect prompt-injection via `inbox`/ingested content: validate injection `kind` against an allowlist; `abort` requires the URGENT sentinel.

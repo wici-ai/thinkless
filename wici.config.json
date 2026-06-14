@@ -50,7 +50,7 @@
     "user_email": "wici@example.invalid"
   },
   "safety": {
-    "container_hint": "Supported deployment is a disposable container or VM with only the target repo mounted.",
+    "container_hint": "Recommended isolation is a disposable container or VM. Direct-host real runs require git-backed target rollback and a pinned WiCi checkout.",
     "forbidden_actions": ["git push", "rm -rf outside workspace", "production credentials"]
   }
 }

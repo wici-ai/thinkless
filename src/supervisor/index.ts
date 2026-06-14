@@ -108,7 +108,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     const toolHealth = config.tools.mode === 'stub' ? null : await checkToolHealth(config, { probeClaude: config.tools.mode === 'real' });
     if (toolHealth) assertRealToolsReady(config, toolHealth);
     assertNoPendingToolUpdatesForLongRun(config, toolHealth, maxIters);
-    const currentToolVersions = toolVersionsFromHealth(config, toolHealth);
+    const currentToolVersions = await toolVersionsFromHealth(config, toolHealth);
     assertNoActiveToolVersionDrift(checkpoint, currentToolVersions);
     checkpoint.tool_versions = currentToolVersions;
     await saveCheckpoint(paths, checkpoint);

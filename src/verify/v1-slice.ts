@@ -84,6 +84,12 @@ async function main(): Promise<void> {
   assert(checkpoint.supervisor_state === 'STOP', `expected STOP checkpoint, got ${checkpoint.supervisor_state}`);
   assert(checkpoint.iter === 1, `expected checkpoint iter=1, got ${checkpoint.iter}`);
   assert(checkpoint.ledger_seq === 1, `expected checkpoint ledger_seq=1, got ${checkpoint.ledger_seq}`);
+  assert(checkpoint.tool_versions?.wici?.package_version === '0.1.0', `checkpoint missing WiCi package version: ${JSON.stringify(checkpoint.tool_versions)}`);
+  assert(
+    checkpoint.tool_versions.wici.git_commit === null || /^[0-9a-f]{40}$/.test(checkpoint.tool_versions.wici.git_commit ?? ''),
+    `checkpoint has invalid WiCi git commit: ${checkpoint.tool_versions.wici.git_commit}`
+  );
+  assert(typeof checkpoint.tool_versions.wici.git_dirty === 'boolean' || checkpoint.tool_versions.wici.git_dirty === undefined, 'checkpoint missing WiCi dirty flag');
 
   const hotpath = await readFile(`${target}/src/hotpath.js`, 'utf8');
   assert(hotpath.includes('new Set'), 'target hot path was not optimized by the v1 slice');
