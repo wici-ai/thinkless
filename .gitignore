@@ -15,6 +15,8 @@ fixture/stuck-target/
 fixture/real-mode-target/
 fixture/outbox-target/
 fixture/ask-stop-target/
+fixture/stop-policy-target/
+fixture/stop-policy-synthetic/
 fixture/codex-run-target/
 fixture/clarify-target/
 fixture/manual-lock-target/

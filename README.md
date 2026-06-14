@@ -37,6 +37,7 @@ npm run verify:real-mode
 npm run verify:outbox
 npm run verify:tool-version
 npm run verify:ask-stop
+npm run verify:stop-policy
 npm run verify:tool-commands
 npm run verify:codex-run-usage
 npm run verify:clarify

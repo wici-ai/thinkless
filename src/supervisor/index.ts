@@ -245,7 +245,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           kind: decision.stop ? (goal.stop.mode === 'ask' ? 'question' : 'stop_verdict') : 'error',
           text: decision.stop && goal.stop.mode === 'ask' ? `Stop candidate: ${decision.reason}. Type a new requirement or /steer continue to resume.` : decision.reason,
           replyKey: decision.stop && goal.stop.mode === 'ask' ? `stop-${goal.version}-${checkpoint.iter}` : undefined,
-          data: { no_executable_step: true, stop_mode: goal.stop.mode }
+          data: { no_executable_step: true, stop_mode: goal.stop.mode, stop_analysis: decision.analysis, verdict: decision.verdict }
         });
         await events.emit(checkpoint.supervisor_state, decision.reason, undefined, decision.stop ? 'info' : 'warn');
         return {
@@ -570,7 +570,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       }
 
       const stop = await shouldStop(paths, goal, ledger, config);
-      await events.emit('STOP_CHECK', stop.reason, { candidate: stop.candidate, stop: stop.stop });
+      await events.emit('STOP_CHECK', stop.reason, { candidate: stop.candidate, stop: stop.stop, stop_analysis: stop.analysis, verdict: stop.verdict });
       if (stop.stop) {
         checkpoint.supervisor_state = 'STOP';
         await saveCheckpoint(paths, checkpoint);
@@ -578,7 +578,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           kind: goal.stop.mode === 'ask' ? 'question' : 'stop_verdict',
           text: goal.stop.mode === 'ask' ? `Stop candidate: ${stop.reason}. Type a new requirement or /steer continue to resume.` : stop.reason,
           replyKey: goal.stop.mode === 'ask' ? `stop-${goal.version}-${checkpoint.iter}` : undefined,
-          data: { candidate: stop.candidate, stop_mode: goal.stop.mode }
+          data: { candidate: stop.candidate, stop_mode: goal.stop.mode, stop_analysis: stop.analysis, verdict: stop.verdict }
         });
         await events.emit('STOP', stop.reason);
         return { state: 'STOP', reason: stop.reason, iter: checkpoint.iter };
