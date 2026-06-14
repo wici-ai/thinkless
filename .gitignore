@@ -46,3 +46,4 @@ fixture/limit-artifact-deadline-target/
 fixture/v1-slice-target/
 fixture/rollback-target/
 fixture/tui-live-target/
+fixture/tui-chat-intake-target/

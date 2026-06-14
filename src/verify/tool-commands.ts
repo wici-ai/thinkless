@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
 import { buildInitialPlannerArgs, buildPlanDiffArgs } from '../supervisor/planner.js';
-import { schemaPath } from '../shared/paths.js';
+import { promptPath, schemaPath } from '../shared/paths.js';
 
 async function main(): Promise<void> {
   const planSchema = await readFile(schemaPath('plan'), 'utf8');
@@ -47,6 +47,11 @@ async function main(): Promise<void> {
   assert(!diffArgs.includes('--dangerously-skip-permissions'), 'planner diff must not bypass permissions outside plan mode');
   assert(diffArgs[diffArgs.indexOf('-p') + 1].includes('Current GOAL.md:'), 'planner diff must pass markdown GOAL.md text');
   assert(!diffArgs[diffArgs.indexOf('-p') + 1].includes('"requirements"'), 'planner diff must not expose internal goal.json as the goal contract');
+
+  const plannerPrompt = await readFile(promptPath('planner'), 'utf8');
+  assert(!plannerPrompt.includes('unit=ms n=<integer>'), 'planner prompt must not hardcode metric unit=ms');
+  assert(plannerPrompt.includes('unit=<goal metric unit>'), 'planner prompt must require the GOAL.md metric unit');
+  assert(plannerPrompt.includes('goal direction determine acceptance'), 'planner prompt must let GOAL.md metric direction control acceptance');
 
   assert(firstCodex.includes('--output-schema'), 'first codex exec missing --output-schema');
   assert(firstCodex.includes('--output-last-message'), 'first codex exec missing --output-last-message');

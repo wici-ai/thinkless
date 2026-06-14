@@ -64,18 +64,21 @@ program
   .option('--no-fullscreen', 'render without fullscreen mode')
   .action((options: { target: string; goal?: string; maxIters?: number; resumeIteration?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; supervisor: boolean; fullscreen: boolean }) => {
     const target = resolve(options.target);
-    if (options.supervisor) {
-      void runSupervisor({
-        target,
-        goal: options.goal,
-        maxIters: options.maxIters,
-        resumeIteration: options.resumeIteration,
-        mode: options.mode,
-        lockMode: options.lockMode
-      });
-    }
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
-    const tree = <App target={target} interactive={interactive} />;
+    const tree = (
+      <App
+        target={target}
+        interactive={interactive}
+        supervisor={{
+          enabled: options.supervisor,
+          initialGoal: options.goal,
+          maxIters: options.maxIters,
+          resumeIteration: options.resumeIteration,
+          mode: options.mode,
+          lockMode: options.lockMode
+        }}
+      />
+    );
     if (options.fullscreen && interactive) {
       void withFullScreen(tree, { interactive: true }).start();
     } else {

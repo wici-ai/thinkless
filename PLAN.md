@@ -74,7 +74,7 @@ claude -p "ULTRAPLAN for goal: $(cat GOAL.md)" \
 # capture: jq -r '.session_id' -> .wici/sessions.json ; jq '.structured_output' -> verify -> materialize/lock
 ```
 
-`prompts/planner.md` rubric (the "no corner-cutting" enforcement): rigorous plan with **stable step IDs** (S1,S2,…); each step lists experiments, a validation command, and environment setup; **design `measure.sh`** (warmup-discard, ≥N reps, emit `METRIC p50=.. p95=.. p99=.. unit=ms n=..`) and **`checks.sh`** (tests/typecheck/lint, separate timeout); Codex is the only writer at execution time.
+`prompts/planner.md` rubric (the "no corner-cutting" enforcement): rigorous plan with **stable step IDs** (S1,S2,…); each step lists experiments, a validation command, and environment setup; **design `measure.sh`** (warmup-discard, ≥N reps, emit `METRIC p50=.. p95=.. p99=.. unit=<goal metric unit> n=..`; `p99` is WiCi's current primary scalar slot and goal direction controls minimize/maximize acceptance) and **`checks.sh`** (tests/typecheck/lint, separate timeout); Codex is the only writer at execution time.
 
 **Plan diff on a new requirement** (resume same session, minimal surgical diff):
 
@@ -194,7 +194,7 @@ Helpers: `shared/atomic.ts` (temp+rename writes), `shared/paths.ts`, `shared/typ
 Two-stage, **correctness first, then performance** — a faster-but-broken candidate is never committed.
 
 1. **`.opt/checks.sh`** (correctness backpressure): tests + typecheck + lint, separate ~300s timeout, excluded from the timed metric. Fail → REVERT.
-2. **`.opt/measure.sh`** (the metric, tamper-proof): warmup-discard `K`, run workload `M`×, emit `METRIC p50=.. p95=.. p99=.. unit=ms n=.. warmup_discarded=..`.
+2. **`.opt/measure.sh`** (the metric, tamper-proof): warmup-discard `K`, run workload `M`×, emit `METRIC p50=.. p95=.. p99=.. unit=<goal metric unit> n=.. warmup_discarded=..`; for non-latency goals, `p99` still carries the primary scalar that WiCi gates on, while `GOAL.md` supplies the unit and direction.
 
 **Noise handling for a p99 goal** — accept iff **all**: (a) point delta beats `noise_threshold` (≥1% rel); (b) significance: paired **bootstrap CI of the delta excludes 0** (≥1000 resamples) **or** Mann-Whitney `p<0.05`; (c) **no guard regresses** (`error_rate`, `throughput_rps`, and `p50/p95` don't blow up — don't fix the tail by wrecking the body). ≥5 independent reps. Never gate on p100.
 

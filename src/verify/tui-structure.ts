@@ -29,9 +29,13 @@ async function main(): Promise<void> {
   assert(files.app.includes('useInput') && files.app.includes('useFocusManager'), 'App must keep keyboard focus management at the top level');
   assert(files.app.includes("focus('chat')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat pane');
   assert(files.app.includes('<ChatPane') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render the three V1 panes');
+  assert(files.app.includes('shouldAcceptInitialGoalFromChat'), 'App must route blank-run chat input to the initial supervisor goal');
+  assert(files.app.includes('launchSupervisor(supervisor.initialGoal)'), 'App must keep --goal as an explicit automation shortcut');
 
   assert(files.chat.includes("useFocus({ id: 'chat'"), 'ChatPane must have a stable focus id');
   assert(files.chat.includes('writeInjection'), 'ChatPane must write chat input through writeInjection');
+  assert(files.chat.includes('acceptInitialGoal') && files.chat.includes('onInitialGoal'), 'ChatPane must support initial goal intake before inbox injections');
+  assert(files.chat.includes('isInitialGoalText'), 'ChatPane must distinguish initial natural-language goals from slash commands');
   assert(files.chat.includes("kind: 'add_requirement'"), 'ChatPane must default text input to add_requirement injections');
   assert(files.chat.includes("kind: 'answer'"), 'ChatPane must support outbox answers');
   assert(files.chat.includes("kind: 'steer'"), 'ChatPane must support steering injections');
@@ -69,6 +73,7 @@ async function main(): Promise<void> {
   assert(files.cli.includes(".command('tui')"), 'CLI must expose the tui command');
   assert(files.cli.includes(".option('--no-supervisor'"), 'tui command must support read-only/manual launch without supervisor');
   assert(files.cli.includes(".option('--no-fullscreen'"), 'tui command must support non-fullscreen rendering for verification');
+  assert(files.cli.includes('initialGoal: options.goal'), 'tui --goal must be explicit automation input, not an implicit default goal');
 
   verifyVisibleEvents();
   verifyGoalPlanDiff();

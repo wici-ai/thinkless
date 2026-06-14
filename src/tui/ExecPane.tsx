@@ -18,7 +18,8 @@ export function ExecPane({ state }: { state: RunState }) {
   const live = displayedEvents.at(-1);
   const rangeStart = state.events.length === 0 ? 0 : tailing ? 1 : viewport.start + 1;
   const rangeEnd = tailing ? state.events.length : viewport.end;
-  const running = state.checkpoint?.supervisor_state !== 'STOP' && state.checkpoint?.supervisor_state !== 'FAILED';
+  const hasRun = Boolean(state.checkpoint || state.events.length > 0);
+  const running = Boolean(state.checkpoint && state.checkpoint.supervisor_state !== 'STOP' && state.checkpoint.supervisor_state !== 'FAILED');
 
   useEffect(() => {
     setScrollOffset((current) => Math.min(current, maxScroll));
@@ -46,21 +47,23 @@ export function ExecPane({ state }: { state: RunState }) {
             </Text>
           )}
         </Static>
-        {live ? <Text color={colorFor(live)}>{formatEvent(live)}</Text> : <Text color="gray">waiting for events</Text>}
+        {live ? <Text color={colorFor(live)}>{formatEvent(live)}</Text> : null}
       </Box>
-      <Box>
-        {running ? (
-          <Text color="cyan">
-            <Spinner type="dots" /> running
+      {hasRun ? (
+        <Box>
+          {running ? (
+            <Text color="cyan">
+              <Spinner type="dots" /> running
+            </Text>
+          ) : (
+            <Text color="gray">idle</Text>
+          )}
+          <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>
+            {' '}
+            {rangeStart}-{rangeEnd}/{state.events.length || 0}
           </Text>
-        ) : (
-          <Text color="gray">idle</Text>
-        )}
-        <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>
-          {' '}
-          {rangeStart}-{rangeEnd}/{state.events.length || 0}
-        </Text>
-      </Box>
+        </Box>
+      ) : null}
     </Box>
   );
 }

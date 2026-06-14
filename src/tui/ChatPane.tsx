@@ -5,7 +5,21 @@ import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
 import type { OutboxMessage } from '../shared/types.js';
 
-export function ChatPane({ target, interactive = true, outbox = [] }: { target: string; interactive?: boolean; outbox?: OutboxMessage[] }) {
+export function ChatPane({
+  target,
+  interactive = true,
+  outbox = [],
+  acceptInitialGoal = false,
+  onInitialGoal,
+  systemLine
+}: {
+  target: string;
+  interactive?: boolean;
+  outbox?: OutboxMessage[];
+  acceptInitialGoal?: boolean;
+  onInitialGoal?: (text: string) => void;
+  systemLine?: string | null;
+}) {
   const { isFocused } = useFocus({ id: 'chat', autoFocus: true, isActive: interactive });
   const [value, setValue] = useState('');
   const [lines, setLines] = useState<string[]>([]);
@@ -14,6 +28,11 @@ export function ChatPane({ target, interactive = true, outbox = [] }: { target: 
     const text = raw.trim();
     if (!text) return;
     setValue('');
+    if (acceptInitialGoal && onInitialGoal && isInitialGoalText(text)) {
+      onInitialGoal(text);
+      setLines((prev) => [...prev.slice(-8), `goal: ${text}`]);
+      return;
+    }
     const paths = runPaths(target);
     const latestQuestion = [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered);
     const injection =
@@ -40,6 +59,7 @@ export function ChatPane({ target, interactive = true, outbox = [] }: { target: 
             {message.kind}{message.answered ? ' answered' : ''}: {message.text.length > 52 ? `${message.text.slice(0, 49)}...` : message.text}
           </Text>
         ))}
+        {systemLine ? <Text color="red">{systemLine.length > 52 ? `${systemLine.slice(0, 49)}...` : systemLine}</Text> : null}
         {lines.map((line, index) => (
           <Text key={`${index}-${line}`} color="gray">
             {line}
@@ -52,6 +72,10 @@ export function ChatPane({ target, interactive = true, outbox = [] }: { target: 
       </Box>
     </Box>
   );
+}
+
+export function isInitialGoalText(text: string): boolean {
+  return text.trim().length > 0 && !text.trim().startsWith('/');
 }
 
 async function writeAnswer(paths: ReturnType<typeof runPaths>, raw: string, fallbackReplyKey: string | undefined) {

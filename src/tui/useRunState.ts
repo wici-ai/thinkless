@@ -34,6 +34,7 @@ export function useRunState(target: string): RunState {
   useEffect(() => {
     let alive = true;
     let timer: NodeJS.Timeout | null = null;
+    let poller: NodeJS.Timeout | null = null;
 
     const load = async () => {
       const next = await readState(paths.target);
@@ -49,6 +50,9 @@ export function useRunState(target: string): RunState {
     };
 
     void load();
+    poller = setInterval(() => {
+      void load();
+    }, 300);
     const watcher = chokidar.watch([paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox], {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 40, pollInterval: 20 }
@@ -58,6 +62,7 @@ export function useRunState(target: string): RunState {
     return () => {
       alive = false;
       if (timer) clearTimeout(timer);
+      if (poller) clearInterval(poller);
       void watcher.close();
     };
   }, [paths.target, paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox]);

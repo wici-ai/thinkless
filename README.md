@@ -31,6 +31,7 @@ npm run build
 npm run smoke
 npm run verify:v1-slice
 npm run verify:tui-structure
+npm run verify:tui-chat-intake
 npm run verify:tui-live
 npm run verify:durability
 npm run verify:resume-iteration
@@ -77,6 +78,8 @@ Open the TUI over the fixture target:
 npm run sample
 npm run dev
 ```
+
+In an interactive TUI with no existing run and no `--goal`, the Goal and Execution panes stay empty until the first natural-language Chat message. That message becomes the initial planner input. After the run exists, later Chat messages are drained through `.wici/inbox/` as hot requirements or steering.
 
 Run headlessly over a target:
 

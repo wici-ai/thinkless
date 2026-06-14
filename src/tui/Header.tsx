@@ -9,7 +9,7 @@ export function Header({ state }: { state: RunState }) {
   const goal = state.goal;
   const last = state.events.at(-1);
   const iter = checkpoint?.iter ?? 0;
-  const status = checkpoint?.supervisor_state ?? 'BOOT';
+  const status = checkpoint?.supervisor_state ?? 'INTAKE';
 
   return (
     <Box justifyContent="space-between" paddingX={1}>
