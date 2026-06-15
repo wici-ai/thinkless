@@ -23,6 +23,8 @@ export interface RunPaths {
   curriculum: string;
   events: string;
   codexRun: string;
+  chat: string;
+  chatSession: string;
   goal: string;
   goalDoc: string;
   checkpoint: string;
@@ -64,6 +66,8 @@ export function runPaths(target: string): RunPaths {
     curriculum: join(wici, 'curriculum.jsonl'),
     events: join(wici, 'events.jsonl'),
     codexRun: join(wici, 'codex-run.jsonl'),
+    chat: join(wici, 'chat.jsonl'),
+    chatSession: join(wici, 'chat-session.json'),
     goal: join(wici, 'goal.json'),
     goalDoc: join(root, 'GOAL.md'),
     checkpoint: join(wici, 'checkpoint.json'),
@@ -122,6 +126,6 @@ export function schemaPath(name: 'iter-result'): string {
   return join(TOOL_ROOT, 'schemas', `${name}.schema.json`);
 }
 
-export function promptPath(name: 'planner' | 'planner-diff' | 'stop-verdict'): string {
+export function promptPath(name: 'planner' | 'planner-diff' | 'stop-verdict' | 'chat'): string {
   return join(TOOL_ROOT, 'prompts', `${name}.md`);
 }

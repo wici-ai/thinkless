@@ -149,7 +149,8 @@ function blankState(root: string): RunState {
     plan: '',
     events: [],
     outbox: [],
-    injections: []
+    injections: [],
+    chat: []
   };
 }
 

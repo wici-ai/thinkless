@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { chmod, readFile, readdir, stat } from 'node:fs/promises';
 import { execa } from 'execa';
 import { createHash } from 'node:crypto';
@@ -11,6 +10,7 @@ import { type PlannerBenchmark, writeBenchmarkManifest } from './benchmark.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
 import { isPlannerSelectedMetricName, primaryMetricName } from './metricFormat.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput, type ClaudeUsage } from './claudeOutput.js';
+import { runClaudeStreamProcess } from './claudeProcess.js';
 import { saveGoalFiles } from './goalDoc.js';
 
 interface PlannerOutput {
@@ -294,87 +294,37 @@ async function runPlannerProcess(
     onProgress?: (progress: PlannerUsageProgress) => Promise<void>;
   }
 ): Promise<{ stdout: string; all: string }> {
-  const child = spawn(command, args, {
-    cwd: options.cwd,
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-
-  let stdout = '';
-  let stderr = '';
-  let lineBuffer = '';
-  let timeoutReason: 'idle' | 'hard' | null = null;
   let progressChain = Promise.resolve();
   let lastUsageSignature = '';
-  const startedAt = Date.now();
-  let lastActivityAt = startedAt;
-
-  const markActivity = () => {
-    lastActivityAt = Date.now();
+  const emitProgress = (line: string) => {
+    const progress = plannerProgressFromLine(line);
+    if (!progress || !options.onProgress) return;
+    const signature = JSON.stringify(progress);
+    if (signature === lastUsageSignature) return;
+    lastUsageSignature = signature;
+    progressChain = progressChain.then(() => options.onProgress?.(progress)).then(() => undefined);
   };
-  const killForTimeout = (reason: 'idle' | 'hard') => {
-    if (timeoutReason) return;
-    timeoutReason = reason;
-    child.kill('SIGTERM');
-    setTimeout(() => child.kill('SIGKILL'), 2_000).unref();
-  };
-  const watchdog = setInterval(() => {
-    const now = Date.now();
-    if (now - startedAt >= PLANNER_HARD_TIMEOUT_MS) {
-      killForTimeout('hard');
-    } else if (now - lastActivityAt >= PLANNER_IDLE_TIMEOUT_MS) {
-      killForTimeout('idle');
-    }
-  }, 5_000);
-  watchdog.unref();
 
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (chunk: string) => {
-    markActivity();
-    stdout += chunk;
-    lineBuffer += chunk;
-    const lines = lineBuffer.split(/\r?\n/);
-    lineBuffer = lines.pop() ?? '';
-    for (const line of lines) {
-      const progress = plannerProgressFromLine(line);
-      if (!progress || !options.onProgress) continue;
-      const signature = JSON.stringify(progress);
-      if (signature === lastUsageSignature) continue;
-      lastUsageSignature = signature;
-      progressChain = progressChain.then(() => options.onProgress?.(progress)).then(() => undefined);
-    }
+  const result = await runClaudeStreamProcess(command, args, {
+    cwd: options.cwd,
+    idleTimeoutMs: PLANNER_IDLE_TIMEOUT_MS,
+    hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS,
+    onLine: emitProgress
   });
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk: string) => {
-    markActivity();
-    stderr += chunk;
-  });
-
-  const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-    child.once('exit', (code, signal) => resolve({ code, signal }));
-  });
-  clearInterval(watchdog);
-
-  const trailingProgress = plannerProgressFromLine(lineBuffer);
-  if (trailingProgress && options.onProgress) {
-    const signature = JSON.stringify(trailingProgress);
-    if (signature !== lastUsageSignature) {
-      progressChain = progressChain.then(() => options.onProgress?.(trailingProgress)).then(() => undefined);
-    }
-  }
   await progressChain;
 
-  const all = `${stdout}${stderr}`;
-  if (timeoutReason === 'hard') {
+  const stderr = result.all.slice(result.stdout.length);
+  if (result.timeoutReason === 'hard') {
     throw new Error(`Planner exceeded hard timeout after ${Math.round(PLANNER_HARD_TIMEOUT_MS / 1000)}s without producing PLAN.md artifacts`);
   }
-  if (timeoutReason === 'idle') {
+  if (result.timeoutReason === 'idle') {
     throw new Error(`Planner timed out after ${Math.round(PLANNER_IDLE_TIMEOUT_MS / 1000)}s without planner output`);
   }
-  if (exit.code !== 0) {
-    const detail = summarizePlannerFailure(stdout, stderr);
-    throw new Error(`Planner exited with code ${exit.code ?? `signal ${exit.signal}`}${detail ? `: ${detail}` : ''}`);
+  if (result.exitCode !== 0) {
+    const detail = summarizePlannerFailure(result.stdout, stderr);
+    throw new Error(`Planner exited with code ${result.exitCode ?? `signal ${result.signal}`}${detail ? `: ${detail}` : ''}`);
   }
-  return { stdout, all };
+  return { stdout: result.stdout, all: result.all };
 }
 
 function summarizePlannerFailure(stdout: string, stderr: string): string {

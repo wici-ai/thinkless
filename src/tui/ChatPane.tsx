@@ -2,7 +2,8 @@ import React, { useRef, useState } from 'react';
 import { Box, Text, useFocus, useInput } from 'ink';
 import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
-import type { GoalFile, Injection, OutboxMessage } from '../shared/types.js';
+import { runChatTurn } from '../supervisor/chatAgent.js';
+import type { ChatLogEntry, GoalFile, Injection, OutboxMessage, RunEvent, ToolMode } from '../shared/types.js';
 
 export function ChatPane({
   target,
@@ -10,6 +11,11 @@ export function ChatPane({
   outbox = [],
   injections = [],
   goal = null,
+  goalDoc = '',
+  plan = '',
+  events = [],
+  chat = [],
+  mode,
   acceptInitialGoal = false,
   onInitialGoal,
   onInjection,
@@ -20,6 +26,11 @@ export function ChatPane({
   outbox?: OutboxMessage[];
   injections?: Injection[];
   goal?: GoalFile | null;
+  goalDoc?: string;
+  plan?: string;
+  events?: RunEvent[];
+  chat?: ChatLogEntry[];
+  mode?: ToolMode;
   acceptInitialGoal?: boolean;
   onInitialGoal?: (text: string) => void;
   onInjection?: () => void;
@@ -29,7 +40,8 @@ export function ChatPane({
   const [value, setValue] = useState('');
   const valueRef = useRef('');
   const [lines, setLines] = useState<string[]>([]);
-  const history = buildChatHistory(outbox, injections, goal);
+  const [busy, setBusy] = useState(false);
+  const history = buildChatHistory(outbox, injections, goal, chat);
 
   const setInputValue = (next: string) => {
     valueRef.current = next;
@@ -47,20 +59,39 @@ export function ChatPane({
     }
     const paths = runPaths(target);
     const latestQuestion = [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered);
-    const injection =
-      text.startsWith('/abort ')
-        ? await writeInjection(paths, { kind: 'abort', text: text.slice('/abort '.length), priority: 'urgent' })
-        : text.startsWith('/drop ')
-          ? await writeInjection(paths, { kind: 'drop_requirement', text: text.slice('/drop '.length), priority: 'normal' })
-          : text.startsWith('/answer ')
-            ? await writeAnswer(paths, text.slice('/answer '.length), latestQuestion?.reply_key)
-          : text.startsWith('/steer ')
-            ? await writeInjection(paths, { kind: 'steer', text: text.slice('/steer '.length), priority: 'normal' })
-          : latestQuestion
-            ? await writeAnswer(paths, text, latestQuestion.reply_key)
-            : await writeInjection(paths, { kind: 'add_requirement', text, priority: 'normal' });
-    setLines((prev) => [...prev.slice(-8), `${injection.kind}: ${text}`]);
-    onInjection?.();
+
+    // Explicit control input: slash commands and answers to an open planner
+    // question bypass the conversational agent and go straight to the inbox.
+    const isSlash = text.startsWith('/abort ') || text.startsWith('/drop ') || text.startsWith('/answer ') || text.startsWith('/steer ');
+    if (isSlash || latestQuestion) {
+      const injection =
+        text.startsWith('/abort ')
+          ? await writeInjection(paths, { kind: 'abort', text: text.slice('/abort '.length), priority: 'urgent' })
+          : text.startsWith('/drop ')
+            ? await writeInjection(paths, { kind: 'drop_requirement', text: text.slice('/drop '.length), priority: 'normal' })
+            : text.startsWith('/answer ')
+              ? await writeAnswer(paths, text.slice('/answer '.length), latestQuestion?.reply_key)
+            : text.startsWith('/steer ')
+              ? await writeInjection(paths, { kind: 'steer', text: text.slice('/steer '.length), priority: 'normal' })
+            : await writeAnswer(paths, text, latestQuestion!.reply_key);
+      setLines((prev) => [...prev.slice(-8), `${injection.kind}: ${text}`]);
+      onInjection?.();
+      return;
+    }
+
+    // Ordinary conversation: the Chat agent replies and decides on its own
+    // judgment whether this turn warrants a goal/plan update (hot reload).
+    setBusy(true);
+    try {
+      const result = await runChatTurn({ paths, userText: text, goalDoc, plan, recentEvents: events, mode });
+      if (result.update) onInjection?.();
+    } catch {
+      // Defensive fallback: never drop the user's message if the agent errors.
+      await writeInjection(paths, { kind: 'add_requirement', text, priority: 'normal' });
+      onInjection?.();
+    } finally {
+      setBusy(false);
+    }
   };
 
   useInput((input, key) => {
@@ -109,6 +140,7 @@ export function ChatPane({
             {line}
           </Text>
         ))}
+        {busy ? <Text color="cyan">· chatting…</Text> : null}
       </Box>
       <Box>
         <Text color={isFocused ? 'cyan' : 'gray'}>{'>'} </Text>
@@ -151,7 +183,13 @@ interface ChatHistoryLine {
   color: string;
 }
 
-export function buildChatHistory(outbox: OutboxMessage[], injections: Injection[], goal: GoalFile | null = null, limit = 10): ChatHistoryLine[] {
+export function buildChatHistory(
+  outbox: OutboxMessage[],
+  injections: Injection[],
+  goal: GoalFile | null = null,
+  chat: ChatLogEntry[] = [],
+  limit = 12
+): ChatHistoryLine[] {
   const initialGoalLines = (goal?.requirements ?? [])
     .filter((requirement) => requirement.source === 'initial')
     .map((requirement): ChatHistoryLine => ({
@@ -160,6 +198,18 @@ export function buildChatHistory(outbox: OutboxMessage[], injections: Injection[
       text: clip(`initial goal: ${requirement.text}`),
       color: 'gray'
     }));
+  const chatLines = chat.flatMap((entry, index): ChatHistoryLine[] => {
+    const text = entry.text.trim();
+    if (!text) return [];
+    return [
+      {
+        id: `chat-${index}-${entry.role}`,
+        ts: entry.ts,
+        text: clip(`${entry.role === 'user' ? 'you' : 'claude'}: ${text}`),
+        color: entry.role === 'user' ? 'white' : 'cyanBright'
+      }
+    ];
+  });
   const questionLines = outbox
     .filter((message) => message.answered && message.answer_text)
     .flatMap((message): ChatHistoryLine[] => [
@@ -182,7 +232,7 @@ export function buildChatHistory(outbox: OutboxMessage[], injections: Injection[
     text: clip(`${labelForInjection(injection)}: ${injection.text}`),
     color: injection.priority === 'urgent' ? 'yellow' : 'gray'
   }));
-  return [...initialGoalLines, ...questionLines, ...injectionLines]
+  return [...initialGoalLines, ...questionLines, ...injectionLines, ...chatLines]
     .sort((a, b) => a.ts.localeCompare(b.ts) || a.id.localeCompare(b.id))
     .slice(-limit);
 }

@@ -4,7 +4,7 @@ import type { RunState } from './useRunState.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
 import { isPlannerSelectedMetricName, primaryMetricValue, primaryMetricName } from '../supervisor/metricFormat.js';
 
-export function Header({ state }: { state: RunState }) {
+export const Header = React.memo(function Header({ state }: { state: RunState }) {
   const checkpoint = state.checkpoint;
   const baseline = state.baseline;
   const goal = state.goal;
@@ -24,7 +24,7 @@ export function Header({ state }: { state: RunState }) {
       <Text color={last?.level === 'error' ? 'red' : last?.level === 'warn' ? 'yellow' : 'gray'}>{last?.type ?? 'idle'}</Text>
     </Box>
   );
-}
+});
 
 export function rollbackSummary(checkpoint: Checkpoint | null): string {
   if (!checkpoint) return 'rollback pending';

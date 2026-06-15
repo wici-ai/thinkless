@@ -14,7 +14,7 @@ export interface PlanDiffView {
   changed: boolean;
 }
 
-export function GoalPane({ state }: { state: RunState }) {
+export const GoalPane = React.memo(function GoalPane({ state }: { state: RunState }) {
   const { isFocused } = useFocus({ id: 'goal' });
   const goal = state.goal;
   const goalLines = state.goalDoc.split('\n').filter(Boolean).slice(0, 12);
@@ -46,7 +46,7 @@ export function GoalPane({ state }: { state: RunState }) {
       </Box>
     </Box>
   );
-}
+});
 
 export function buildPlanDiffView(previousPlan: string, currentPlan: string, limit: number): PlanDiffView {
   const previous = planLines(previousPlan);

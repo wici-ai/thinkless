@@ -7,15 +7,18 @@ import type { RunState } from './useRunState.js';
 const VISIBLE_EVENTS = 18;
 const PAGE_SIZE = 8;
 
-export function ExecPane({ state }: { state: RunState }) {
+export const ExecPane = React.memo(function ExecPane({ state }: { state: RunState }) {
   const { isFocused } = useFocus({ id: 'exec' });
   const [scrollOffset, setScrollOffset] = useState(0);
   const maxScroll = Math.max(0, state.events.length - VISIBLE_EVENTS);
   const viewport = useMemo(() => visibleEvents(state.events, scrollOffset, VISIBLE_EVENTS), [state.events, scrollOffset]);
   const tailing = scrollOffset === 0;
-  const displayedEvents = tailing ? state.events : viewport.events;
-  const stable = displayedEvents.slice(0, -1);
-  const live = displayedEvents.at(-1);
+  // When tailing, the finished events feed a constant-key Static region so
+  // streaming only ever appends new lines (no full re-flush). The last event
+  // renders live below it. When scrolled, we render a plain Box viewport instead
+  // so arrow-key scrolling never remounts the region or re-flushes history.
+  const stable = state.events.slice(0, -1);
+  const live = state.events.at(-1);
   const rangeStart = state.events.length === 0 ? 0 : tailing ? 1 : viewport.start + 1;
   const rangeEnd = tailing ? state.events.length : viewport.end;
   const hasRun = Boolean(state.checkpoint || state.events.length > 0);
@@ -40,14 +43,26 @@ export function ExecPane({ state }: { state: RunState }) {
         事实执行
       </Text>
       <Box flexDirection="column" flexGrow={1}>
-        <Static key={tailing ? 'exec-static-tail' : `exec-static-${viewport.start}-${viewport.end}`} items={stable}>
-          {(event) => (
-            <Text key={event.seq ?? `${event.ts}-${event.type}`} color={colorFor(event)}>
-              {formatEvent(event)}
-            </Text>
-          )}
-        </Static>
-        {live ? <Text color={colorFor(live)}>{formatEvent(live)}</Text> : null}
+        {tailing ? (
+          <>
+            <Static key="exec-static" items={stable}>
+              {(event) => (
+                <Text key={event.seq ?? `${event.ts}-${event.type}`} color={colorFor(event)}>
+                  {formatEvent(event)}
+                </Text>
+              )}
+            </Static>
+            {live ? <Text color={colorFor(live)}>{formatEvent(live)}</Text> : null}
+          </>
+        ) : (
+          <Box flexDirection="column">
+            {viewport.events.map((event) => (
+              <Text key={event.seq ?? `${event.ts}-${event.type}`} color={colorFor(event)}>
+                {formatEvent(event)}
+              </Text>
+            ))}
+          </Box>
+        )}
       </Box>
       {hasRun ? (
         <Box>
@@ -66,7 +81,7 @@ export function ExecPane({ state }: { state: RunState }) {
       ) : null}
     </Box>
   );
-}
+});
 
 export function visibleEvents(events: RunEvent[], scrollOffset: number, size: number): { events: RunEvent[]; start: number; end: number } {
   if (events.length === 0 || size <= 0) return { events: [], start: 0, end: 0 };

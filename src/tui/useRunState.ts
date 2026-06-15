@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import chokidar from 'chokidar';
 import { readFile, readdir } from 'node:fs/promises';
 import { runPaths } from '../shared/paths.js';
-import type { BaselineFile, Checkpoint, GoalFile, Injection, LedgerEntry, OutboxMessage, RunEvent } from '../shared/types.js';
+import type { BaselineFile, ChatLogEntry, Checkpoint, GoalFile, Injection, LedgerEntry, OutboxMessage, RunEvent } from '../shared/types.js';
 import { exists } from '../shared/atomic.js';
 
 export interface RunState {
@@ -16,12 +16,12 @@ export interface RunState {
   events: RunEvent[];
   outbox: OutboxMessage[];
   injections: Injection[];
+  chat: ChatLogEntry[];
 }
 
-export function useRunState(target: string): RunState {
-  const paths = useMemo(() => runPaths(target), [target]);
-  const [state, setState] = useState<RunState>({
-    target: paths.target,
+function emptyRunState(target: string): RunState {
+  return {
+    target,
     goal: null,
     checkpoint: null,
     baseline: null,
@@ -30,8 +30,18 @@ export function useRunState(target: string): RunState {
     plan: '',
     events: [],
     outbox: [],
-    injections: []
-  });
+    injections: [],
+    chat: []
+  };
+}
+
+export function useRunState(target: string): RunState {
+  const paths = useMemo(() => runPaths(target), [target]);
+  const [state, setState] = useState<RunState>(() => emptyRunState(paths.target));
+  // Keep the last committed signature so we only re-render when blackboard
+  // content actually changed; an unconditional setState on every poll/watch
+  // tick re-renders the whole TUI and is the primary flicker source.
+  const lastSignatureRef = useRef<string>(stateSignature(emptyRunState(paths.target)));
 
   useEffect(() => {
     let alive = true;
@@ -39,8 +49,12 @@ export function useRunState(target: string): RunState {
     let poller: NodeJS.Timeout | null = null;
 
     const load = async () => {
-      const next = await readState(paths.target);
-      if (alive) setState(next);
+      const next = await readState(paths.target).catch(() => null);
+      if (!alive || !next) return;
+      const signature = stateSignature(next);
+      if (signature === lastSignatureRef.current) return;
+      lastSignatureRef.current = signature;
+      setState(next);
     };
 
     const schedule = () => {
@@ -52,10 +66,12 @@ export function useRunState(target: string): RunState {
     };
 
     void load();
+    // Slow safety poll only: chokidar drives normal refreshes, and load() is a
+    // no-op when nothing changed, so this is just a watcher-miss backstop.
     poller = setInterval(() => {
       void load();
-    }, 300);
-    const watcher = chokidar.watch([paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone], {
+    }, 1500);
+    const watcher = chokidar.watch([paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone, paths.chat], {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 40, pollInterval: 20 }
     });
@@ -67,14 +83,39 @@ export function useRunState(target: string): RunState {
       if (poller) clearInterval(poller);
       void watcher.close();
     };
-  }, [paths.target, paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone]);
+  }, [paths.target, paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone, paths.chat]);
 
   return state;
 }
 
+// Cheap content fingerprint: changes when any rendered blackboard slice changes.
+// Includes in-place mutations (outbox.answered, injection.applied) so answered
+// questions and applied injections still refresh the Chat pane.
+export function stateSignature(state: RunState): string {
+  const lastEvent = state.events.at(-1);
+  const lastLedger = state.ledger.at(-1);
+  const lastOutbox = state.outbox.at(-1);
+  const lastInjection = state.injections.at(-1);
+  const lastChat = state.chat.at(-1);
+  const answered = state.outbox.reduce((count, message) => count + (message.answered ? 1 : 0), 0);
+  const applied = state.injections.reduce((count, injection) => count + (injection.applied ? 1 : 0), 0);
+  return [
+    state.goal ? `${state.goal.run_id}:${state.goal.version}` : '-',
+    state.checkpoint ? `${state.checkpoint.supervisor_state}:${state.checkpoint.iter}:${state.checkpoint.events_seq}:${state.checkpoint.ledger_seq}:${state.checkpoint.best_commit ?? ''}:${state.checkpoint.updated_at}` : '-',
+    state.baseline ? state.baseline.updated_at : '-',
+    `g${state.goalDoc.length}`,
+    `p${state.plan.length}`,
+    `e${state.events.length}:${lastEvent?.seq ?? lastEvent?.ts ?? ''}`,
+    `l${state.ledger.length}:${lastLedger?.id ?? ''}`,
+    `o${state.outbox.length}:${answered}:${lastOutbox?.id ?? ''}`,
+    `i${state.injections.length}:${applied}:${lastInjection?.id ?? ''}`,
+    `c${state.chat.length}:${lastChat?.ts ?? ''}`
+  ].join('|');
+}
+
 async function readState(target: string): Promise<RunState> {
   const paths = runPaths(target);
-  const [goal, checkpoint, baseline, ledger, goalDoc, plan, events, outbox, injections] = await Promise.all([
+  const [goal, checkpoint, baseline, ledger, goalDoc, plan, events, outbox, injections, chat] = await Promise.all([
     readJsonMaybe<GoalFile>(paths.goal),
     readJsonMaybe<Checkpoint>(paths.checkpoint),
     readJsonMaybe<BaselineFile>(paths.baseline),
@@ -83,7 +124,8 @@ async function readState(target: string): Promise<RunState> {
     readTextMaybe(paths.plan),
     readJsonLinesMaybe<RunEvent>(paths.events),
     readOutboxMessages(paths.outbox),
-    readInjectionHistory(paths.inbox, paths.inboxDone)
+    readInjectionHistory(paths.inbox, paths.inboxDone),
+    readChatLog(paths.chat)
   ]);
   return {
     target: paths.target,
@@ -95,8 +137,14 @@ async function readState(target: string): Promise<RunState> {
     plan,
     events,
     outbox,
-    injections
+    injections,
+    chat
   };
+}
+
+async function readChatLog(path: string): Promise<ChatLogEntry[]> {
+  const entries = await readJsonLinesMaybe<ChatLogEntry>(path);
+  return entries.filter((entry) => entry && typeof entry.text === 'string' && (entry.role === 'user' || entry.role === 'assistant')).slice(-40);
 }
 
 async function readTextMaybe(path: string): Promise<string> {

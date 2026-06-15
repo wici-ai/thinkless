@@ -59,6 +59,16 @@ export interface Injection {
   coalesced_ids?: string[];
 }
 
+export interface ChatLogEntry {
+  ts: string;
+  role: 'user' | 'assistant';
+  text: string;
+  update?: {
+    kind: 'add_requirement' | 'steer';
+    text: string;
+  };
+}
+
 export type OutboxKind = 'info' | 'question' | 'stop_verdict' | 'error';
 
 export interface OutboxMessage {

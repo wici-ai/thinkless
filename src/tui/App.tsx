@@ -92,6 +92,11 @@ export function App({
             outbox={state.outbox}
             injections={state.injections}
             goal={state.goal}
+            goalDoc={state.goalDoc}
+            plan={state.plan}
+            events={state.events}
+            chat={state.chat}
+            mode={supervisor.mode}
             acceptInitialGoal={acceptInitialGoal}
             onInitialGoal={(goal) => launchSupervisor(goal, 'tui_chat')}
             onInjection={() => launchSupervisor(undefined)}
