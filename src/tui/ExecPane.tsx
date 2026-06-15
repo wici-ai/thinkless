@@ -1,68 +1,58 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Static, Text, useFocus, useInput } from 'ink';
+import { Box, Text, useFocus, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import type { RunEvent } from '../shared/types.js';
 import type { RunState } from './useRunState.js';
+import { mouseScrollDelta } from './input.js';
+import { PAGE_SIZE, scrollBy, viewport, wrapLines } from './viewport.js';
 
 const VISIBLE_EVENTS = 18;
-const PAGE_SIZE = 8;
 
-export const ExecPane = React.memo(function ExecPane({ state }: { state: RunState }) {
+export const ExecPane = React.memo(function ExecPane({
+  state,
+  contentWidth = 48,
+  viewportHeight = VISIBLE_EVENTS
+}: {
+  state: RunState;
+  contentWidth?: number;
+  viewportHeight?: number;
+}) {
   const { isFocused } = useFocus({ id: 'exec' });
   const [scrollOffset, setScrollOffset] = useState(0);
-  const maxScroll = Math.max(0, state.events.length - VISIBLE_EVENTS);
-  const viewport = useMemo(() => visibleEvents(state.events, scrollOffset, VISIBLE_EVENTS), [state.events, scrollOffset]);
-  const tailing = scrollOffset === 0;
-  // When tailing, the finished events feed a constant-key Static region so
-  // streaming only ever appends new lines (no full re-flush). The last event
-  // renders live below it. When scrolled, we render a plain Box viewport instead
-  // so arrow-key scrolling never remounts the region or re-flushes history.
-  const stable = state.events.slice(0, -1);
-  const live = state.events.at(-1);
-  const rangeStart = state.events.length === 0 ? 0 : tailing ? 1 : viewport.start + 1;
-  const rangeEnd = tailing ? state.events.length : viewport.end;
+  const rawLines = useMemo(() => codexDisplayLines(state.codexTranscript), [state.codexTranscript]);
+  const fallbackLines = useMemo(() => state.events.map(formatEvent), [state.events]);
+  const sourceLines = rawLines.length > 0 ? rawLines : fallbackLines;
+  const displayLines = useMemo(() => wrapLines(sourceLines, contentWidth), [contentWidth, sourceLines]);
+  const view = viewport(displayLines, scrollOffset, viewportHeight);
   const hasRun = Boolean(state.checkpoint || state.events.length > 0);
   const running = Boolean(state.checkpoint && state.checkpoint.supervisor_state !== 'STOP' && state.checkpoint.supervisor_state !== 'FAILED');
 
   useEffect(() => {
-    setScrollOffset((current) => Math.min(current, maxScroll));
-  }, [maxScroll]);
+    setScrollOffset((current) => Math.min(current, view.maxScroll));
+  }, [view.maxScroll]);
 
-  useInput((_input, key) => {
-    if (key.upArrow) setScrollOffset((current) => Math.min(maxScroll, current + 1));
-    else if (key.downArrow) setScrollOffset((current) => Math.max(0, current - 1));
-    else if (key.pageUp) setScrollOffset((current) => Math.min(maxScroll, current + PAGE_SIZE));
-    else if (key.pageDown) setScrollOffset((current) => Math.max(0, current - PAGE_SIZE));
-    else if (key.home) setScrollOffset(maxScroll);
-    else if (key.end) setScrollOffset(0);
+  useInput((input, key) => {
+    const wheel = mouseScrollDelta(input);
+    if (wheel !== 0) setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
+    else if (key.upArrow || input === 'k') setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
+    else if (key.downArrow || input === 'j') setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
+    else if (key.pageUp || input === 'u') setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
+    else if (key.pageDown || input === 'd') setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
+    else if (key.home || input === 'g') setScrollOffset(view.maxScroll);
+    else if (key.end || input === 'G') setScrollOffset(0);
   }, { isActive: isFocused });
 
   return (
     <Box flexDirection="column" height="100%" paddingX={1}>
       <Text bold color={isFocused ? 'greenBright' : 'green'}>
-        事实执行
+        EXECUTION
       </Text>
       <Box flexDirection="column" flexGrow={1}>
-        {tailing ? (
-          <>
-            <Static key="exec-static" items={stable}>
-              {(event) => (
-                <Text key={event.seq ?? `${event.ts}-${event.type}`} color={colorFor(event)}>
-                  {formatEvent(event)}
-                </Text>
-              )}
-            </Static>
-            {live ? <Text color={colorFor(live)}>{formatEvent(live)}</Text> : null}
-          </>
-        ) : (
-          <Box flexDirection="column">
-            {viewport.events.map((event) => (
-              <Text key={event.seq ?? `${event.ts}-${event.type}`} color={colorFor(event)}>
-                {formatEvent(event)}
-              </Text>
-            ))}
-          </Box>
-        )}
+        {view.lines.map((line, index) => (
+          <Text key={`${view.start + index}-${line}`} color={execLineColor(line)}>
+            {line || ' '}
+          </Text>
+        ))}
       </Box>
       {hasRun ? (
         <Box>
@@ -75,13 +65,82 @@ export const ExecPane = React.memo(function ExecPane({ state }: { state: RunStat
           )}
           <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>
             {' '}
-            {rangeStart}-{rangeEnd}/{state.events.length || 0}
+            {view.end}/{displayLines.length || 0}
           </Text>
         </Box>
       ) : null}
     </Box>
   );
 });
+
+export function codexDisplayLines(rawLines: string[]): string[] {
+  const output: string[] = [];
+  for (const raw of rawLines) {
+    const parsed = parseJson(raw);
+    if (!parsed) {
+      output.push(raw);
+      continue;
+    }
+    output.push(...displayLinesFromRecord(parsed, raw));
+  }
+  return output.filter((line) => line.length > 0);
+}
+
+function displayLinesFromRecord(record: Record<string, unknown>, raw: string): string[] {
+  const type = stringValue(record.type) ?? stringValue(record.event) ?? stringValue(record.name);
+  const item = recordValue(record.item);
+  const source = item ?? record;
+  const itemType = stringValue(source.type);
+  const lines: string[] = [];
+
+  const command = stringValue(source.command);
+  if (command) lines.push(`[command] ${command}`);
+
+  const query = stringValue(source.query);
+  if (query) lines.push(`[web] ${query}`);
+
+  const text = stringValue(source.text) ?? stringValue(source.message);
+  if (text) lines.push(...text.split(/\r?\n/));
+
+  const output = stringValue(source.aggregated_output) ?? stringValue(source.output);
+  if (output) lines.push(...output.replace(/\s+$/, '').split(/\r?\n/));
+
+  const changes = Array.isArray(source.changes) ? source.changes : undefined;
+  if (changes) {
+    for (const change of changes) {
+      const changeRecord = recordValue(change);
+      if (!changeRecord) continue;
+      const path = stringValue(changeRecord.path);
+      const kind = stringValue(changeRecord.kind);
+      if (path) lines.push(`[file ${kind ?? 'change'}] ${path}`);
+    }
+  }
+
+  const exitCode = source.exit_code;
+  if (typeof exitCode === 'number') lines.push(`[exit] ${exitCode}`);
+
+  if (lines.length > 0) return lines;
+  if (type === 'turn.completed') return ['[turn.completed]'];
+  if (type || itemType) return [`[${type ?? itemType}] ${raw}`];
+  return [raw];
+}
+
+function parseJson(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return recordValue(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
 
 export function visibleEvents(events: RunEvent[], scrollOffset: number, size: number): { events: RunEvent[]; start: number; end: number } {
   if (events.length === 0 || size <= 0) return { events: [], start: 0, end: 0 };
@@ -139,5 +198,14 @@ function colorFor(event: RunEvent): string {
   if (event.level === 'warn') return 'yellow';
   if (event.type === 'COMMIT') return 'green';
   if (event.type === 'EXECUTE_START' || event.type === 'EXECUTE_PROGRESS' || event.type === 'PLAN_USAGE') return 'cyan';
+  return 'white';
+}
+
+function execLineColor(line: string): string {
+  if (line.startsWith('[command]')) return 'cyan';
+  if (line.startsWith('[exit] 0')) return 'green';
+  if (line.startsWith('[exit]')) return 'yellow';
+  if (line.startsWith('[file')) return 'magenta';
+  if (line.startsWith('[web]')) return 'blue';
   return 'white';
 }

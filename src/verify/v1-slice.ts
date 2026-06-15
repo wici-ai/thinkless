@@ -169,7 +169,7 @@ async function verifyTuiRender(): Promise<{ rendered: true }> {
 }
 
 function hasTuiPanes(text: string): boolean {
-  return text.includes('WiCi') && text.includes('CHAT') && text.includes('GOAL') && text.includes('事实执行');
+  return text.includes('WiCi') && text.includes('CHAT') && text.includes('GOAL / PLAN') && text.includes('EXECUTION');
 }
 
 async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {

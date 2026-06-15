@@ -147,7 +147,7 @@ export interface BenchmarkManifest {
   }>;
 }
 
-export type LedgerStatus = 'keep' | 'reject' | 'revert' | 'checks_failed' | 'crash';
+export type LedgerStatus = 'keep' | 'reject' | 'revert' | 'checks_failed' | 'crash' | 'preempted';
 
 export interface LedgerEntry {
   id: string;

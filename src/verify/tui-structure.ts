@@ -3,9 +3,12 @@ import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
 import { buildChatHistory } from '../tui/ChatPane.js';
-import { formatEvent, visibleEvents } from '../tui/ExecPane.js';
+import { codexDisplayLines, formatEvent, visibleEvents } from '../tui/ExecPane.js';
 import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
+import { mouseScrollDelta } from '../tui/input.js';
+import { viewport, wrapLines } from '../tui/viewport.js';
+import { summarizePlanForChat } from '../supervisor/chatAgent.js';
 
 const tuiRoot = join(TOOL_ROOT, 'src', 'tui');
 
@@ -16,6 +19,7 @@ async function main(): Promise<void> {
     exec: await source('ExecPane.tsx'),
     goal: await source('GoalPane.tsx'),
     header: await source('Header.tsx'),
+    input: await source('input.ts'),
     state: await source('useRunState.ts'),
     cli: await readFile(join(TOOL_ROOT, 'src', 'cli.tsx'), 'utf8')
   };
@@ -23,11 +27,10 @@ async function main(): Promise<void> {
   const staticUses = Object.entries(files)
     .filter(([name]) => ['app', 'chat', 'exec', 'goal', 'header', 'state'].includes(name))
     .flatMap(([name, text]) => occurrences(text, '<Static').map((index) => ({ name, index })));
-  assert(staticUses.length === 1, `TUI must have exactly one <Static>, found ${JSON.stringify(staticUses)}`);
-  assert(staticUses[0].name === 'exec', `the single <Static> must live in ExecPane, found ${staticUses[0].name}`);
-  assert(files.exec.includes('items={stable}'), 'ExecPane Static must render stable finished events');
+  assert(staticUses.length === 0, `TUI panes must use scrollable viewports instead of Static regions, found ${JSON.stringify(staticUses)}`);
 
   assert(files.app.includes('useInput') && files.app.includes('useFocusManager'), 'App must keep keyboard focus management at the top level');
+  assert(files.app.includes('enableMouseReporting'), 'App must enable terminal mouse reporting for pane-local wheel scroll');
   assert(files.app.includes("focus('chat')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat pane');
   assert(files.app.includes('<ChatPane') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render the three V1 panes');
   assert(files.app.includes('shouldAcceptInitialGoalFromChat'), 'App must route blank-run chat input to the initial supervisor goal');
@@ -39,8 +42,11 @@ async function main(): Promise<void> {
   assertNoControlWrites('App', files.app);
 
   assert(files.chat.includes("useFocus({ id: 'chat'"), 'ChatPane must have a stable focus id');
+  assert(files.chat.includes('isActive: interactive && isFocused'), 'ChatPane input and scroll must be gated on focus');
   assert(files.chat.includes('writeInjection'), 'ChatPane must write chat input through writeInjection');
   assert(files.chat.includes('buildChatHistory'), 'ChatPane must render persisted chat history');
+  assert(files.chat.includes('viewport(') && files.chat.includes('wrapLines'), 'ChatPane must render full wrapped content through a scroll viewport');
+  assert(files.chat.includes('mouseScrollDelta'), 'ChatPane must support pane-local mouse wheel scroll');
   assert(files.chat.includes('acceptInitialGoal') && files.chat.includes('onInitialGoal'), 'ChatPane must support initial goal intake before inbox injections');
   assert(files.chat.includes('onInjection?.()'), 'ChatPane must notify App after writing inbox injections');
   assert(files.chat.includes('isInitialGoalText'), 'ChatPane must distinguish initial natural-language goals from slash commands');
@@ -51,14 +57,18 @@ async function main(): Promise<void> {
   assert(files.chat.includes("kind: 'steer'"), 'ChatPane must support steering injections');
   assert(files.chat.includes("kind: 'abort'"), 'ChatPane must support urgent abort injections');
   assertNoControlWrites('ChatPane', files.chat);
+  assert(!files.chat.includes("? `${") && !files.chat.includes("...'"), 'ChatPane must not intentionally ellipsize content');
 
   assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
+  assert(files.goal.includes('useInput') && files.goal.includes('isActive: isFocused'), 'GoalPane scroll input must be gated on focus');
   assert(files.goal.includes('state.goalDoc'), 'GoalPane must render the user-facing GOAL.md document');
   assert(!files.goal.includes('goal?.requirements'), 'GoalPane must not use internal goal.json requirements as the primary goal UI');
   assert(files.goal.includes('buildPlanDiffView'), 'GoalPane must compute a visible PLAN diff');
-  assert(files.goal.includes('Δ +'), 'GoalPane must render added/removed PLAN counts');
-  assert(files.goal.includes("line.added ? '+ '"), 'GoalPane must mark added PLAN lines');
+  assert(files.goal.includes('GOAL / PLAN'), 'GoalPane title must be English');
+  assert(files.goal.includes('viewport(') && files.goal.includes('wrapLines'), 'GoalPane must render full GOAL.md and PLAN.md through a scroll viewport');
+  assert(files.goal.includes('mouseScrollDelta') && files.goal.includes("input === 'k'"), 'GoalPane must support wheel and vim-style scroll keys');
   assertNoControlWrites('GoalPane', files.goal);
+  assert(!files.goal.includes("? `${") && !files.goal.includes("...'"), 'GoalPane must not intentionally ellipsize content');
 
   assert(files.exec.includes("useFocus({ id: 'exec'"), 'ExecPane must be focusable for scroll controls');
   assert(files.exec.includes('useInput') && files.exec.includes('isActive: isFocused'), 'ExecPane input must be gated on focus');
@@ -66,7 +76,9 @@ async function main(): Promise<void> {
     assert(files.exec.includes(`key.${key}`), `ExecPane missing ${key} scroll binding`);
   }
   assert(files.exec.includes('visibleEvents') && files.exec.includes('scrollOffset'), 'ExecPane must render an in-pane scroll viewport');
-  assert(files.exec.includes('usageSuffix'), 'ExecPane must surface token usage from event data');
+  assert(files.exec.includes('mouseScrollDelta') && files.exec.includes("input === 'k'"), 'ExecPane must support wheel and vim-style scroll keys');
+  assert(files.exec.includes('codexDisplayLines') && files.exec.includes('state.codexTranscript'), 'ExecPane must render Codex transcript text fields');
+  assert(files.exec.includes('EXECUTION'), 'ExecPane title must be English');
   assertNoControlWrites('ExecPane', files.exec);
   assert(!files.goal.includes('writeInjection'), 'GoalPane must not write inbox injections');
   assert(!files.exec.includes('writeInjection'), 'ExecPane must not write inbox injections');
@@ -77,7 +89,7 @@ async function main(): Promise<void> {
   assert(files.header.includes('elapsedSummary'), 'Header must show elapsed run time');
 
   assert(files.state.includes("import chokidar from 'chokidar'"), 'useRunState must use chokidar for blackboard watching');
-  for (const watched of ['paths.events', 'paths.goal', 'paths.goalDoc', 'paths.checkpoint', 'paths.baseline', 'paths.ledger', 'paths.plan', 'paths.outbox']) {
+  for (const watched of ['paths.events', 'paths.codexRun', 'paths.goal', 'paths.goalDoc', 'paths.checkpoint', 'paths.baseline', 'paths.ledger', 'paths.plan', 'paths.outbox']) {
     assert(files.state.includes(watched), `useRunState watcher missing ${watched}`);
   }
   assert(files.state.includes('paths.inbox') && files.state.includes('paths.inboxDone'), 'useRunState watcher must include persisted Chat inbox history');
@@ -92,7 +104,11 @@ async function main(): Promise<void> {
   assert(files.cli.includes('initialGoal: options.goal'), 'tui --goal must be explicit automation input, not an implicit default goal');
 
   verifyVisibleEvents();
+  verifyTextViewport();
+  verifyMouseScroll();
+  verifyChatPromptCompression();
   verifyExecEventUsage();
+  verifyCodexDisplayLines();
   verifyChatHistory();
   verifyGoalPlanDiff();
   verifyHeaderSummaries();
@@ -101,9 +117,10 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         ok: true,
-        single_static_owner: 'ExecPane',
+        scrollable_panes: true,
         esc_focuses_chat: true,
         exec_scroll_viewport: true,
+        exec_codex_transcript: true,
         goal_plan_diff: true,
         header_cost_elapsed: true,
         header_rollback_status: true,
@@ -116,6 +133,36 @@ async function main(): Promise<void> {
       2
     )
   );
+}
+
+function verifyTextViewport(): void {
+  const wrapped = wrapLines(['abcdef'], 2);
+  assert(wrapped.join('|') === 'ab|cd|ef', `wrapLines should keep text inside pane width: ${wrapped.join('|')}`);
+  const view = viewport(['1', '2', '3', '4'], 1, 2);
+  assert(view.lines.join(',') === '2,3', `viewport should scroll independently, got ${view.lines.join(',')}`);
+}
+
+function verifyMouseScroll(): void {
+  assert(mouseScrollDelta('\x1b[<64;20;10M') === 1, 'mouse wheel up should scroll into pane history');
+  assert(mouseScrollDelta('\x1b[<65;20;10M') === -1, 'mouse wheel down should scroll toward pane tail');
+  assert(mouseScrollDelta('k') === 0, 'ordinary keyboard input must not parse as mouse scroll');
+}
+
+function verifyChatPromptCompression(): void {
+  const longPlan = [
+    '# PLAN',
+    'Intro '.repeat(600),
+    ...Array.from({ length: 80 }, (_, index) => [
+      `- [ ] S${index + 1} Step ${index + 1}`,
+      `  Action: do ${index + 1}`,
+      `  Validation: check ${index + 1}`,
+      `  Rollback / failure signal: recover ${index + 1}`
+    ]).flat()
+  ].join('\n');
+  const summary = summarizePlanForChat(longPlan, 2_000);
+  assert(summary.length <= 2_100, `Chat plan summary should be bounded, got ${summary.length}`);
+  assert(summary.includes('- [ ] S1 Step 1'), 'Chat plan summary should preserve discoverable step lines');
+  assert(summary.includes('[truncated'), 'Chat plan summary should mark truncation');
 }
 
 function verifyGoalPlanDiff(): void {
@@ -286,6 +333,20 @@ function verifyExecEventUsage(): void {
     }
   });
   assert(!alreadyFormatted.includes('tok total=456'), `ExecPane should not duplicate token usage already in message: ${alreadyFormatted}`);
+}
+
+function verifyCodexDisplayLines(): void {
+  const lines = codexDisplayLines([
+    JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'hello\nworld' } }),
+    JSON.stringify({ type: 'item.started', item: { type: 'command_execution', command: 'npm test' } }),
+    JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', aggregated_output: 'ok\n', exit_code: 0 } }),
+    JSON.stringify({ type: 'item.completed', item: { type: 'file_change', changes: [{ path: 'src/a.ts', kind: 'update' }] } })
+  ]);
+  const text = lines.join('\n');
+  assert(text.includes('hello') && text.includes('world'), `Codex agent text should render directly:\n${text}`);
+  assert(text.includes('[command] npm test'), `Codex command should render directly:\n${text}`);
+  assert(text.includes('ok'), `Codex command output should render directly:\n${text}`);
+  assert(text.includes('[file update] src/a.ts'), `Codex file changes should render directly:\n${text}`);
 }
 
 function verifyChatHistory(): void {

@@ -30,6 +30,7 @@ npm run verify:v1-core
 npm run verify:v1-slice
 npm run verify:direct-no-scripts
 npm run verify:direct-recovery
+npm run verify:direct-preempt
 npm run verify:existing-goal
 npm run verify:v1-requirements
 npm run verify:tui-structure
@@ -156,7 +157,7 @@ Users should not need to add meta-instructions such as "search tutorials", "debu
 
 When `PLAN.md` exists, the fresh V1 path starts Codex directly. It does not require `baseline.json`, `.opt/benchmark.json`, `acceptance.spec.json`, or pre-run measurements before execution. A stray or historical `baseline.json` does not switch V1 into an eval-gated loop; the legacy optimizer must be explicitly enabled with `WICI_LEGACY_OPTIMIZER=1`.
 
-During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.wici/artifacts/planner-*.stdout.jsonl`. Real Codex execution tails `EXECUTE_PROGRESS` events from `codex exec --json` and writes the raw stream to `.wici/codex-run.jsonl`. The executor watchdog is intentionally long for remote deploys, model downloads, builds, and benchmarks: a silent executor is allowed up to 60 minutes before WiCi records a recoverable timeout event for the next Codex resume.
+During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.wici/artifacts/planner-*.stdout.jsonl`. Real Codex execution tails `EXECUTE_PROGRESS` events from `codex exec --json` and writes the raw stream to `.wici/codex-run.jsonl`. The executor watchdog is intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work, but an empty `codex exec resume` that only emits session startup and no actionable item is restarted quickly as a recoverable timeout.
 
 WiCi does not treat a single executor failure as the whole goal failing. Direct V1 execution is intentionally long-horizon: command failures, failed validation, and executor timeouts are recorded as recoverable crash ledger rows, the active `PLAN.md` step is reset to pending, and the next Codex `exec resume --last` prompt receives the failure reason. Codex is allowed to inspect logs and remote state, update `PLAN.md`, repair planner-provided `.opt` scripts, choose a different deployment or validation strategy, and continue the same `GOAL.md` until the goal is actually satisfied or there is concrete repeated evidence that it cannot proceed.
 
@@ -191,6 +192,8 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 `npm run verify:direct-no-scripts` covers the complementary path: an existing markdown `PLAN.md` can execute directly without `.opt/checks.sh`, `.opt/measure.sh`, or `.opt/benchmark.json`.
 
 `npm run verify:direct-recovery` covers long-goal recovery: a fake real-mode Codex fails the first invocation, WiCi records `EXECUTE_RECOVERABLE_FAILURE` without entering `FAILED`, then the second invocation uses `codex exec resume --last` and completes.
+
+`npm run verify:direct-preempt` covers finer hot reload: a fake real-mode Codex is interrupted after pending Chat input appears, WiCi records `EXECUTE_PREEMPTED`, drains the inbox, applies a planner diff, then resumes Codex.
 
 `npm run verify:existing-goal` covers continuing a target that already has `GOAL.md` and `PLAN.md` without passing a new `--goal`.
 

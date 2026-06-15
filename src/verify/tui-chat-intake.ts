@@ -148,6 +148,7 @@ function blankState(root: string): RunState {
     goalDoc: '',
     plan: '',
     events: [],
+    codexTranscript: [],
     outbox: [],
     injections: [],
     chat: []

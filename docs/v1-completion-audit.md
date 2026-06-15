@@ -66,6 +66,7 @@ This audit records what is currently proven, what is covered by automated checks
 | Requirement | Evidence | Status |
 | --- | --- | --- |
 | Later Chat input updates the goal without restarting the TUI | `npm run verify:hotreload`, `npm run verify:tui-chat-intake` | Covered |
+| Pending Chat input can preempt an active direct Codex run at the next executor output/heartbeat | `npm run verify:direct-preempt` report `preempted_active_executor`, `EXECUTE_PREEMPTED`, and resumed executor evidence | Covered |
 | Real pseudo-terminal follow-up Chat input hot-reloads GOAL/PLAN before the next Codex iteration | `npm run verify:tui-hotreload-pty` report `pty_hot_reload`, `goal_version: 2`, and `ledger_rows: 2` | Covered |
 | Hot reload preserves Codex execution continuity instead of starting a fresh executor context | `npm run verify:hotreload-resume` report `codex_resume_after_hot_reload`; `npm run verify:executor-contract` | Covered |
 | Hot-reload steering is persisted into `GOAL.md`, not only passed as a transient prompt note | `npm run verify:hotreload` report `goal_doc_contains_steering`; `npm run verify:v1-requirements` | Covered |

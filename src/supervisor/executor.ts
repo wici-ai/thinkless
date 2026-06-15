@@ -11,6 +11,7 @@ import { formatSafetyForPrompt } from './safety.js';
 const EXECUTOR_IDLE_TIMEOUT_MS = 60 * 60_000;
 const EXECUTOR_HARD_TIMEOUT_MS = 12 * 60 * 60_000;
 const EXECUTOR_HEARTBEAT_MS = 30_000;
+const EXECUTOR_FIRST_MEANINGFUL_EVENT_TIMEOUT_MS = 5 * 60_000;
 
 export interface ExecutorProgress {
   kind: 'event' | 'heartbeat';
@@ -24,9 +25,25 @@ export interface ExecutorRunOptions {
   artifactId?: string;
   resume?: boolean;
   onProgress?: (progress: ExecutorProgress) => Promise<void>;
+  shouldPreempt?: () => Promise<boolean>;
   idleTimeoutMs?: number;
   hardTimeoutMs?: number;
   heartbeatMs?: number;
+  firstMeaningfulEventTimeoutMs?: number;
+}
+
+export class ExecutorPreemptedError extends Error {
+  readonly usage: ToolInvocationResult['usage'];
+
+  constructor(message: string, usage: ToolInvocationResult['usage']) {
+    super(message);
+    this.name = 'ExecutorPreemptedError';
+    this.usage = usage;
+  }
+}
+
+export function isExecutorPreempted(error: unknown): error is ExecutorPreemptedError {
+  return error instanceof ExecutorPreemptedError;
 }
 
 async function commandExists(command: string): Promise<boolean> {
@@ -53,7 +70,7 @@ export async function runExecutorStep(
     try {
       const safetyText = formatSafetyForPrompt(config);
       const artifactId = options.artifactId ?? `iter-${iter}`;
-      const prompt = await buildExecutorPrompt(paths, stepId, iter, artifactId, safetyText, steerText, lessonsText);
+      const prompt = await buildExecutorPrompt(paths, stepId, iter, artifactId, safetyText, steerText, lessonsText, options.resume ?? iter > 1);
 
       const artifactPath = join(paths.artifacts, `${artifactId}.txt`);
       await atomicWriteFile(join(paths.artifacts, `${artifactId}.prompt.txt`), `${prompt}\n`);
@@ -70,9 +87,11 @@ export async function runExecutorStep(
       const result = await runCodexProcess(config.tools.executor.command, args, paths, {
         cwd: paths.target,
         onProgress: options.onProgress,
+        shouldPreempt: options.shouldPreempt,
         idleTimeoutMs: options.idleTimeoutMs,
         hardTimeoutMs: options.hardTimeoutMs,
-        heartbeatMs: options.heartbeatMs
+        heartbeatMs: options.heartbeatMs,
+        firstMeaningfulEventTimeoutMs: options.firstMeaningfulEventTimeoutMs
       });
       if (result.exitCode !== 0) {
         throw new CodexRunError(`codex exec exited ${result.exitCode}:\n${result.all}`, result.usage);
@@ -85,7 +104,7 @@ export async function runExecutorStep(
     }
   }
 
-  const stubPrompt = await buildExecutorPrompt(paths, stepId, iter, `iter-${iter}`, formatSafetyForPrompt(config), steerText, lessonsText);
+  const stubPrompt = await buildExecutorPrompt(paths, stepId, iter, `iter-${iter}`, formatSafetyForPrompt(config), steerText, lessonsText, iter > 1);
   await atomicWriteFile(join(paths.artifacts, `iter-${iter}.prompt.txt`), `${stubPrompt}\n`);
   const iterResult = await runStubExecutor(paths, goal, stepId, iter);
   const usage = await appendCodexRunTranscript(paths, syntheticCodexRunEvent(iter, iterResult.notes));
@@ -99,10 +118,30 @@ async function buildExecutorPrompt(
   artifactId: string,
   safetyText: string,
   steerText?: string,
-  memoryText?: string
+  memoryText?: string,
+  resume = iter > 1
 ): Promise<string> {
   const goalMarkdown = await readTextIfExists(paths.goalDoc);
   const planMarkdown = await readTextIfExists(paths.plan);
+  if (resume) {
+    return [
+      'Continue the existing Codex session for this WiCi run.',
+      `Supervisor receipt focus: ${stepId}. Use this as orientation only; satisfy the current GOAL.md and PLAN.md as a whole.`,
+      'GOAL.md and PLAN.md have already been updated on disk. Re-read them from the workspace before acting.',
+      steerText ? `New requirement or steering delta to apply now:\n${steerText}` : '',
+      'Do not restart the task from scratch. Continue from the existing workspace and remote state; preserve completed useful work.',
+      'If the updated GOAL.md/PLAN.md changes validation, update only the necessary local files/scripts and run the new checks.',
+      `Use the target repository as the only workspace.`,
+      `For long-running installs, builds, SSH tasks, model downloads, and benchmarks, prefer commands that stream progress or write logs you can tail so the TUI remains observable.`,
+      `Treat existing .opt scripts as planner-provided validation artifacts; follow PLAN.md if it explicitly asks you to run or adjust them.`,
+      '',
+      safetyText,
+      memoryText ? memoryText : '',
+      `Write result JSON to .wici/artifacts/${artifactId}.json with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
+    ]
+      .filter((item) => item !== '')
+      .join('\n');
+  }
   return [
     iter === 1 ? 'Execute the current GOAL.md and PLAN.md as one Codex goal.' : 'Continue executing the current GOAL.md and PLAN.md as one Codex goal.',
     `Supervisor receipt focus: ${stepId}. Use this as orientation for progress reporting; do not ignore other PLAN.md work needed to satisfy the goal.`,
@@ -144,14 +183,17 @@ async function runCodexProcess(
   options: {
     cwd: string;
     onProgress?: (progress: ExecutorProgress) => Promise<void>;
+    shouldPreempt?: () => Promise<boolean>;
     idleTimeoutMs?: number;
     hardTimeoutMs?: number;
     heartbeatMs?: number;
+    firstMeaningfulEventTimeoutMs?: number;
   }
 ): Promise<{ stdout: string; stderr: string; all: string; usage: ExecutorProgress['usage']; exitCode: number | null; signal: NodeJS.Signals | null }> {
   const idleTimeoutMs = options.idleTimeoutMs ?? EXECUTOR_IDLE_TIMEOUT_MS;
   const hardTimeoutMs = options.hardTimeoutMs ?? EXECUTOR_HARD_TIMEOUT_MS;
   const heartbeatMs = options.heartbeatMs ?? EXECUTOR_HEARTBEAT_MS;
+  const firstMeaningfulEventTimeoutMs = options.firstMeaningfulEventTimeoutMs ?? EXECUTOR_FIRST_MEANINGFUL_EVENT_TIMEOUT_MS;
   const child = spawn(command, args, {
     cwd: options.cwd,
     stdio: ['ignore', 'pipe', 'pipe']
@@ -161,14 +203,18 @@ async function runCodexProcess(
   let stderr = '';
   let stdoutLineBuffer = '';
   let stderrLineBuffer = '';
-  let timeoutReason: 'idle' | 'hard' | null = null;
+  let timeoutReason: 'idle' | 'hard' | 'no_meaningful_event' | null = null;
   let transcriptChain = Promise.resolve();
   let transcriptError: unknown;
   let progressChain = Promise.resolve();
   let progressError: unknown;
+  let preemptChain = Promise.resolve();
+  let preemptError: unknown;
+  let preempted = false;
   const usage = emptyUsageSummary();
   const startedAt = Date.now();
   let lastActivityAt = startedAt;
+  let firstMeaningfulEventAt: number | null = null;
 
   const markActivity = () => {
     lastActivityAt = Date.now();
@@ -209,29 +255,53 @@ async function runCodexProcess(
     let nextBuffer = buffer + chunk;
     const lines = nextBuffer.split(/\r?\n/);
     nextBuffer = lines.pop() ?? '';
-    for (const line of lines) consumeCodexLine(line, usage, scheduleProgress);
+    for (const line of lines) {
+      const eventType = consumeCodexLine(line, usage, scheduleProgress);
+      if (isMeaningfulCodexEvent(eventType)) firstMeaningfulEventAt ??= Date.now();
+    }
     return nextBuffer;
   };
 
-  const killForTimeout = (reason: 'idle' | 'hard') => {
+  const killForTimeout = (reason: NonNullable<typeof timeoutReason>) => {
     if (timeoutReason) return;
     timeoutReason = reason;
     child.kill('SIGTERM');
     setTimeout(() => child.kill('SIGKILL'), 2_000).unref();
   };
 
+  const requestPreemptCheck = () => {
+    if (!options.shouldPreempt || preempted || timeoutReason) return;
+    preemptChain = preemptChain.then(async () => {
+      if (preempted || timeoutReason || preemptError) return;
+      try {
+        if (await options.shouldPreempt?.()) {
+          preempted = true;
+          child.kill('SIGTERM');
+          setTimeout(() => {
+            if (preempted) child.kill('SIGKILL');
+          }, 2_000).unref();
+        }
+      } catch (error) {
+        preemptError = error;
+      }
+    });
+  };
+
   const watchdog = setInterval(() => {
     const now = Date.now();
     if (now - startedAt >= hardTimeoutMs) {
       killForTimeout('hard');
+    } else if (!firstMeaningfulEventAt && now - startedAt >= firstMeaningfulEventTimeoutMs) {
+      killForTimeout('no_meaningful_event');
     } else if (now - lastActivityAt >= idleTimeoutMs) {
       killForTimeout('idle');
     }
-  }, Math.min(5_000, Math.max(50, idleTimeoutMs)));
+  }, Math.min(5_000, Math.max(50, Math.min(idleTimeoutMs, firstMeaningfulEventTimeoutMs))));
   watchdog.unref();
 
   const heartbeat = setInterval(() => {
     scheduleProgress({ kind: 'heartbeat' });
+    requestPreemptCheck();
   }, heartbeatMs);
   heartbeat.unref();
 
@@ -241,6 +311,7 @@ async function runCodexProcess(
     stdout += chunk;
     appendTranscript(chunk);
     stdoutLineBuffer = consumeLines(stdoutLineBuffer, chunk);
+    requestPreemptCheck();
   });
   child.stderr?.setEncoding('utf8');
   child.stderr?.on('data', (chunk: string) => {
@@ -248,6 +319,7 @@ async function runCodexProcess(
     stderr += chunk;
     appendTranscript(chunk);
     stderrLineBuffer = consumeLines(stderrLineBuffer, chunk);
+    requestPreemptCheck();
   });
 
   let exit: { code: number | null; signal: NodeJS.Signals | null };
@@ -261,15 +333,23 @@ async function runCodexProcess(
     clearInterval(heartbeat);
     await transcriptChain;
     await progressChain;
+    await preemptChain;
     throw new CodexRunError(`codex exec failed to start: ${error instanceof Error ? error.message : String(error)}`, cloneUsageSummary(usage));
   }
 
   clearInterval(watchdog);
   clearInterval(heartbeat);
-  if (stdoutLineBuffer) consumeCodexLine(stdoutLineBuffer, usage, scheduleProgress);
-  if (stderrLineBuffer) consumeCodexLine(stderrLineBuffer, usage, scheduleProgress);
+  if (stdoutLineBuffer) {
+    const eventType = consumeCodexLine(stdoutLineBuffer, usage, scheduleProgress);
+    if (isMeaningfulCodexEvent(eventType)) firstMeaningfulEventAt ??= Date.now();
+  }
+  if (stderrLineBuffer) {
+    const eventType = consumeCodexLine(stderrLineBuffer, usage, scheduleProgress);
+    if (isMeaningfulCodexEvent(eventType)) firstMeaningfulEventAt ??= Date.now();
+  }
   await transcriptChain;
   await progressChain;
+  await preemptChain;
 
   if (transcriptError) {
     throw transcriptError;
@@ -277,10 +357,22 @@ async function runCodexProcess(
   if (progressError) {
     throw progressError;
   }
+  if (preemptError) {
+    throw preemptError;
+  }
+  if (preempted) {
+    throw new ExecutorPreemptedError('Codex executor preempted to apply pending Chat input', cloneUsageSummary(usage));
+  }
 
   const all = `${stdout}${stderr}`;
   if (timeoutReason === 'hard') {
     throw new CodexRunError(`Codex executor exceeded hard timeout after ${durationLabel(hardTimeoutMs)}`, cloneUsageSummary(usage));
+  }
+  if (timeoutReason === 'no_meaningful_event') {
+    throw new CodexRunError(
+      `Codex executor produced no actionable event after ${durationLabel(firstMeaningfulEventTimeoutMs)}; restarting via resume`,
+      cloneUsageSummary(usage)
+    );
   }
   if (timeoutReason === 'idle') {
     throw new CodexRunError(`Codex executor timed out after ${durationLabel(idleTimeoutMs)} without stdout/stderr output`, cloneUsageSummary(usage));
@@ -300,12 +392,18 @@ function consumeCodexLine(
   line: string,
   usage: ExecutorProgress['usage'],
   scheduleProgress: (progress: Omit<ExecutorProgress, 'usage' | 'wallMs' | 'idleMs'>) => void
-): void {
+): string | undefined {
   const delta = parseCodexRunEvents(line);
   mergeUsageSummary(usage, delta);
+  const eventType = codexEventType(line);
   if (delta.events > 0 || delta.parse_errors) {
-    scheduleProgress({ kind: 'event', eventType: codexEventType(line) });
+    scheduleProgress({ kind: 'event', eventType });
   }
+  return eventType;
+}
+
+function isMeaningfulCodexEvent(eventType: string | undefined): boolean {
+  return Boolean(eventType && eventType !== 'thread.started');
 }
 
 function emptyUsageSummary(): ExecutorProgress['usage'] {

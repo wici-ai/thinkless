@@ -6,7 +6,7 @@ import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, LedgerEntr
 import { hashFile, iterationSnapshotPath, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
 import { applyInjections, drainInbox, drainPendingInjectionsById, injectionIds, readPendingInjections } from './inbox.js';
-import { runExecutorStep, type ExecutorProgress } from './executor.js';
+import { isExecutorPreempted, runExecutorStep, type ExecutorProgress } from './executor.js';
 import {
   lockEvalScripts,
   runInitialPlanner,
@@ -892,7 +892,8 @@ async function runDirectPlanExecution(
             mode: 'direct',
             progress
           });
-        }
+        },
+        shouldPreempt: () => hasPendingChatInput(paths, checkpoint)
       });
       checkpoint.sessions.executor = iterResult.invocation.sessionId ?? checkpoint.sessions.executor;
       await events.emit('EXECUTE_DONE', iterResult.notes, {
@@ -958,6 +959,49 @@ async function runDirectPlanExecution(
       steerText = undefined;
       if (options.once) break;
     } catch (error) {
+      if (isExecutorPreempted(error)) {
+        const usage = error.usage;
+        const reason = errorMessage(error);
+        await events.emit('EXECUTE_PREEMPTED', reason, usage ? { usage, mode: 'direct' } : { mode: 'direct' }, 'warn');
+        await revertToBest(paths, checkpoint.best_commit ?? 'NO_HEAD');
+        await setPlanStepStatus(paths, step.id, 'pending', nextIter);
+        const ledgerEntry = directLedgerEntry({
+          iter: nextIter,
+          stepId: step.id,
+          status: 'preempted',
+          commit: checkpoint.best_commit ?? null,
+          wallMs: Date.now() - iterationStarted,
+          usage,
+          notes: 'Executor preempted at the next Codex output/heartbeat to apply pending Chat input.',
+          stepDone: false,
+          testsPass: false,
+          changedFiles: []
+        });
+        await appendLedger(paths, ledgerEntry);
+        await refreshContextSummary(paths, goal, events);
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'REFLECT',
+          next_step: step.id,
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq,
+          plan_hash: await hashFile(paths.plan)
+        };
+        await saveCheckpoint(paths, checkpoint);
+        if (await hasChanges(paths)) {
+          const stateCommit = await commitAll(paths, `chore: record WiCi direct preemption ${nextIter} ${step.id}`);
+          await events.emit('GIT_COMMIT', `Created direct preemption checkpoint ${stateCommit.slice(0, 7)}`, {
+            commit: stateCommit,
+            iter: nextIter,
+            step_id: step.id,
+            mode: 'direct_preempt'
+          });
+          await tagBest(paths);
+        }
+        steerText = undefined;
+        if (options.once) break;
+        continue;
+      }
       const usage = codexUsageFromError(error);
       const reason = errorMessage(error);
       await events.emit('EXECUTE_RECOVERABLE_FAILURE', reason, usage ? { usage, mode: 'direct' } : { mode: 'direct' }, 'warn');
@@ -1882,6 +1926,10 @@ async function hardBackstop(paths: ReturnType<typeof runPaths>, goal: GoalFile):
   }
 
   return null;
+}
+
+async function hasPendingChatInput(paths: ReturnType<typeof runPaths>, checkpoint: Checkpoint): Promise<boolean> {
+  return (await readPendingInjections(paths, checkpoint.drained_inbox)).length > 0;
 }
 
 function withLessons(text: string, lessonsText: string): string {

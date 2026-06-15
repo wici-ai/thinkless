@@ -63,9 +63,12 @@ async function main(): Promise<void> {
   }
 
   const secondPrompt = await readFile(join(paths.artifacts, 'iter-2.prompt.txt'), 'utf8');
-  assert(secondPrompt.includes('Continue executing the current GOAL.md and PLAN.md as one Codex goal.'), 'resume prompt must treat GOAL.md and PLAN.md as one Codex goal');
+  assert(secondPrompt.includes('Continue the existing Codex session for this WiCi run.'), 'resume prompt must continue the existing Codex session');
   assert(secondPrompt.includes('Supervisor receipt focus: S2.'), 'resume prompt missing supervisor receipt focus');
-  assert(secondPrompt.includes('NOTE new requirement or steering input: new operator steering'), 'resume prompt missing steering text');
+  assert(secondPrompt.includes('GOAL.md and PLAN.md have already been updated on disk'), 'resume prompt must tell Codex to re-read updated disk files');
+  assert(secondPrompt.includes('New requirement or steering delta to apply now:\nnew operator steering'), 'resume prompt missing steering delta');
+  assert(!secondPrompt.includes('Current PLAN.md:'), 'resume prompt should not inline the full PLAN.md');
+  assert(secondPrompt.length < 4_000, `resume prompt should stay compact, got ${secondPrompt.length} chars`);
   assert(secondPrompt.includes('remember prior accepted patch'), 'resume prompt missing retrieved memory');
 
   const secondLastMessage = await readFile(join(paths.artifacts, 'iter-2.txt'), 'utf8');
@@ -76,6 +79,7 @@ async function main(): Promise<void> {
   assert(transcript.includes('"item.completed"'), 'codex transcript missing item.completed event');
 
   await verifyIdleWatchdog(paths);
+  await verifyFirstMeaningfulEventWatchdog(paths);
 
   console.log(
     JSON.stringify(
@@ -93,6 +97,43 @@ async function main(): Promise<void> {
       2
     )
   );
+}
+
+async function verifyFirstMeaningfulEventWatchdog(paths: ReturnType<typeof runPaths>): Promise<void> {
+  const threadOnlyCodex = join(paths.wici, 'fake-thread-only-codex.mjs');
+  await atomicWriteFile(threadOnlyCodex, threadOnlyCodexScript(), 0o755);
+  await chmod(threadOnlyCodex, 0o755);
+
+  let error: unknown;
+  try {
+    await runExecutorStep(
+      paths,
+      goal(),
+      'S1',
+      1,
+      {
+        ...testConfig(threadOnlyCodex),
+        tools: {
+          ...testConfig(threadOnlyCodex).tools,
+          mode: 'real'
+        }
+      },
+      undefined,
+      undefined,
+      {
+      artifactId: 'thread-only-1',
+      firstMeaningfulEventTimeoutMs: 500,
+      idleTimeoutMs: 2_000,
+      hardTimeoutMs: 5_000,
+      heartbeatMs: 25
+      }
+    );
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert(error instanceof Error, 'thread-only fake codex should fail before the long idle timeout');
+  assert(error.message.includes('no actionable event'), `unexpected thread-only fake codex error: ${error.message}`);
 }
 
 async function verifyIdleWatchdog(paths: ReturnType<typeof runPaths>): Promise<void> {
@@ -203,6 +244,13 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'message', it
 
 function hangingCodexScript(): string {
   return `#!/usr/bin/env node
+setInterval(() => {}, 1000);
+`;
+}
+
+function threadOnlyCodexScript(): string {
+  return `#!/usr/bin/env node
+console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-thread' }));
 setInterval(() => {}, 1000);
 `;
 }

@@ -12,6 +12,9 @@ import { writeInjection } from './inbox.js';
 const CHAT_IDLE_TIMEOUT_MS = 2 * 60_000;
 const CHAT_HARD_TIMEOUT_MS = 5 * 60_000;
 const RECENT_EVENT_LINES = 12;
+const CHAT_PLAN_MAX_CHARS = 6_000;
+const CHAT_GOAL_MAX_CHARS = 4_000;
+const CHAT_EVENT_MESSAGE_MAX_CHARS = 240;
 
 export interface ChatUpdate {
   kind: 'add_requirement' | 'steer';
@@ -116,14 +119,56 @@ function buildChatPrompt(ctx: ChatTurnContext): string {
   const events =
     ctx.recentEvents
       .slice(-RECENT_EVENT_LINES)
-      .map((event) => `${event.ts.slice(11, 19)} ${event.type} ${event.message}`)
+      .map((event) => `${event.ts.slice(11, 19)} ${event.type} ${truncateForChat(event.message, CHAT_EVENT_MESSAGE_MAX_CHARS)}`)
       .join('\n') || '(no run events yet)';
   return [
     `User message:\n${ctx.userText}`,
-    `\nCurrent GOAL.md:\n${ctx.goalDoc.trim() || '(none yet)'}`,
-    `\nCurrent PLAN.md:\n${ctx.plan.trim() || '(none yet)'}`,
+    `\nCurrent GOAL.md:\n${truncateForChat(ctx.goalDoc.trim(), CHAT_GOAL_MAX_CHARS) || '(none yet)'}`,
+    `\nCurrent PLAN.md summary:\n${summarizePlanForChat(ctx.plan)}`,
     `\nRecent run events:\n${events}`
   ].join('\n');
+}
+
+export function summarizePlanForChat(plan: string, maxChars = CHAT_PLAN_MAX_CHARS): string {
+  const trimmed = plan.trim();
+  if (!trimmed) return '(none yet)';
+  if (trimmed.length <= maxChars) return trimmed;
+
+  const lines = trimmed.split('\n');
+  const summary: string[] = [];
+  let inStep = false;
+  let stepDetailLines = 0;
+
+  for (const line of lines) {
+    if (/^#/.test(line)) {
+      summary.push(line);
+      inStep = false;
+      stepDetailLines = 0;
+      continue;
+    }
+    if (/^\s*- \[[ x>!]\]\s+S\d+/i.test(line)) {
+      summary.push(line);
+      inStep = true;
+      stepDetailLines = 0;
+      continue;
+    }
+    if (inStep && /^\s+(Action|Validation|Rollback|Setup\/prereqs):/i.test(line) && stepDetailLines < 2) {
+      summary.push(line);
+      stepDetailLines += 1;
+      continue;
+    }
+    if (!inStep && summary.length < 24 && line.trim()) {
+      summary.push(truncateForChat(line, 320));
+    }
+  }
+
+  const compact = summary.join('\n').trim();
+  return truncateForChat(compact || trimmed, maxChars);
+}
+
+function truncateForChat(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 80)).trimEnd()}\n[truncated ${text.length - maxChars} chars; inspect files directly for exact contents]`;
 }
 
 interface ParsedChat {

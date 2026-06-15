@@ -7,6 +7,7 @@ import { ExecPane } from './ExecPane.js';
 import { useRunState } from './useRunState.js';
 import { runSupervisor } from '../supervisor/index.js';
 import type { RunOptions, ToolMode } from '../shared/types.js';
+import { enableMouseReporting } from './input.js';
 
 export interface TuiSupervisorOptions {
   enabled: boolean;
@@ -30,6 +31,11 @@ export function App({
   const { stdout } = useStdout();
   const { focus, focusNext, focusPrevious } = useFocusManager();
   const height = stdout.rows || 32;
+  const width = stdout.columns || 120;
+  const paneHeight = Math.max(6, height - 4);
+  const chatContentWidth = Math.max(16, Math.floor(width * 0.28) - 4);
+  const goalContentWidth = Math.max(20, Math.floor(width * 0.34) - 4);
+  const execContentWidth = Math.max(24, width - Math.floor(width * 0.28) - Math.floor(width * 0.34) - 8);
   const startedRef = useRef(false);
   const [started, setStarted] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -69,6 +75,11 @@ export function App({
     launchSupervisor(undefined);
   }, [launchSupervisor, state.goal, state.checkpoint?.supervisor_state, supervisor.enabled, supervisor.initialGoal]);
 
+  useEffect(() => {
+    if (!interactive) return;
+    return enableMouseReporting(stdout);
+  }, [interactive, stdout]);
+
   useInput((_input, key) => {
     if (key.escape) focus('chat');
     else if (key.tab && key.shift) focusPrevious();
@@ -97,6 +108,8 @@ export function App({
             events={state.events}
             chat={state.chat}
             mode={supervisor.mode}
+            contentWidth={chatContentWidth}
+            viewportHeight={Math.max(3, paneHeight - 3)}
             acceptInitialGoal={acceptInitialGoal}
             onInitialGoal={(goal) => launchSupervisor(goal, 'tui_chat')}
             onInjection={() => launchSupervisor(undefined)}
@@ -104,10 +117,10 @@ export function App({
           />
         </Box>
         <Box width="34%" borderStyle="round" borderColor="magenta">
-          <GoalPane state={state} />
+          <GoalPane state={state} contentWidth={goalContentWidth} viewportHeight={Math.max(4, paneHeight - 2)} />
         </Box>
         <Box flexGrow={1} borderStyle="round" borderColor="green">
-          <ExecPane state={state} />
+          <ExecPane state={state} contentWidth={execContentWidth} viewportHeight={Math.max(4, paneHeight - 3)} />
         </Box>
       </Box>
     </Box>

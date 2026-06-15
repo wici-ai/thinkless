@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { Box, Text, useFocus } from 'ink';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Text, useFocus, useInput } from 'ink';
 import type { RunState } from './useRunState.js';
+import { mouseScrollDelta } from './input.js';
+import { PAGE_SIZE, scrollBy, viewport, wrapLines } from './viewport.js';
 
 interface PlanLineView {
   text: string;
@@ -14,41 +16,67 @@ export interface PlanDiffView {
   changed: boolean;
 }
 
-export const GoalPane = React.memo(function GoalPane({ state }: { state: RunState }) {
+export const GoalPane = React.memo(function GoalPane({
+  state,
+  contentWidth = 42,
+  viewportHeight = 18
+}: {
+  state: RunState;
+  contentWidth?: number;
+  viewportHeight?: number;
+}) {
   const { isFocused } = useFocus({ id: 'goal' });
   const goal = state.goal;
-  const goalLines = state.goalDoc.split('\n').filter(Boolean).slice(0, 12);
   const previousPlan = useRef(state.plan);
-  const diff = useMemo(() => buildPlanDiffView(previousPlan.current, state.plan, 34), [state.plan]);
+  const diff = useMemo(() => buildPlanDiffView(previousPlan.current, state.plan), [state.plan]);
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const displayLines = useMemo(
+    () =>
+      wrapLines(
+        [
+          ...(state.goalDoc ? state.goalDoc.replace(/^```markdown\n?|\n?```\n?$/g, '').split('\n') : []),
+          ...(state.goalDoc || state.plan ? ['', '--- PLAN.md ---'] : []),
+          ...(state.plan ? state.plan.replace(/^```markdown\n?|\n?```\n?$/g, '').split('\n') : [])
+        ],
+        contentWidth
+      ),
+    [contentWidth, state.goalDoc, state.plan]
+  );
+  const view = viewport(displayLines, scrollOffset, viewportHeight);
 
   useEffect(() => {
     previousPlan.current = state.plan;
   }, [state.plan]);
 
+  useInput((input, key) => {
+    const wheel = mouseScrollDelta(input);
+    if (wheel !== 0) setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
+    else if (key.upArrow || input === 'k') setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
+    else if (key.downArrow || input === 'j') setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
+    else if (key.pageUp || input === 'u') setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
+    else if (key.pageDown || input === 'd') setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
+    else if (key.home || input === 'g') setScrollOffset(view.maxScroll);
+    else if (key.end || input === 'G') setScrollOffset(0);
+  }, { isActive: isFocused });
+
   return (
     <Box flexDirection="column" height="100%" paddingX={1}>
       <Text bold color={isFocused ? 'magentaBright' : 'magenta'}>
-        热 GOAL {goal ? `v${goal.version}` : ''}{diff.changed ? ` Δ +${diff.added} -${diff.removed}` : ''}
+        GOAL / PLAN {goal ? `v${goal.version}` : ''}{diff.changed ? ` d +${diff.added} -${diff.removed}` : ''}
       </Text>
-      <Box flexDirection="column">
-        {goalLines.map((line, index) => (
-          <Text key={`${index}-${line}`} color={goalLineColor(line)}>
-            {line.length > 72 ? `${line.slice(0, 69)}...` : line}
+      <Box flexDirection="column" flexGrow={1}>
+        {view.lines.map((line, index) => (
+          <Text key={`${view.start + index}-${line}`} color={goalLineColor(line)}>
+            {line || ' '}
           </Text>
         ))}
       </Box>
-      <Box flexDirection="column" marginTop={1}>
-        {diff.lines.map((line, index) => (
-          <Text key={`${index}-${line.text}`} color={planLineColor(line)}>
-            {line.added ? '+ ' : '  '}{line.text.length > 70 ? `${line.text.slice(0, 67)}...` : line.text}
-          </Text>
-        ))}
-      </Box>
+      <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>{view.end}/{displayLines.length || 0}</Text>
     </Box>
   );
 });
 
-export function buildPlanDiffView(previousPlan: string, currentPlan: string, limit: number): PlanDiffView {
+export function buildPlanDiffView(previousPlan: string, currentPlan: string, limit = Number.POSITIVE_INFINITY): PlanDiffView {
   const previous = planLines(previousPlan);
   const current = planLines(currentPlan);
   const remainingPrevious = counts(previous);
@@ -93,18 +121,14 @@ function counts(lines: string[]): Map<string, number> {
   return output;
 }
 
-function planLineColor(line: PlanLineView): string {
-  if (line.added) return 'greenBright';
-  if (line.text.includes('[>]')) return 'cyan';
-  if (line.text.includes('[x]')) return 'green';
-  if (line.text.includes('[!]')) return 'yellow';
-  return 'white';
-}
-
 function goalLineColor(line: string): string {
   if (line.startsWith('#')) return 'magentaBright';
+  if (line.includes('[>]')) return 'cyan';
+  if (line.includes('[x]')) return 'green';
+  if (line.includes('[!]')) return 'yellow';
   if (line.includes('[dropped]')) return 'gray';
   if (line.includes('[active]')) return 'white';
+  if (line === '--- PLAN.md ---') return 'magenta';
   if (line.startsWith('-')) return 'gray';
   return 'white';
 }

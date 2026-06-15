@@ -4,6 +4,8 @@ import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
 import { runChatTurn } from '../supervisor/chatAgent.js';
 import type { ChatLogEntry, GoalFile, Injection, OutboxMessage, RunEvent, ToolMode } from '../shared/types.js';
+import { mouseScrollDelta } from './input.js';
+import { PAGE_SIZE, scrollBy, viewport, wrapLines } from './viewport.js';
 
 export function ChatPane({
   target,
@@ -16,6 +18,8 @@ export function ChatPane({
   events = [],
   chat = [],
   mode,
+  contentWidth = 32,
+  viewportHeight = 12,
   acceptInitialGoal = false,
   onInitialGoal,
   onInjection,
@@ -31,6 +35,8 @@ export function ChatPane({
   events?: RunEvent[];
   chat?: ChatLogEntry[];
   mode?: ToolMode;
+  contentWidth?: number;
+  viewportHeight?: number;
   acceptInitialGoal?: boolean;
   onInitialGoal?: (text: string) => void;
   onInjection?: () => void;
@@ -42,6 +48,21 @@ export function ChatPane({
   const [lines, setLines] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const history = buildChatHistory(outbox, injections, goal, chat);
+  const displayLines = wrapLines(
+    [
+      ...history.map((line) => line.text),
+      ...outbox
+        .filter((message) => !message.answered)
+        .slice(-5)
+        .map((message) => `${message.kind}${message.answered ? ' answered' : ''}: ${message.text}`),
+      ...(systemLine ? [systemLine] : []),
+      ...lines,
+      ...(busy ? ['chatting'] : [])
+    ],
+    contentWidth
+  );
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const view = viewport(displayLines, scrollOffset, viewportHeight);
 
   const setInputValue = (next: string) => {
     valueRef.current = next;
@@ -49,6 +70,7 @@ export function ChatPane({
   };
 
   const submit = async (raw: string) => {
+    if (busy) return;
     const text = raw.trim();
     if (!text) return;
     setInputValue('');
@@ -96,6 +118,35 @@ export function ChatPane({
 
   useInput((input, key) => {
     if (!interactive) return;
+    const wheel = mouseScrollDelta(input);
+    if (wheel !== 0) {
+      setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
+      return;
+    }
+    if (key.upArrow) {
+      setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
+      return;
+    }
+    if (key.downArrow) {
+      setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
+      return;
+    }
+    if (key.pageUp) {
+      setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
+      return;
+    }
+    if (key.pageDown) {
+      setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
+      return;
+    }
+    if (key.home) {
+      setScrollOffset(view.maxScroll);
+      return;
+    }
+    if (key.end) {
+      setScrollOffset(0);
+      return;
+    }
     if (key.return || input === '\r' || input === '\n') {
       void submit(valueRef.current);
       return;
@@ -116,7 +167,7 @@ export function ChatPane({
     if (input) {
       setInputValue(valueRef.current + input);
     }
-  }, { isActive: interactive });
+  }, { isActive: interactive && isFocused });
 
   return (
     <Box flexDirection="column" height="100%" paddingX={1}>
@@ -124,24 +175,15 @@ export function ChatPane({
         CHAT
       </Text>
       <Box flexDirection="column" flexGrow={1}>
-        {history.map((line) => (
-          <Text key={line.id} color={line.color}>
-            {line.text}
+        {view.lines.map((line, index) => (
+          <Text key={`${view.start + index}-${line}`} color={chatLineColor(line)}>
+            {line || ' '}
           </Text>
         ))}
-        {outbox.filter((message) => !message.answered).slice(-5).map((message) => (
-          <Text key={message.id} color={message.kind === 'error' ? 'red' : message.kind === 'stop_verdict' ? 'yellow' : 'cyan'}>
-            {message.kind}{message.answered ? ' answered' : ''}: {message.text.length > 52 ? `${message.text.slice(0, 49)}...` : message.text}
-          </Text>
-        ))}
-        {systemLine ? <Text color="red">{systemLine.length > 52 ? `${systemLine.slice(0, 49)}...` : systemLine}</Text> : null}
-        {lines.map((line, index) => (
-          <Text key={`${index}-${line}`} color="gray">
-            {line}
-          </Text>
-        ))}
-        {busy ? <Text color="cyan">· chatting…</Text> : null}
       </Box>
+      <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>
+        {view.end}/{displayLines.length || 0}
+      </Text>
       <Box>
         <Text color={isFocused ? 'cyan' : 'gray'}>{'>'} </Text>
         <Text color={isFocused && interactive ? 'white' : 'gray'}>{value || ' '}</Text>
@@ -188,7 +230,7 @@ export function buildChatHistory(
   injections: Injection[],
   goal: GoalFile | null = null,
   chat: ChatLogEntry[] = [],
-  limit = 12
+  limit = 80
 ): ChatHistoryLine[] {
   const initialGoalLines = (goal?.requirements ?? [])
     .filter((requirement) => requirement.source === 'initial')
@@ -246,5 +288,14 @@ function labelForInjection(injection: Injection): string {
 }
 
 function clip(text: string): string {
-  return text.length > 72 ? `${text.slice(0, 69)}...` : text;
+  return text;
+}
+
+function chatLineColor(line: string): string {
+  if (line.startsWith('claude:') || line === 'chatting') return 'cyanBright';
+  if (line.startsWith('you:')) return 'white';
+  if (line.startsWith('question') || line.startsWith('planner:')) return 'cyan';
+  if (line.startsWith('error')) return 'red';
+  if (line.startsWith('stop_verdict')) return 'yellow';
+  return 'gray';
 }

@@ -14,6 +14,7 @@ export interface RunState {
   goalDoc: string;
   plan: string;
   events: RunEvent[];
+  codexTranscript: string[];
   outbox: OutboxMessage[];
   injections: Injection[];
   chat: ChatLogEntry[];
@@ -29,6 +30,7 @@ function emptyRunState(target: string): RunState {
     goalDoc: '',
     plan: '',
     events: [],
+    codexTranscript: [],
     outbox: [],
     injections: [],
     chat: []
@@ -71,7 +73,7 @@ export function useRunState(target: string): RunState {
     poller = setInterval(() => {
       void load();
     }, 1500);
-    const watcher = chokidar.watch([paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone, paths.chat], {
+    const watcher = chokidar.watch([paths.events, paths.codexRun, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone, paths.chat], {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 40, pollInterval: 20 }
     });
@@ -83,7 +85,7 @@ export function useRunState(target: string): RunState {
       if (poller) clearInterval(poller);
       void watcher.close();
     };
-  }, [paths.target, paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone, paths.chat]);
+  }, [paths.target, paths.events, paths.codexRun, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone, paths.chat]);
 
   return state;
 }
@@ -93,6 +95,7 @@ export function useRunState(target: string): RunState {
 // questions and applied injections still refresh the Chat pane.
 export function stateSignature(state: RunState): string {
   const lastEvent = state.events.at(-1);
+  const lastCodex = state.codexTranscript.at(-1);
   const lastLedger = state.ledger.at(-1);
   const lastOutbox = state.outbox.at(-1);
   const lastInjection = state.injections.at(-1);
@@ -106,6 +109,7 @@ export function stateSignature(state: RunState): string {
     `g${state.goalDoc.length}`,
     `p${state.plan.length}`,
     `e${state.events.length}:${lastEvent?.seq ?? lastEvent?.ts ?? ''}`,
+    `x${state.codexTranscript.length}:${lastCodex?.length ?? 0}:${lastCodex?.slice(0, 20) ?? ''}`,
     `l${state.ledger.length}:${lastLedger?.id ?? ''}`,
     `o${state.outbox.length}:${answered}:${lastOutbox?.id ?? ''}`,
     `i${state.injections.length}:${applied}:${lastInjection?.id ?? ''}`,
@@ -115,7 +119,7 @@ export function stateSignature(state: RunState): string {
 
 async function readState(target: string): Promise<RunState> {
   const paths = runPaths(target);
-  const [goal, checkpoint, baseline, ledger, goalDoc, plan, events, outbox, injections, chat] = await Promise.all([
+  const [goal, checkpoint, baseline, ledger, goalDoc, plan, events, codexTranscript, outbox, injections, chat] = await Promise.all([
     readJsonMaybe<GoalFile>(paths.goal),
     readJsonMaybe<Checkpoint>(paths.checkpoint),
     readJsonMaybe<BaselineFile>(paths.baseline),
@@ -123,6 +127,7 @@ async function readState(target: string): Promise<RunState> {
     readTextMaybe(paths.goalDoc),
     readTextMaybe(paths.plan),
     readJsonLinesMaybe<RunEvent>(paths.events),
+    readRawLinesMaybe(paths.codexRun, 600),
     readOutboxMessages(paths.outbox),
     readInjectionHistory(paths.inbox, paths.inboxDone),
     readChatLog(paths.chat)
@@ -136,10 +141,16 @@ async function readState(target: string): Promise<RunState> {
     goalDoc,
     plan,
     events,
+    codexTranscript,
     outbox,
     injections,
     chat
   };
+}
+
+async function readRawLinesMaybe(path: string, limit: number): Promise<string[]> {
+  const raw = await readTextMaybe(path);
+  return raw.split('\n').filter((line) => line.trim()).slice(-limit);
 }
 
 async function readChatLog(path: string): Promise<ChatLogEntry[]> {
