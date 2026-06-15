@@ -5,6 +5,8 @@ import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import type { BaselineFile } from '../shared/types.js';
 
+process.env.WICI_LEGACY_OPTIMIZER = '1';
+
 async function main(): Promise<void> {
   const measure = await runTamperScenario(resolve('fixture/tamper-target'), async (paths) => {
     await chmod(paths.measure, 0o755);

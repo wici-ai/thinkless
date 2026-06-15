@@ -59,11 +59,11 @@ function formatContextSummary(
     `- target: ${paths.target}`,
     '- goal: GOAL.md',
     '- plan: PLAN.md',
-    '- frozen acceptance spec: acceptance.spec.json',
     '- public ledger: ledger.jsonl',
     '- executor artifacts: .wici/artifacts/',
-    '- locked eval scripts: .opt/checks.sh and .opt/measure.sh',
-    '- benchmark selection: .opt/benchmark.json',
+    '- optional planner scripts: .opt/checks.sh and .opt/measure.sh',
+    '- optional planner benchmark note: .opt/benchmark.json',
+    '- legacy optimizer acceptance spec, only if present: acceptance.spec.json',
     '- periodic goal checks: .wici/goal-interrogations.jsonl',
     '- automatic curriculum: .wici/curriculum.jsonl',
     '',
@@ -90,7 +90,7 @@ function formatCurriculum(entry: CurriculumEntry): string[] {
     `- id: ${entry.id}`,
     `- iter: ${entry.iter}`,
     `- saturated_step_id: ${entry.saturated_step_id}`,
-    `- avenue: ${singleLine(entry.avenue)}`,
+    `- branch_reason: ${singleLine(entry.branch_reason)}`,
     `- parent_ledger_id: ${entry.parent_ledger_id ?? 'none'}`,
     `- sub_goal: ${singleLine(entry.sub_goal)}`
   ];

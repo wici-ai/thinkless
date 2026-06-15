@@ -2,6 +2,7 @@ import { execa } from 'execa';
 import { appendJsonLine, readJsonLines } from '../shared/atomic.js';
 import type { LedgerEntry, LessonEntry, WiCiConfig } from '../shared/types.js';
 import type { RunPaths } from '../shared/paths.js';
+import { isClaudeEnvelope, parseClaudeJsonOutput, parseJsonObjectFromText } from './claudeOutput.js';
 
 export async function appendLessonFromLedger(paths: RunPaths, entry: LedgerEntry, config?: WiCiConfig): Promise<LessonEntry | null> {
   if (!isMeasuredReject(entry)) return null;
@@ -55,12 +56,12 @@ async function reflectMeasuredReject(
           ].join('\n'),
           '--output-format',
           'json',
-          '--dangerously-skip-permissions'
+          '--permission-mode',
+          'plan'
         ],
         { cwd: paths.target, reject: true, all: true, maxBuffer: 1024 * 1024 * 5 }
       );
-      const parsed = JSON.parse(result.stdout) as { lesson?: string; structured_output?: { lesson?: string } };
-      const lesson = compactLesson(parsed.structured_output?.lesson ?? parsed.lesson);
+      const lesson = compactLesson(extractLesson(result.stdout));
       if (lesson) return { lesson, author: 'claude' };
     } catch (error) {
       if (config.tools.mode === 'real') throw error;
@@ -72,12 +73,36 @@ async function reflectMeasuredReject(
 
 function deterministicMeasuredRejectLesson(entry: LedgerEntry): string {
   const delta = typeof entry.delta_pct === 'number' ? ` delta=${(entry.delta_pct * 100).toFixed(2)}%` : '';
-  return `Measured verifier rejected ${entry.hypothesis}.${delta} Do not repeat this avenue without a new hypothesis; address: ${entry.reflection}.`;
+  return `Measured verifier rejected ${entry.hypothesis}.${delta} Do not repeat this direction without a new hypothesis; address: ${entry.reflection}.`;
+}
+
+function extractLesson(raw: string): string | undefined {
+  const parsed = parseClaudeJsonOutput(raw);
+  for (const item of [...parsed].reverse()) {
+    const lesson = lessonFromCandidate(item);
+    if (lesson) return lesson;
+  }
+  return undefined;
+}
+
+function lessonFromCandidate(candidate: unknown): string | null {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const direct = candidate as { lesson?: unknown; structured_output?: unknown };
+  if (typeof direct.lesson === 'string') return direct.lesson;
+  if (direct.structured_output) {
+    const structured = lessonFromCandidate(direct.structured_output);
+    if (structured) return structured;
+  }
+  if (!isClaudeEnvelope(candidate) || candidate.result === undefined || candidate.result === null) return null;
+  if (typeof candidate.result === 'object') return lessonFromCandidate(candidate.result);
+  if (typeof candidate.result !== 'string') return null;
+  const parsed = parseJsonObjectFromText(candidate.result);
+  return parsed ? lessonFromCandidate(parsed) : null;
 }
 
 function isMeasuredReject(entry: LedgerEntry): boolean {
   if (entry.status !== 'reject' && entry.status !== 'revert') return false;
-  return Boolean(entry.metric || typeof entry.guards.prescreen_p99 === 'number' || typeof entry.guards.heldout_p99 === 'number');
+  return Boolean(entry.metric || typeof entry.guards.prescreen_value === 'number' || typeof entry.guards.heldout_value === 'number');
 }
 
 function compactLesson(value: string | undefined): string | null {

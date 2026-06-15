@@ -1,11 +1,16 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
-import { runPaths } from '../shared/paths.js';
+import { ensureRunDirs, runPaths } from '../shared/paths.js';
 import type { GoalFile, WiCiConfig } from '../shared/types.js';
 import { runExecutorStep } from '../supervisor/executor.js';
+import { ensureGitRepo } from '../supervisor/gitgate.js';
 import { runInitialPlanner, runPlanDiff } from '../supervisor/planner.js';
 
 const target = resolve('fixture/real-mode-target');
+const emptyTarget = resolve('fixture/real-mode-empty-target');
+const nonGitTarget = resolve('fixture/real-mode-non-git-target');
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
@@ -13,21 +18,52 @@ async function main(): Promise<void> {
   const config = fakeRealConfig();
   const goal = fakeGoal();
 
+  await verifyFreshTargetGitInit(config);
+  await verifyNonEmptyNonGitTargetRejected(config);
+
   await expectRejects(() => runInitialPlanner(paths, goal, config), 'Planner command not found in real mode');
   await expectRejects(() => runPlanDiff(paths, goal, undefined, 'new requirement', config), 'Planner command not found in real mode');
   await expectRejects(() => runExecutorStep(paths, goal, 'S1', 1, config), 'Executor command not found in real mode');
 
   console.log(
     JSON.stringify(
-      {
-        ok: true,
-        target,
-        real_mode_does_not_fallback_to_stub: true
-      },
+        {
+          ok: true,
+          target,
+          fresh_target_git_init: true,
+          non_empty_non_git_rejected: true,
+          real_mode_does_not_fallback_to_stub: true
+        },
       null,
       2
     )
   );
+}
+
+async function verifyFreshTargetGitInit(config: WiCiConfig): Promise<void> {
+  await rm(emptyTarget, { recursive: true, force: true });
+  try {
+    const paths = runPaths(emptyTarget);
+    await ensureRunDirs(paths);
+    await ensureGitRepo(paths, config);
+    const result = await execa('git', ['-C', emptyTarget, 'rev-parse', '--show-toplevel']);
+    if (resolve(result.stdout.trim()) !== emptyTarget) throw new Error('fresh WiCi target was not initialized as a git top-level');
+  } finally {
+    await rm(emptyTarget, { recursive: true, force: true });
+  }
+}
+
+async function verifyNonEmptyNonGitTargetRejected(config: WiCiConfig): Promise<void> {
+  await rm(nonGitTarget, { recursive: true, force: true });
+  try {
+    await mkdir(nonGitTarget, { recursive: true });
+    await writeFile(`${nonGitTarget}/user-file.txt`, 'user owned file\n');
+    const paths = runPaths(nonGitTarget);
+    await ensureRunDirs(paths);
+    await expectRejects(() => ensureGitRepo(paths, config), 'Target is not a git repository');
+  } finally {
+    await rm(nonGitTarget, { recursive: true, force: true });
+  }
 }
 
 function fakeRealConfig(): WiCiConfig {
@@ -36,7 +72,7 @@ function fakeRealConfig(): WiCiConfig {
       mode: 'real',
       planner: {
         command: 'definitely-missing-claude-for-wici-test',
-        effort: 'max'
+        effort: 'default'
       },
       executor: {
         command: 'definitely-missing-codex-for-wici-test',
@@ -58,9 +94,6 @@ function fakeRealConfig(): WiCiConfig {
       max_attempts_per_step: 2,
       reverts_before_reset: 5,
       stall_replan_after: 3
-    },
-    diversity: {
-      avenues: ['algorithmic complexity', 'data structure change']
     },
     evaluation: {
       noise_threshold: 0.01,
@@ -88,7 +121,7 @@ function fakeGoal(): GoalFile {
     requirements: [{ id: 'R1', text: 'test real mode fallback', source: 'initial', status: 'active' }],
     acceptance_criteria: [],
     constraints: [],
-    metric: { name: 'p99', direction: 'minimize', target: null, unit: 'ms' },
+    metric: { name: 'fixture runtime', direction: 'minimize', target: null, unit: 'ms' },
     budget: { max_iters: 3, max_cost_usd: 1, deadline: null },
     stop: { tau: 0.01, K: 3, N: 4, mode: 'auto' }
   };

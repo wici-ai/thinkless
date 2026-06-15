@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { Checkpoint } from '../shared/types.js';
 import {
   assertNoActiveToolVersionDrift,
-  assertNoPendingToolUpdatesForLongRun,
+  parseCodexDoctorError,
   parseCodexUpdatePending,
   toolVersionsFromHealth
 } from '../supervisor/selfupdate.js';
@@ -70,15 +70,18 @@ async function main(): Promise<void> {
   assert(parseCodexUpdatePending('latest version status    current version is not older') === false, 'expected current codex doctor status to parse as no pending update');
   assert(parseCodexUpdatePending('latest version status    current version is older') === true, 'expected older codex doctor status to parse as pending update');
   assert(
+    parseCodexDoctorError('16 ok · 1 idle · 1 notes · 1 warn · 0 fail degraded', 1) === undefined,
+    'optional Codex doctor warnings must not block real mode'
+  );
+  assert(
+    parseCodexDoctorError('15 ok · 1 fail degraded', 1) === 'tool reported a non-zero health check',
+    'degraded Codex doctor failures must still block real mode'
+  );
+  assert(
     parseCodexUpdatePending('version                  0.139.0\nlatest version           0.140.0') === true,
     'expected latest version greater than current to parse as pending update'
   );
-  expectThrows(
-    () => assertNoPendingToolUpdatesForLongRun(fakeConfig('auto'), fakeReport(true), 2),
-    'Refusing to start long run because tool update is pending'
-  );
-  assertNoPendingToolUpdatesForLongRun(fakeConfig('auto'), fakeReport(true), 1);
-  assertNoPendingToolUpdatesForLongRun(fakeConfig('stub'), fakeReport(true), 20);
+  assert(fakeReport(true).codex.updatePending === true, 'pending updates should be reported for operator visibility, not used as a supervisor start gate');
 
   const current = await toolVersionsFromHealth(fakeConfig('stub'), null);
   const packageVersion = await readPackageVersion();
@@ -98,7 +101,8 @@ async function main(): Promise<void> {
         wici_version_recorded: true,
         stopped_drift_allowed: true,
         unpinned_allowed: true,
-        pending_update_gate_verified: true
+        pending_update_reported_not_gated: true,
+        optional_doctor_warning_allowed: true
       },
       null,
       2
@@ -142,13 +146,12 @@ function fakeConfig(mode: WiCiConfig['tools']['mode']): WiCiConfig {
   return {
     tools: {
       mode,
-      planner: { command: 'claude', effort: 'max' },
+      planner: { command: 'claude', effort: 'default' },
       executor: { command: 'codex', dangerouslyBypassApprovalsAndSandbox: true }
     },
     budget: { max_iters: 20, max_cost_usd: 1, deadline: null },
     stop: { tau: 0.01, K: 3, N: 4, mode: 'auto' },
     retry: { max_attempts_per_step: 2, reverts_before_reset: 5, stall_replan_after: 3 },
-    diversity: { avenues: ['algorithmic complexity', 'data structure change'] },
     evaluation: { noise_threshold: 0.01, min_reps: 5, bootstrap_resamples: 1000, checks_timeout_ms: 300000, measure_timeout_ms: 300000 },
     git: { init_if_missing: false, user_name: 'WiCi Test', user_email: 'wici-test@example.invalid' },
     safety: { container_hint: 'test', forbidden_actions: [] }

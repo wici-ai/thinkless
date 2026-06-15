@@ -10,6 +10,7 @@ import type { BaselineFile, Checkpoint, LedgerEntry, RunEvent } from '../shared/
 
 const target = resolve('fixture/manual-lock-target');
 const prematureTarget = resolve('fixture/manual-lock-preapprove-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   const approved = await runApprovedScenario(target);

@@ -1,6 +1,10 @@
+import { mkdir, readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { execa } from 'execa';
 import type { RunPaths } from '../shared/paths.js';
 import type { WiCiConfig } from '../shared/types.js';
+
+const WICI_SCAFFOLD_ENTRIES = new Set(['.wici', '.opt']);
 
 async function git(paths: RunPaths, args: string[], reject = true): Promise<string> {
   const result = await execa('git', ['-C', paths.target, ...args], {
@@ -11,20 +15,32 @@ async function git(paths: RunPaths, args: string[], reject = true): Promise<stri
 }
 
 export async function isGitRepo(paths: RunPaths): Promise<boolean> {
-  const result = await execa('git', ['-C', paths.target, 'rev-parse', '--is-inside-work-tree'], {
+  const result = await execa('git', ['-C', paths.target, 'rev-parse', '--show-toplevel'], {
     reject: false
   });
-  return result.exitCode === 0 && result.stdout.trim() === 'true';
+  return result.exitCode === 0 && resolve(result.stdout.trim()) === resolve(paths.target);
 }
 
 export async function ensureGitRepo(paths: RunPaths, config: WiCiConfig): Promise<void> {
   if (await isGitRepo(paths)) return;
-  if (!config.git.init_if_missing) {
+  const canInit = config.git.init_if_missing || (await hasOnlyWiCiScaffold(paths.target));
+  if (!canInit) {
     throw new Error(`Target is not a git repository: ${paths.target}`);
   }
+  await mkdir(paths.target, { recursive: true });
   await execa('git', ['-C', paths.target, 'init']);
   await execa('git', ['-C', paths.target, 'config', 'user.name', config.git.user_name]);
   await execa('git', ['-C', paths.target, 'config', 'user.email', config.git.user_email]);
+}
+
+async function hasOnlyWiCiScaffold(target: string): Promise<boolean> {
+  try {
+    const entries = await readdir(target, { withFileTypes: true });
+    return entries.every((entry) => WICI_SCAFFOLD_ENTRIES.has(entry.name));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+    throw error;
+  }
 }
 
 export async function ensureGitIdentity(paths: RunPaths, config: WiCiConfig): Promise<void> {

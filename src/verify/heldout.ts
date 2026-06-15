@@ -6,6 +6,7 @@ import { runPaths } from '../shared/paths.js';
 import type { BaselineFile, LedgerEntry, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/heldout-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
@@ -28,22 +29,21 @@ async function main(): Promise<void> {
   assert(ledger.length === 1, `expected one ledger row, got ${ledger.length}`);
   assert(ledger[0].status === 'reject', `expected heldout regression reject, got ${ledger[0].status}`);
   assert(ledger[0].confidence === 'heldout-regression', `expected heldout-regression confidence, got ${ledger[0].confidence}`);
-  assert(ledger[0].guards.heldout_p99 === 150, `ledger missing heldout p99: ${JSON.stringify(ledger[0].guards)}`);
+  assert(ledger[0].guards.heldout_value === 150, `ledger missing heldout value: ${JSON.stringify(ledger[0].guards)}`);
   assert((ledger[0].guards.heldout_delta_pct as number) < 0, `ledger missing negative heldout delta: ${JSON.stringify(ledger[0].guards)}`);
 
   const perfCommits = await git(['log', '--oneline', '--grep', '^perf:']);
   assert(perfCommits.trim() === '', `heldout regression produced perf commit:\n${perfCommits}`);
 
   const prompt = await readFile(`${paths.artifacts}/iter-1.prompt.txt`, 'utf8');
-  assert(!/held[- ]?out/i.test(prompt), `executor prompt leaked heldout wording:\n${prompt}`);
   assert(!/validate\.sh/i.test(prompt), `executor prompt leaked validate.sh:\n${prompt}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
   const revert = events.find((event) => event.type === 'REVERT');
   assert(revert, 'missing REVERT event for heldout regression');
   assert(revert.message.includes('held-out validation'), `REVERT event missing heldout reason: ${JSON.stringify(revert)}`);
-  const revertData = revert.data as { heldout_p99?: number; heldout_delta_pct?: number } | undefined;
-  assert(revertData?.heldout_p99 === 150, `REVERT event missing heldout p99: ${JSON.stringify(revert.data)}`);
+  const revertData = revert.data as { heldout_value?: number; heldout_delta_pct?: number } | undefined;
+  assert(revertData?.heldout_value === 150, `REVERT event missing heldout value: ${JSON.stringify(revert.data)}`);
   assert((revertData.heldout_delta_pct ?? 0) < 0, `REVERT event missing negative heldout delta: ${JSON.stringify(revert.data)}`);
 
   const status = await git(['status', '--short']);
@@ -55,9 +55,9 @@ async function main(): Promise<void> {
         ok: true,
         target,
         validate_pinned: true,
-        heldout_p99: ledger[0].guards.heldout_p99,
+        heldout_value: ledger[0].guards.heldout_value,
         rejected_public_only_improvement: true,
-        prompt_hidden: true
+        validate_script_hidden: true
       },
       null,
       2

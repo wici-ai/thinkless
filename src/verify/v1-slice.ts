@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
-import type { AcceptanceSpec, BaselineFile, BenchmarkManifest, Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
+import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
 import { runSupervisor } from '../supervisor/index.js';
 
 const target = resolve('fixture/v1-slice-target');
@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 
   const result = await runSupervisor({
     target,
-    goal: 'Reduce p99 latency in a v1 vertical slice while preserving exact uniqueSorted output.',
+    goal: 'Improve the v1 vertical slice fixture while preserving exact uniqueSorted output correctness.',
     maxIters: 1,
     mode: 'stub'
   });
@@ -30,67 +30,40 @@ async function main(): Promise<void> {
   const paths = runPaths(target);
   await assertExists(paths.goalDoc, 'GOAL.md');
   await assertExists(paths.plan, 'PLAN.md');
-  await assertExists(paths.acceptanceSpec, 'acceptance.spec.json');
-  await assertExists(paths.benchmarkManifest, '.opt/benchmark.json');
   await assertExists(paths.measure, '.opt/measure.sh');
   await assertExists(paths.checks, '.opt/checks.sh');
-  await assertExists(paths.baseline, 'baseline.json');
-  await assertExists(paths.ledger, 'ledger.jsonl');
-  await assertExists(`${target}/wici-limit-artifact.md`, 'wici-limit-artifact.md');
-  await assertExists(`${paths.checkpoints}/iter-1.json`, '.wici/checkpoints/iter-1.json');
+  await assertExecutable(paths.measure, '.opt/measure.sh');
+  await assertExecutable(paths.checks, '.opt/checks.sh');
   await assertExists(`${paths.artifacts}/iter-1.json`, '.wici/artifacts/iter-1.json');
   await assertExists(`${paths.artifacts}/iter-1.prompt.txt`, '.wici/artifacts/iter-1.prompt.txt');
 
-  const acceptance = await readJsonFile<AcceptanceSpec>(paths.acceptanceSpec);
   const goalDoc = await readFile(paths.goalDoc, 'utf8');
   assert(goalDoc.includes('# GOAL') && goalDoc.includes('v1 vertical slice'), `GOAL.md missing initial goal text:\n${goalDoc}`);
-  assert(acceptance.criteria.some((criterion) => criterion.check === './.opt/checks.sh'), 'acceptance spec missing checks criterion');
-  assert(acceptance.criteria.some((criterion) => criterion.check === './.opt/measure.sh'), 'acceptance spec missing measure criterion');
-
-  const benchmark = await readJsonFile<BenchmarkManifest>(paths.benchmarkManifest);
-  assert(benchmark.command === './.opt/measure.sh', `benchmark command should use locked measure.sh, got ${benchmark.command}`);
-  assert(benchmark.min_reps >= 5, `benchmark min_reps too low: ${benchmark.min_reps}`);
-
-  const baseline = await readJsonFile<BaselineFile>(paths.baseline);
-  assert(typeof baseline.eval_sha256.measure === 'string' && baseline.eval_sha256.measure.length > 0, 'baseline missing measure hash');
-  assert(typeof baseline.eval_sha256.checks === 'string' && baseline.eval_sha256.checks.length > 0, 'baseline missing checks hash');
-  assert(typeof baseline.eval_sha256.benchmark_manifest === 'string', 'baseline missing benchmark manifest hash');
-  assert(typeof baseline.eval_sha256.acceptance_spec === 'string', 'baseline missing acceptance spec hash');
-  assert(typeof baseline.eval_sha256.files?.['test.mjs'] === 'string', 'baseline missing test guard hash');
-
-  const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
-  assert(ledger.length === 1, `expected exactly one v1 ledger row, got ${ledger.length}`);
-  assert(ledger[0].status === 'keep', `expected accepted v1 row, got ${ledger[0].status}`);
-  assert((ledger[0].delta_pct ?? 0) > 0.5, `expected substantial deterministic improvement, got ${ledger[0].delta_pct}`);
-  assert(typeof ledger[0].p_value === 'number' && ledger[0].p_value < 0.05, `accepted v1 row missing significant p-value: ${ledger[0].p_value}`);
-  assert(ledger[0].commit, 'accepted v1 ledger row missing commit');
-  assert(ledger[0].cost.wall_ms !== undefined, 'accepted v1 ledger row missing wall clock cost');
+  const plan = await readFile(paths.plan, 'utf8');
+  assert(plan.includes('- [x] S1') || plan.includes('status:done'), `PLAN.md did not mark the executed step done:\n${plan}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
   for (const type of [
     'SUPERVISOR_START',
-    'ACCEPTANCE_SPEC_FROZEN',
     'PLAN_DONE',
-    'BENCHMARK_SELECTED',
-    'BASELINE_DONE',
     'EXECUTE_START',
     'EXECUTE_DONE',
-    'EVALUATE_START',
     'GIT_COMMIT',
-    'COMMIT',
-    'LIMIT_ARTIFACT_COMMIT',
     'STOP'
   ]) {
     assert(events.some((event) => event.type === type), `missing v1 event ${type}`);
   }
-  const commitEvent = events.find((event) => event.type === 'COMMIT');
-  const commitData = commitEvent?.data as { p_value?: number } | undefined;
-  assert(typeof commitData?.p_value === 'number' && commitData.p_value < 0.05, `COMMIT event missing significant p-value: ${JSON.stringify(commitEvent)}`);
+  assert(!events.some((event) => event.type === 'BASELINE_START'), 'fresh V1 direct run must not initialize baseline before Codex execution');
+  assert(!events.some((event) => event.type === 'EVALUATE_START'), 'fresh V1 direct run must not require measure/evaluate before completing execution');
 
   const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
   assert(checkpoint.supervisor_state === 'STOP', `expected STOP checkpoint, got ${checkpoint.supervisor_state}`);
   assert(checkpoint.iter === 1, `expected checkpoint iter=1, got ${checkpoint.iter}`);
-  assert(checkpoint.ledger_seq === 1, `expected checkpoint ledger_seq=1, got ${checkpoint.ledger_seq}`);
+  assert(checkpoint.ledger_seq === 1, `direct V1 run should record one ledger receipt, got ${checkpoint.ledger_seq}`);
+  const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
+  assert(ledger.length === 1, `direct V1 run should record one ledger row, got ${ledger.length}`);
+  assert(ledger[0].guards.direct === true, `direct V1 ledger row should be marked direct: ${JSON.stringify(ledger[0])}`);
+  assert(ledger[0].cost.tokens_input !== undefined, `direct V1 ledger row missing token usage: ${JSON.stringify(ledger[0])}`);
   const packageVersion = await readPackageVersion();
   const wiciVersion = checkpoint.tool_versions?.wici;
   assert(wiciVersion !== undefined, `checkpoint missing WiCi version block: ${JSON.stringify(checkpoint.tool_versions)}`);
@@ -106,7 +79,12 @@ async function main(): Promise<void> {
 
   const prompt = await readFile(`${paths.artifacts}/iter-1.prompt.txt`, 'utf8');
   assert(prompt.includes('WiCi safety constraints'), 'executor prompt missing safety constraints');
-  assert(prompt.includes('Frozen acceptance spec'), 'executor prompt missing frozen acceptance spec');
+  assert(prompt.includes('Execute the current GOAL.md and PLAN.md as one Codex goal.'), 'executor prompt must treat GOAL.md and PLAN.md as one Codex goal');
+  assert(prompt.includes('Supervisor receipt focus: S1.'), 'executor prompt missing supervisor receipt focus');
+  assert(prompt.includes('Current GOAL.md:'), 'executor prompt missing embedded GOAL.md section');
+  assert(prompt.includes('v1 vertical slice'), 'executor prompt missing GOAL.md content');
+  assert(prompt.includes('Current PLAN.md:'), 'executor prompt missing embedded PLAN.md section');
+  assert(prompt.includes('S1'), 'executor prompt missing PLAN.md step content');
 
   const checks = await execa(paths.checks, [], { cwd: target, all: true, reject: false });
   assert(checks.exitCode === 0, `locked checks failed after v1 run:\n${checks.all}`);
@@ -114,8 +92,9 @@ async function main(): Promise<void> {
   assert(measure.exitCode === 0 && (measure.all ?? '').includes('METRIC '), `locked measure failed after v1 run:\n${measure.all}`);
 
   const log = await git(['log', '--oneline', '--decorate', '-8']);
-  assert(log.includes('perf:'), `v1 target git log missing perf commit:\n${log}`);
-  assert(log.includes('chore: record WiCi limit artifact'), `v1 target git log missing limit artifact commit:\n${log}`);
+  assert(log.includes('chore: initialize WiCi plan'), `v1 target git log missing initial plan checkpoint:\n${log}`);
+  assert(log.includes('chore: WiCi direct iteration 1 S1'), `v1 target git log missing direct execution checkpoint:\n${log}`);
+  assert(log.includes('chore: record WiCi direct iteration 1 state'), `v1 target git log missing direct state checkpoint:\n${log}`);
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `v1 target worktree dirty:\n${status}`);
 
@@ -128,8 +107,6 @@ async function main(): Promise<void> {
         target,
         iter: result.iter,
         stop_reason: result.reason,
-        ledger_rows: ledger.length,
-        perf_commit: ledger[0].commit,
         events_checked: events.length,
         tui_rendered: tui.rendered
       },
@@ -217,6 +194,11 @@ function stripAnsi(value: string): string {
 
 async function assertExists(path: string, label: string): Promise<void> {
   assert(await exists(path), `missing ${label}: ${path}`);
+}
+
+async function assertExecutable(path: string, label: string): Promise<void> {
+  const mode = (await stat(path)).mode;
+  assert((mode & 0o111) !== 0, `${label} should be executable: ${path}`);
 }
 
 async function git(args: string[]): Promise<string> {

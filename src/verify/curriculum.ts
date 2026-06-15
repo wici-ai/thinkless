@@ -15,7 +15,7 @@ async function main(): Promise<void> {
 
   const result = await execa(
     process.execPath,
-    ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--goal', 'Generate a curriculum sub-goal when an avenue saturates', '--max-iters', '3', '--mode', 'stub'],
+    ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--goal', 'Delegate stalled replan direction to the planner', '--max-iters', '3', '--mode', 'stub'],
     {
       cwd: resolve('.'),
       all: true,
@@ -30,31 +30,23 @@ async function main(): Promise<void> {
   assert(result.exitCode === 0, `curriculum verifier supervisor run failed:\n${result.all}`);
 
   const entries = await readJsonLines<CurriculumEntry>(paths.curriculum);
-  assert(entries.length === 1, `expected one curriculum entry, got ${entries.length}`);
-  const entry = entries[0];
-  assert(entry.id === 'curriculum-3-S2', `unexpected curriculum id: ${entry.id}`);
-  assert(entry.iter === 3, `expected curriculum at iter 3, got ${entry.iter}`);
-  assert(entry.saturated_step_id === 'S2', `expected saturated step S2, got ${entry.saturated_step_id}`);
-  assert(entry.parent_ledger_id === 'iter-1', `expected parent iter-1, got ${entry.parent_ledger_id}`);
-  assert(entry.sub_goal.includes(entry.avenue), 'curriculum sub-goal missing selected avenue');
-  assert(entry.sub_goal.includes('acceptance.spec.json'), 'curriculum sub-goal missing acceptance-spec guardrail');
+  assert(entries.length === 0, `supervisor should not generate category curriculum entries, got ${entries.length}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
-  const event = events.find((item) => item.type === 'CURRICULUM_SUBGOAL');
-  assert(event, 'missing CURRICULUM_SUBGOAL event');
-  assert((event.data as { id?: string } | undefined)?.id === entry.id, `curriculum event did not reference ${entry.id}`);
+  assert(!events.some((item) => item.type === 'CURRICULUM_SUBGOAL'), 'supervisor should not emit CURRICULUM_SUBGOAL');
+  assert(!events.some((item) => item.type === 'BRANCH_REPLAN_REQUEST'), 'fresh direct path should not force an optimizer branch replan');
 
   const plan = await readFile(paths.plan, 'utf8');
-  assert(plan.includes('Curriculum sub-goal:'), 'PLAN.md missing curriculum replan text');
-  assert(plan.includes(entry.sub_goal), 'PLAN.md missing generated curriculum sub-goal');
+  assert(!plan.includes('Curriculum sub-goal:'), 'PLAN.md should not include supervisor-generated curriculum text');
+  assert(!plan.includes('Avenue:'), 'PLAN.md should not include supervisor-selected avenue text');
+  assert(plan.includes('S1') && plan.includes('S2'), 'PLAN.md should remain a normal direct execution plan');
 
   const context = await readFile(paths.context, 'utf8');
   assert(context.includes('## Latest Curriculum Sub-goal'), 'context missing latest curriculum section');
-  assert(context.includes(entry.id), 'context missing curriculum id');
-  assert(context.includes(entry.sub_goal), 'context missing curriculum sub-goal');
+  assert(context.includes('- none yet'), 'context should not contain supervisor-generated curriculum');
 
-  const snapshot = JSON.parse(await readFile(iterationSnapshotPath(paths, 3), 'utf8')) as CheckpointSnapshot;
-  assert(snapshot.files.curriculum?.includes(entry.id), 'iteration snapshot did not preserve curriculum jsonl');
+  const snapshot = JSON.parse(await readFile(iterationSnapshotPath(paths, 0), 'utf8')) as CheckpointSnapshot;
+  assert(!snapshot.files.curriculum, 'iteration snapshot should not preserve absent curriculum jsonl');
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree dirty after curriculum run:\n${status}`);
@@ -64,9 +56,8 @@ async function main(): Promise<void> {
       {
         ok: true,
         target,
-        curriculum_id: entry.id,
-        avenue: entry.avenue,
-        context_includes_curriculum: true
+        supervisor_curriculum_disabled: true,
+        direct_path_avoids_branch_replan: true
       },
       null,
       2
@@ -91,7 +82,13 @@ console.log(\`METRIC p50=\${p50} p95=\${p95} p99=\${p99} unit=ms n=\${samples.le
 }
 
 async function readJsonLines<T>(path: string): Promise<T[]> {
-  const raw = await readFile(path, 'utf8');
+  let raw = '';
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
   return raw
     .split('\n')
     .map((line) => line.trim())

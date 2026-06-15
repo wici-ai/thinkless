@@ -8,6 +8,7 @@ import type { GoalFile, LedgerEntry, OutboxMessage, RunEvent, WiCiConfig } from 
 import { buildStopAnalysis, shouldStop } from '../supervisor/stop.js';
 
 const target = resolve('fixture/stop-policy-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await verifyCostAnalysis();
@@ -138,13 +139,12 @@ function config(): WiCiConfig {
   return {
     tools: {
       mode: 'stub',
-      planner: { command: 'claude', effort: 'max' },
+      planner: { command: 'claude', effort: 'default' },
       executor: { command: 'codex', dangerouslyBypassApprovalsAndSandbox: true }
     },
     budget: { max_iters: 3, max_cost_usd: 50, deadline: null },
     stop: { tau: 0.01, K: 2, N: 1, mode: 'auto' },
     retry: { max_attempts_per_step: 2, reverts_before_reset: 5, stall_replan_after: 3 },
-    diversity: { avenues: ['algorithmic complexity'] },
     evaluation: { noise_threshold: 0.01, min_reps: 5, bootstrap_resamples: 1000, checks_timeout_ms: 300000, measure_timeout_ms: 300000 },
     git: { init_if_missing: false, user_name: 'WiCi Bot', user_email: 'wici@example.invalid' },
     safety: { container_hint: 'test', forbidden_actions: [] }

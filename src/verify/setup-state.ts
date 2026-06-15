@@ -8,7 +8,7 @@ import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, RunEvent } from '../shared/types.js';
 
 const planTarget = resolve('fixture/setup-state-plan-target');
-const measureTarget = resolve('fixture/setup-state-measure-target');
+const executeTarget = resolve('fixture/setup-state-execute-target');
 
 async function main(): Promise<void> {
   const plan = await verifyPausedSetupState({
@@ -16,13 +16,14 @@ async function main(): Promise<void> {
     pauseAfter: 'PLAN_START',
     expectedState: 'PLAN'
   });
-  const measure = await verifyPausedSetupState({
-    target: measureTarget,
-    pauseAfter: 'BASELINE_START',
-    expectedState: 'MEASURE',
+  const execute = await verifyPausedSetupState({
+    target: executeTarget,
+    pauseAfter: 'EXECUTE_START',
+    expectedState: 'EXECUTE',
     assertCheckpoint: (checkpoint) => {
       assert(checkpoint.sessions.planner === 'stub-planner', `checkpoint did not preserve initial planner session: ${JSON.stringify(checkpoint.sessions)}`);
-      assert(typeof checkpoint.plan_hash === 'string' && checkpoint.plan_hash.length > 0, `checkpoint missing plan hash before baseline: ${checkpoint.plan_hash}`);
+      assert(typeof checkpoint.plan_hash === 'string' && checkpoint.plan_hash.length > 0, `checkpoint missing plan hash before execute: ${checkpoint.plan_hash}`);
+      assert(checkpoint.next_step === 'S1', `checkpoint should name direct execute step S1, got ${checkpoint.next_step}`);
     }
   });
 
@@ -31,8 +32,8 @@ async function main(): Promise<void> {
       {
         ok: true,
         plan_state: plan.supervisor_state,
-        measure_state: measure.supervisor_state,
-        planner_session: measure.sessions.planner
+        execute_state: execute.supervisor_state,
+        planner_session: execute.sessions.planner
       },
       null,
       2
@@ -42,7 +43,7 @@ async function main(): Promise<void> {
 
 async function verifyPausedSetupState(input: {
   target: string;
-  pauseAfter: 'PLAN_START' | 'BASELINE_START';
+  pauseAfter: 'PLAN_START' | 'EXECUTE_START';
   expectedState: Checkpoint['supervisor_state'];
   assertCheckpoint?: (checkpoint: Checkpoint) => void;
 }): Promise<Checkpoint> {

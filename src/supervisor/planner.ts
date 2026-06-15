@@ -1,29 +1,54 @@
+import { spawn } from 'node:child_process';
 import { chmod, readFile, readdir, stat } from 'node:fs/promises';
 import { execa } from 'execa';
 import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { atomicWriteFile, atomicWriteJson, exists, makeReadOnly, makeWritable } from '../shared/atomic.js';
-import { promptPath, schemaPath, type RunPaths } from '../shared/paths.js';
+import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { EvalSha256, GoalFile, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
 import { applyPlanDiff } from './plan.js';
 import { type PlannerBenchmark, writeBenchmarkManifest } from './benchmark.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
-import { primaryMetricName } from './metricFormat.js';
+import { isPlannerSelectedMetricName, primaryMetricName } from './metricFormat.js';
+import { isClaudeEnvelope, parseClaudeJsonOutput, type ClaudeUsage } from './claudeOutput.js';
+import { saveGoalFiles } from './goalDoc.js';
 
 interface PlannerOutput {
   session_id?: string;
-  structured_output?: {
-    summary?: string;
-    planMarkdown: string;
-    measureSh: string;
-    checksSh: string;
-    benchmark?: PlannerBenchmark;
-  };
+  goalMarkdown?: string;
   planMarkdown?: string;
   measureSh?: string;
   checksSh?: string;
-  benchmark?: PlannerBenchmark;
 }
+
+export interface PlannerQuestion {
+  session_id?: string;
+  question: string;
+  questions?: string[];
+  reason?: string;
+}
+
+export type PlannerResponse = { kind: 'plan'; output: PlannerOutput } | { kind: 'question'; question: PlannerQuestion };
+
+export type PlannerInvocationResult = ToolInvocationResult & {
+  needsInput?: PlannerQuestion;
+};
+
+export interface PlannerUsageProgress {
+  eventType?: string;
+  sessionId?: string;
+  totalCostUsd?: number;
+  usage: ClaudeUsage;
+}
+
+export interface PlannerClarificationResume {
+  sessionId?: string;
+  question?: string;
+  answer: string;
+}
+
+const PLANNER_IDLE_TIMEOUT_MS = 10 * 60_000;
+const PLANNER_HARD_TIMEOUT_MS = 60 * 60_000;
 
 async function commandExists(command: string): Promise<boolean> {
   const result = await execa('command', ['-v', command], { shell: true, reject: false });
@@ -34,12 +59,35 @@ function requirementText(goal: GoalFile): string {
   return goal.requirements.filter((req) => req.status === 'active').map((req) => req.text).join('\n');
 }
 
-function extractStructured(raw: string): PlannerOutput {
-  const parsed = JSON.parse(raw) as PlannerOutput;
-  return parsed;
+export function extractStructured(raw: string): PlannerOutput {
+  const response = extractPlannerResponse(raw);
+  if (response.kind === 'plan') return response.output;
+  throw new Error(`Planner requested clarification instead of plan artifacts: ${response.question.question}`);
 }
 
-export async function runInitialPlanner(paths: RunPaths, goal: GoalFile, config: WiCiConfig): Promise<ToolInvocationResult> {
+export function extractPlannerResponse(raw: string): PlannerResponse {
+  const parsed = parseClaudeJsonOutput(raw);
+  let plannerError: string | undefined;
+  for (const item of [...parsed].reverse()) {
+    const output = plannerOutputFromCandidate(item);
+    if (output) return { kind: 'plan', output };
+    const question = plannerQuestionFromCandidate(item);
+    if (question) return { kind: 'question', question };
+    if (isClaudeEnvelope(item) && item.is_error) {
+      const result = typeof item.result === 'string' ? item.result : JSON.stringify(item.result);
+      plannerError = result || item.subtype || 'planner reported an error';
+    }
+  }
+  throw new Error(plannerError ?? 'Planner output did not contain structured plan artifacts');
+}
+
+export async function runInitialPlanner(
+  paths: RunPaths,
+  goal: GoalFile,
+  config: WiCiConfig,
+  onProgress?: (progress: PlannerUsageProgress) => Promise<void>,
+  resume?: PlannerClarificationResume
+): Promise<PlannerInvocationResult> {
   const available = await commandExists(config.tools.planner.command);
   if (config.tools.mode === 'real' && !available) {
     throw new Error(`Planner command not found in real mode: ${config.tools.planner.command}`);
@@ -48,28 +96,46 @@ export async function runInitialPlanner(paths: RunPaths, goal: GoalFile, config:
   if (config.tools.mode !== 'stub' && available) {
     try {
       const systemPrompt = await readFile(promptPath('planner'), 'utf8');
-      const schema = await readFile(schemaPath('plan'), 'utf8');
       const safetyText = formatSafetyForPrompt(config);
       const goalText = await readPlannerGoalText(paths, goal);
-      const result = await execa(
+      const args =
+        resume?.sessionId
+          ? buildInitialPlannerResumeArgs({
+              goalText,
+              effort: config.tools.planner.effort,
+              systemPrompt,
+              safetyText,
+              sessionId: resume.sessionId,
+              question: resume.question,
+              answer: resume.answer
+            })
+          : buildInitialPlannerArgs({
+              goalText: resume ? appendClarificationAnswer(goalText, resume) : goalText,
+              effort: config.tools.planner.effort,
+              systemPrompt,
+              safetyText
+            });
+      const result = await runPlannerProcess(
         config.tools.planner.command,
-        buildInitialPlannerArgs({
-          goalText,
-          schema,
-          effort: config.tools.planner.effort,
-          systemPrompt,
-          safetyText
-        }),
+        args,
         {
           cwd: paths.target,
-          reject: true,
-          all: true,
-          maxBuffer: 1024 * 1024 * 20
+          onProgress
         }
       );
-      const output = extractStructured(result.stdout);
-      await materializePlannerOutput(paths, output);
-      return { ok: true, sessionId: output.session_id, stdout: result.all ?? result.stdout };
+      await persistPlannerRaw(paths, resume ? 'initial-resume' : 'initial', result);
+      const response = extractPlannerResponse(result.stdout);
+      if (response.kind === 'question') {
+        return {
+          ok: false,
+          sessionId: response.question.session_id,
+          stdout: result.all ?? result.stdout,
+          error: 'Planner requested clarification',
+          needsInput: response.question
+        };
+      }
+      await materializePlannerOutput(paths, response.output);
+      return { ok: true, sessionId: response.output.session_id, stdout: result.all ?? result.stdout };
     } catch (error) {
       if (config.tools.mode === 'real') throw error;
     }
@@ -79,7 +145,14 @@ export async function runInitialPlanner(paths: RunPaths, goal: GoalFile, config:
   return { ok: true, sessionId: 'stub-planner', stdout: 'stub planner materialized PLAN.md and .opt scripts' };
 }
 
-export async function runPlanDiff(paths: RunPaths, goal: GoalFile, plannerSessionId: string | undefined, newText: string, config: WiCiConfig): Promise<ToolInvocationResult> {
+export async function runPlanDiff(
+  paths: RunPaths,
+  goal: GoalFile,
+  plannerSessionId: string | undefined,
+  newText: string,
+  config: WiCiConfig,
+  onProgress?: (progress: PlannerUsageProgress) => Promise<void>
+): Promise<PlannerInvocationResult> {
   const available = await commandExists(config.tools.planner.command);
   if (config.tools.mode === 'real' && !available) {
     throw new Error(`Planner command not found in real mode: ${config.tools.planner.command}`);
@@ -92,29 +165,32 @@ export async function runPlanDiff(paths: RunPaths, goal: GoalFile, plannerSessio
     try {
       const systemPrompt = await readFile(promptPath('planner-diff'), 'utf8');
       const plan = await readFile(paths.plan, 'utf8');
-      const schema = await readFile(schemaPath('plan-diff'), 'utf8');
       const safetyText = formatSafetyForPrompt(config);
       const goalText = await readPlannerGoalText(paths, goal);
-      const result = await execa(
+      const result = await runPlannerProcess(
         config.tools.planner.command,
         buildPlanDiffArgs({
           newText,
           currentPlan: plan,
           goalText,
           sessionId: plannerSessionId,
-          schema,
           systemPrompt,
           safetyText
         }),
-        {
-          cwd: paths.target,
-          reject: true,
-          all: true,
-          maxBuffer: 1024 * 1024 * 20
-        }
+        { cwd: paths.target, onProgress }
       );
-      const parsed = JSON.parse(result.stdout) as { structured_output?: Parameters<typeof applyPlanDiff>[1] } & Parameters<typeof applyPlanDiff>[1];
-      await applyPlanDiff(paths, parsed.structured_output ?? parsed);
+      await persistPlannerRaw(paths, `diff-${Date.now()}`, result);
+      const response = extractPlannerResponse(result.stdout);
+      if (response.kind === 'question') {
+        return {
+          ok: false,
+          sessionId: response.question.session_id ?? plannerSessionId,
+          stdout: result.all ?? result.stdout,
+          error: 'Planner requested clarification',
+          needsInput: response.question
+        };
+      }
+      await materializePlannerOutput(paths, response.output);
       return { ok: true, sessionId: plannerSessionId, stdout: result.all ?? result.stdout };
     } catch (error) {
       if (config.tools.mode === 'real') throw error;
@@ -129,24 +205,52 @@ export async function runPlanDiff(paths: RunPaths, goal: GoalFile, plannerSessio
   return { ok: true, sessionId: plannerSessionId ?? 'stub-planner', stdout: 'stub planner applied requirement diff' };
 }
 
-export function buildInitialPlannerArgs(input: { goalText: string; schema: string; effort: string; systemPrompt: string; safetyText?: string }): string[] {
+export function buildInitialPlannerArgs(input: { goalText: string; effort: string; systemPrompt: string; safetyText?: string }): string[] {
   return [
     '-p',
-    `ULTRAPLAN for goal:\n${input.goalText}`,
+    `Plan for goal:\n${input.goalText}`,
     '--output-format',
-    'json',
-    '--json-schema',
-    input.schema,
-    '--effort',
-    input.effort,
+    'stream-json',
+    '--verbose',
+    ...plannerEffortArgs(input.effort),
     '--permission-mode',
     'plan',
-    '--disallowedTools',
-    'Bash(git push *)',
-    'Bash(rm -rf *)',
+    '--dangerously-skip-permissions',
     '--append-system-prompt',
     appendSafety(input.systemPrompt, input.safetyText ?? '')
   ];
+}
+
+export function buildInitialPlannerResumeArgs(input: {
+  goalText: string;
+  effort: string;
+  systemPrompt: string;
+  safetyText?: string;
+  sessionId: string;
+  question?: string;
+  answer: string;
+}): string[] {
+  return [
+    '-p',
+    `Planner clarification answer:\nQuestion: ${input.question ?? '(not recorded)'}\nAnswer:\n${input.answer}\n\nCurrent GOAL.md:\n${input.goalText}\n\nContinue planning for GOAL.md and return markdown planner artifacts.`,
+    '--resume',
+    input.sessionId,
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    ...plannerEffortArgs(input.effort),
+    '--permission-mode',
+    'plan',
+    '--dangerously-skip-permissions',
+    '--append-system-prompt',
+    appendSafety(input.systemPrompt, input.safetyText ?? '')
+  ];
+}
+
+function plannerEffortArgs(effort: string | undefined): string[] {
+  const normalized = effort?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['--effort', normalized];
 }
 
 export function buildPlanDiffArgs(input: {
@@ -154,7 +258,6 @@ export function buildPlanDiffArgs(input: {
   currentPlan: string;
   goalText: string;
   sessionId: string;
-  schema: string;
   systemPrompt: string;
   safetyText?: string;
 }): string[] {
@@ -164,14 +267,253 @@ export function buildPlanDiffArgs(input: {
     '--resume',
     input.sessionId,
     '--output-format',
-    'json',
-    '--json-schema',
-    input.schema,
+    'stream-json',
+    '--verbose',
     '--permission-mode',
     'plan',
+    '--dangerously-skip-permissions',
     '--append-system-prompt',
     appendSafety(input.systemPrompt, input.safetyText ?? '')
   ];
+}
+
+function appendClarificationAnswer(goalText: string, resume: PlannerClarificationResume): string {
+  return `${goalText}\n\n## Planner Clarification Answer\n\nQuestion: ${resume.question ?? '(not recorded)'}\n\nAnswer: ${resume.answer}\n`;
+}
+
+async function persistPlannerRaw(paths: RunPaths, label: string, result: { stdout: string; all: string }): Promise<void> {
+  await atomicWriteFile(join(paths.artifacts, `planner-${label}.stdout.jsonl`), result.stdout);
+  await atomicWriteFile(join(paths.artifacts, `planner-${label}.all.log`), result.all);
+}
+
+async function runPlannerProcess(
+  command: string,
+  args: string[],
+  options: {
+    cwd: string;
+    onProgress?: (progress: PlannerUsageProgress) => Promise<void>;
+  }
+): Promise<{ stdout: string; all: string }> {
+  const child = spawn(command, args, {
+    cwd: options.cwd,
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let stdout = '';
+  let stderr = '';
+  let lineBuffer = '';
+  let timeoutReason: 'idle' | 'hard' | null = null;
+  let progressChain = Promise.resolve();
+  let lastUsageSignature = '';
+  const startedAt = Date.now();
+  let lastActivityAt = startedAt;
+
+  const markActivity = () => {
+    lastActivityAt = Date.now();
+  };
+  const killForTimeout = (reason: 'idle' | 'hard') => {
+    if (timeoutReason) return;
+    timeoutReason = reason;
+    child.kill('SIGTERM');
+    setTimeout(() => child.kill('SIGKILL'), 2_000).unref();
+  };
+  const watchdog = setInterval(() => {
+    const now = Date.now();
+    if (now - startedAt >= PLANNER_HARD_TIMEOUT_MS) {
+      killForTimeout('hard');
+    } else if (now - lastActivityAt >= PLANNER_IDLE_TIMEOUT_MS) {
+      killForTimeout('idle');
+    }
+  }, 5_000);
+  watchdog.unref();
+
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => {
+    markActivity();
+    stdout += chunk;
+    lineBuffer += chunk;
+    const lines = lineBuffer.split(/\r?\n/);
+    lineBuffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const progress = plannerProgressFromLine(line);
+      if (!progress || !options.onProgress) continue;
+      const signature = JSON.stringify(progress);
+      if (signature === lastUsageSignature) continue;
+      lastUsageSignature = signature;
+      progressChain = progressChain.then(() => options.onProgress?.(progress)).then(() => undefined);
+    }
+  });
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    markActivity();
+    stderr += chunk;
+  });
+
+  const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+  clearInterval(watchdog);
+
+  const trailingProgress = plannerProgressFromLine(lineBuffer);
+  if (trailingProgress && options.onProgress) {
+    const signature = JSON.stringify(trailingProgress);
+    if (signature !== lastUsageSignature) {
+      progressChain = progressChain.then(() => options.onProgress?.(trailingProgress)).then(() => undefined);
+    }
+  }
+  await progressChain;
+
+  const all = `${stdout}${stderr}`;
+  if (timeoutReason === 'hard') {
+    throw new Error(`Planner exceeded hard timeout after ${Math.round(PLANNER_HARD_TIMEOUT_MS / 1000)}s without producing PLAN.md artifacts`);
+  }
+  if (timeoutReason === 'idle') {
+    throw new Error(`Planner timed out after ${Math.round(PLANNER_IDLE_TIMEOUT_MS / 1000)}s without planner output`);
+  }
+  if (exit.code !== 0) {
+    const detail = summarizePlannerFailure(stdout, stderr);
+    throw new Error(`Planner exited with code ${exit.code ?? `signal ${exit.signal}`}${detail ? `: ${detail}` : ''}`);
+  }
+  return { stdout, all };
+}
+
+function summarizePlannerFailure(stdout: string, stderr: string): string {
+  const stderrText = stderr.trim();
+  try {
+    const parsed = parseClaudeJsonOutput(stdout);
+    for (const item of [...parsed].reverse()) {
+      if (!isClaudeEnvelope(item)) continue;
+      if (typeof item.result === 'string' && item.result.trim()) return item.result.trim().slice(0, 1000);
+      const text = textFromClaudeMessage(item);
+      if (text) return text.slice(0, 1000);
+      const error = stringField(item, 'error');
+      if (error) return error.slice(0, 1000);
+    }
+  } catch {
+    // Fall through to raw stream summary.
+  }
+  return (stderrText || stdout.trim()).slice(0, 1000);
+}
+
+function textFromClaudeMessage(item: unknown): string | null {
+  if (!item || typeof item !== 'object' || !('message' in item)) return null;
+  const message = (item as { message?: unknown }).message;
+  if (!message || typeof message !== 'object' || !('content' in message)) return null;
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return null;
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    const type = stringField(part, 'type');
+    const text = stringField(part, 'text');
+    if (type === 'text' && text?.trim()) return text.trim();
+  }
+  return null;
+}
+
+function stringField(value: unknown, key: string): string | null {
+  if (!value || typeof value !== 'object' || !(key in value)) return null;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === 'string' && field.trim() ? field.trim() : null;
+}
+
+export function plannerProgressFromLine(line: string): PlannerUsageProgress | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!isClaudeEnvelope(parsed)) return null;
+    const usage = parsed.message?.usage ?? parsed.usage;
+    if (!usage) return null;
+    return {
+      eventType: parsed.type,
+      sessionId: parsed.session_id,
+      totalCostUsd: parsed.total_cost_usd,
+      usage
+    };
+  } catch {
+    return null;
+  }
+}
+
+function plannerOutputFromCandidate(candidate: unknown): PlannerOutput | null {
+  if (!isClaudeEnvelope(candidate) || candidate.result === undefined || candidate.result === null) return null;
+  if (typeof candidate.result !== 'string') return null;
+  return plannerMarkdownOutputFromText(candidate.result, candidate.session_id);
+}
+
+function plannerQuestionFromCandidate(candidate: unknown): PlannerQuestion | null {
+  if (!isClaudeEnvelope(candidate) || candidate.result === undefined || candidate.result === null) return null;
+  if (typeof candidate.result !== 'string') return null;
+  return plannerMarkdownQuestionFromText(candidate.result, candidate.session_id);
+}
+
+function plannerMarkdownOutputFromText(text: string, sessionId?: string): PlannerOutput | null {
+  const goalMarkdown = extractMarkdownArtifact(text, 'GOAL.md');
+  const planMarkdown = extractMarkdownArtifact(text, 'PLAN.md');
+  if (!planMarkdown) return null;
+  const checksSh = extractMarkdownArtifact(text, '.opt/checks.sh') ?? extractMarkdownArtifact(text, 'checks.sh');
+  const measureSh = extractMarkdownArtifact(text, '.opt/measure.sh') ?? extractMarkdownArtifact(text, 'measure.sh');
+  return {
+    ...(sessionId ? { session_id: sessionId } : {}),
+    ...(goalMarkdown ? { goalMarkdown } : {}),
+    planMarkdown,
+    ...(checksSh ? { checksSh } : {}),
+    ...(measureSh ? { measureSh } : {})
+  };
+}
+
+function plannerMarkdownQuestionFromText(text: string, sessionId?: string): PlannerQuestion | null {
+  const question = extractMarkdownArtifact(text, 'CLARIFY') ?? extractMarkdownArtifact(text, 'QUESTION');
+  if (!question) return null;
+  return {
+    ...(sessionId ? { session_id: sessionId } : {}),
+    question: question.trim()
+  };
+}
+
+function extractMarkdownArtifact(text: string, label: string): string | undefined {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const headingIndex = lines.findIndex((line) => markdownHeadingLabel(line) === label.toLowerCase());
+  if (headingIndex < 0) return undefined;
+
+  const bodyEnd = nextPlannerArtifactHeadingIndex(lines, headingIndex + 1);
+  const body = lines.slice(headingIndex + 1, bodyEnd);
+  const content = unwrapOuterFence(body).join('\n').trim();
+  return content || undefined;
+}
+
+const PLANNER_ARTIFACT_HEADINGS = new Set(['goal.md', 'plan.md', '.opt/checks.sh', 'checks.sh', '.opt/measure.sh', 'measure.sh', 'question', 'clarify']);
+
+function nextPlannerArtifactHeadingIndex(lines: string[], start: number): number {
+  for (let index = start; index < lines.length; index += 1) {
+    const label = markdownHeadingLabel(lines[index] ?? '');
+    if (label && PLANNER_ARTIFACT_HEADINGS.has(label)) return index;
+  }
+  return lines.length;
+}
+
+function unwrapOuterFence(lines: string[]): string[] {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && (lines[start] ?? '').trim() === '') start += 1;
+  while (end > start && (lines[end - 1] ?? '').trim() === '') end -= 1;
+  if (end - start < 2) return lines.slice(start, end);
+  if (!/^\s*```[A-Za-z0-9_-]*\s*$/.test(lines[start] ?? '')) return lines.slice(start, end);
+  if (!/^\s*```\s*$/.test(lines[end - 1] ?? '')) return lines.slice(start, end);
+  return lines.slice(start + 1, end - 1);
+}
+
+function markdownHeadingLabel(line: string): string | null {
+  const match = /^#{1,6}\s+(.+?)\s*$/.exec(line.trim());
+  return match ? match[1].replace(/`/g, '').trim().toLowerCase() : null;
+}
+
+async function applyPlannerPlanUpdate(paths: RunPaths, raw: string): Promise<void> {
+  const response = extractPlannerResponse(raw);
+  if (response.kind === 'question') {
+    throw new Error(`Planner requested clarification during plan update: ${response.question.question}`);
+  }
+  await materializePlannerOutput(paths, response.output);
 }
 
 async function readPlannerGoalText(paths: RunPaths, goal: GoalFile): Promise<string> {
@@ -179,29 +521,44 @@ async function readPlannerGoalText(paths: RunPaths, goal: GoalFile): Promise<str
 }
 
 async function materializePlannerOutput(paths: RunPaths, output: PlannerOutput): Promise<void> {
-  const structured = output.structured_output ?? output;
-  if (!structured.planMarkdown || !structured.measureSh || !structured.checksSh) {
-    throw new Error('Planner output missing planMarkdown, measureSh, or checksSh');
+  if (!output.planMarkdown) {
+    throw new Error('Planner output missing PLAN.md artifact');
   }
-  await atomicWriteFile(paths.plan, ensureTrailingNewline(structured.planMarkdown));
-  await atomicWriteFile(paths.measure, ensureScript(structured.measureSh), 0o755);
-  await atomicWriteFile(paths.checks, ensureScript(structured.checksSh), 0o755);
-  await writeBenchmarkManifest(paths, await readGoalForPlanner(paths), structured.benchmark ?? output.benchmark);
-  await chmod(paths.measure, 0o755);
-  await chmod(paths.checks, 0o755);
+  await atomicWriteFile(paths.plan, ensureExecutableChecklist(output.planMarkdown));
+  if (output.measureSh) await atomicWriteFile(paths.measure, ensureScript(output.measureSh), 0o755);
+  if (output.checksSh) await atomicWriteFile(paths.checks, ensureScript(output.checksSh), 0o755);
+  if (output.goalMarkdown) await atomicWriteFile(paths.goalDoc, ensureTrailingNewline(output.goalMarkdown));
+  if (output.measureSh) await chmod(paths.measure, 0o755);
+  if (output.checksSh) await chmod(paths.checks, 0o755);
+}
+
+function ensureExecutableChecklist(planMarkdown: string): string {
+  return ensureTrailingNewline(planMarkdown);
 }
 
 async function materializeStubPlan(paths: RunPaths, goal: GoalFile): Promise<void> {
-  const metricName = primaryMetricName(goal);
-  const plan = `# WiCi Optimization Plan
+  const selectedGoal = {
+    ...goal,
+    metric:
+      isPlannerSelectedMetricName(goal.metric.name)
+        ? {
+            name: 'fixture runtime',
+            direction: 'minimize' as const,
+            target: null,
+            unit: 'ms'
+          }
+        : goal.metric
+  };
+  const metricName = primaryMetricName(selectedGoal);
+  const plan = `# WiCi Execution Plan
 
-Goal: ${requirementText(goal) || 'Optimize the target metric while preserving correctness.'}
+Goal: ${requirementText(goal) || 'Execute the requested goal and validate it.'}
 
 - [ ] S1 Replace avoidable quadratic hot-path work with a linear implementation
-  - Experiment: inspect the hot path and remove nested scans or redundant recomputation.
+  - Action: inspect the fixture hot path and remove nested scans or redundant recomputation.
   - Validation: ./.opt/checks.sh && ./.opt/measure.sh
 - [ ] S2 Re-run measurement and commit only if ${metricName} improves beyond the configured noise gate
-  - Experiment: validate the optimized path against the locked metric.
+  - Action: validate the optimized path against the planner-selected fixture runtime check.
   - Validation: ./.opt/checks.sh && ./.opt/measure.sh
 `;
 
@@ -218,13 +575,25 @@ node measure.mjs
   await atomicWriteFile(paths.plan, plan);
   await atomicWriteFile(paths.measure, checksExecutable(measure), 0o755);
   await atomicWriteFile(paths.checks, checksExecutable(checks), 0o755);
-  await writeBenchmarkManifest(paths, goal, {
+  const manifest = await writeBenchmarkManifest(paths, selectedGoal, {
     tool: 'node',
     command: './.opt/measure.sh',
-    metric: goal.metric.name,
+    metric: selectedGoal.metric.name,
+    direction: selectedGoal.metric.direction,
+    target: selectedGoal.metric.target ?? null,
+    unit: selectedGoal.metric.unit,
     min_reps: 5,
     warmup_discarded: 2,
-    reason: `Fixture target uses a deterministic Node workload through .opt/measure.sh; it emits WiCi ${metricName} METRIC samples for the locked gate.`
+    reason: `Fixture target uses a deterministic Node workload through .opt/measure.sh; it emits WiCi ${metricName} samples for the planner-selected validation.`
+  });
+  await saveGoalFiles(paths, {
+    ...selectedGoal,
+    metric: {
+      name: manifest.metric,
+      direction: manifest.direction,
+      target: manifest.target ?? null,
+      unit: manifest.unit
+    }
   });
   await chmod(paths.measure, 0o755);
   await chmod(paths.checks, 0o755);

@@ -24,16 +24,14 @@ async function main(): Promise<void> {
   assert(result.exitCode === 0, `goal metric run failed:\n${result.all}`);
 
   const goal = JSON.parse(await readFile(paths.goal, 'utf8')) as GoalFile;
-  assert(goal.metric.name === 'token throughput', `expected token throughput metric, got ${JSON.stringify(goal.metric)}`);
-  assert(goal.metric.direction === 'maximize', `expected maximize direction, got ${goal.metric.direction}`);
-  assert(goal.metric.target === 700, `expected target 700, got ${goal.metric.target}`);
-  assert(goal.metric.unit === 'token/s', `expected token/s unit, got ${goal.metric.unit}`);
-  assert(goal.acceptance_criteria.some((criterion) => criterion.text.includes('700token/s')), 'acceptance criteria missing token/s target');
+  assert(goal.requirements.some((req) => req.text === goalText), `GOAL should preserve raw user text: ${JSON.stringify(goal.requirements)}`);
+  assert(goal.metric.name === 'fixture runtime', `stub planner should choose fixture metric, not WiCi parser output: ${JSON.stringify(goal.metric)}`);
+  assert(goal.metric.target === null, `WiCi must not parse 700token/s into goal metric target, got ${goal.metric.target}`);
+  assert(!goal.acceptance_criteria.some((criterion) => criterion.text.includes('700token/s')), 'acceptance criteria should not contain WiCi-parsed target');
 
   const goalDoc = await readFile(paths.goalDoc, 'utf8');
-  assert(goalDoc.includes('- Name: token throughput'), 'GOAL.md missing inferred metric name');
-  assert(goalDoc.includes('- Direction: maximize'), 'GOAL.md missing inferred metric direction');
-  assert(goalDoc.includes('- Target: 700token/s'), 'GOAL.md missing inferred metric target');
+  assert(goalDoc.includes(goalText), 'GOAL.md missing raw user requirement');
+  assert(!goalDoc.includes('- Target: 700token/s'), 'GOAL.md should not show a WiCi-inferred target');
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree dirty after goal metric run:\n${status}`);

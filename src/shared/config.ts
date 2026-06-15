@@ -15,13 +15,17 @@ export async function loadConfig(modeOverride?: ToolMode): Promise<WiCiConfig> {
     reverts_before_reset: 5,
     stall_replan_after: 3
   };
-  config.diversity ??= {
-    avenues: ['algorithmic complexity', 'data structure change', 'caching or memoization', 'batching or I/O reduction', 'concurrency or parallelism']
-  };
   config.evaluation.lock_mode ??= 'auto';
+  config.evaluation.legacy_optimizer ??= false;
   if (modeOverride) config.tools.mode = modeOverride;
   if (process.env.WICI_TOOL_MODE === 'real' || process.env.WICI_TOOL_MODE === 'auto' || process.env.WICI_TOOL_MODE === 'stub') {
     config.tools.mode = process.env.WICI_TOOL_MODE;
+  }
+  if (process.env.WICI_LEGACY_OPTIMIZER === '1') {
+    config.evaluation.legacy_optimizer = true;
+  }
+  if (process.env.WICI_CODEX_MODEL?.trim()) {
+    config.tools.executor.model = process.env.WICI_CODEX_MODEL.trim();
   }
   return config;
 }

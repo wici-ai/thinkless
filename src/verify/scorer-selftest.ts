@@ -7,6 +7,7 @@ import type { BaselineFile, LedgerEntry, RunEvent } from '../shared/types.js';
 
 const passTarget = resolve('fixture/scorer-selftest-target');
 const failTarget = resolve('fixture/scorer-selftest-fail-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   const pass = await runPassScenario();

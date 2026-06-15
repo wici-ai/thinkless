@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { execa } from 'execa';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { GoalFile, LedgerEntry, WiCiConfig } from '../shared/types.js';
+import { isClaudeEnvelope, parseClaudeJsonOutput, parseJsonObjectFromText } from './claudeOutput.js';
+import { primaryMetricValue } from './metricFormat.js';
 
 export interface StopDecision {
   stop: boolean;
@@ -81,7 +83,8 @@ export function buildStopAnalysis(goal: GoalFile, ledger: LedgerEntry[]): StopAn
 function isTargetMet(goal: GoalFile, ledger: LedgerEntry[]): boolean {
   const metric = [...ledger].reverse().find((entry) => entry.status === 'keep' && entry.metric)?.metric;
   if (!metric || goal.metric.target === undefined || goal.metric.target === null) return false;
-  return goal.metric.direction === 'minimize' ? metric.p99 <= goal.metric.target : metric.p99 >= goal.metric.target;
+  const value = primaryMetricValue(metric);
+  return goal.metric.direction === 'minimize' ? value <= goal.metric.target : value >= goal.metric.target;
 }
 
 function marginalValueEwma(slice: StopCurvePoint[]): number {
@@ -112,11 +115,12 @@ async function worthItVerdict(
             `${prompt}\n\nStop analysis:\n${JSON.stringify(analysis, null, 2)}\n\nRecent ledger:\n${JSON.stringify(ledger.slice(-12), null, 2)}`,
             '--output-format',
             'json',
-            '--dangerously-skip-permissions'
+            '--permission-mode',
+            'plan'
           ],
           { cwd: paths.target, reject: true, all: true, maxBuffer: 1024 * 1024 * 5 }
         );
-        const parsed = JSON.parse(result.stdout) as { decision?: 'continue' | 'stop'; reason?: string };
+        const parsed = extractStopVerdict(result.stdout);
         if (parsed.decision === 'continue' || parsed.decision === 'stop') {
           return { decision: parsed.decision, reason: parsed.reason ?? 'LLM stop verdict' };
         }
@@ -173,4 +177,33 @@ function effectiveCostUnits(cost: Omit<StopCostSummary, 'effective_cost_units'>)
 function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return String(value);
   return value.toFixed(6);
+}
+
+function extractStopVerdict(raw: string): { decision?: 'continue' | 'stop'; reason?: string } {
+  const parsed = parseClaudeJsonOutput(raw);
+  for (const item of [...parsed].reverse()) {
+    const verdict = stopVerdictFromCandidate(item);
+    if (verdict) return verdict;
+  }
+  return {};
+}
+
+function stopVerdictFromCandidate(candidate: unknown): { decision?: 'continue' | 'stop'; reason?: string } | null {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const direct = candidate as { decision?: unknown; reason?: unknown; structured_output?: unknown };
+  if (direct.decision === 'continue' || direct.decision === 'stop') {
+    return {
+      decision: direct.decision,
+      reason: typeof direct.reason === 'string' ? direct.reason : undefined
+    };
+  }
+  if (direct.structured_output) {
+    const structured = stopVerdictFromCandidate(direct.structured_output);
+    if (structured) return structured;
+  }
+  if (!isClaudeEnvelope(candidate) || candidate.result === undefined || candidate.result === null) return null;
+  if (typeof candidate.result === 'object') return stopVerdictFromCandidate(candidate.result);
+  if (typeof candidate.result !== 'string') return null;
+  const parsed = parseJsonObjectFromText(candidate.result);
+  return parsed ? stopVerdictFromCandidate(parsed) : null;
 }

@@ -59,19 +59,21 @@ async function main(): Promise<void> {
   const events = await readJsonLines<RunEvent>(paths.events);
   assert(events.some((event) => event.type === 'SUPERVISOR_START'), 'live TUI supervisor did not start');
   assert(events.some((event) => event.type === 'EXECUTE_START'), 'live TUI did not show an execution start event');
-  assert(events.some((event) => event.type === 'COMMIT'), 'live TUI did not accept an improvement');
+  assert(events.some((event) => event.type === 'EXECUTE_DONE' && (event.data as { mode?: string } | undefined)?.mode === 'direct'), 'live TUI did not show direct execution completion');
+  assert(events.some((event) => event.type === 'GIT_COMMIT' && (event.data as { mode?: string } | undefined)?.mode === 'direct'), 'live TUI did not create a direct execution checkpoint');
   assert(events.some((event) => event.type === 'STOP' && event.message === 'Reached max_iters=1'), 'live TUI did not stop at max_iters=1');
 
   const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
   assert(checkpoint.supervisor_state === 'STOP', `expected STOP checkpoint, got ${checkpoint.supervisor_state}`);
   assert(checkpoint.iter === 1, `expected one live TUI iteration, got ${checkpoint.iter}`);
+  assert(checkpoint.goal_source === 'tui_goal_option', `TUI --goal shortcut should not be recorded as Chat-first source: ${checkpoint.goal_source}`);
 
   const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
   assert(ledger.length === 1, `expected one live TUI ledger row, got ${ledger.length}`);
   assert(ledger[0].status === 'keep', `expected accepted live TUI row, got ${ledger[0].status}`);
 
   const ui = stripAnsi(output);
-  assert(ui.includes('SUPERVISOR_START') && ui.includes('EXECUTE_START') && ui.includes('COMMIT'), `live TUI output missing execution stream:\n${ui.slice(-5000)}`);
+  assert(ui.includes('SUPERVISOR_START') && ui.includes('EXECUTE_START') && ui.includes('EXECUTE_DONE'), `live TUI output missing direct execution stream:\n${ui.slice(-5000)}`);
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `live TUI target worktree dirty:\n${status}`);
@@ -84,6 +86,8 @@ async function main(): Promise<void> {
         events: events.length,
         ledger_rows: ledger.length,
         rendered_live_stream: true,
+        direct_execution_stream: true,
+        goal_source: checkpoint.goal_source,
         stopped: checkpoint.supervisor_state
       },
       null,

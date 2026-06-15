@@ -5,6 +5,7 @@ import type { RunPaths } from '../shared/paths.js';
 import { currentCommit } from './gitgate.js';
 import { hashFile } from './checkpoint.js';
 import { evalHashes, lockEvalScripts, verifyEvalHashes } from './planner.js';
+import { primaryMetricValue } from './metricFormat.js';
 
 export interface CommandOutcome {
   ok: boolean;
@@ -221,7 +222,7 @@ export function ledgerFromEvaluation(args: {
   usage?: ToolUsageSummary;
   reflection: string;
   parentId?: string | null;
-  avenue?: string;
+  branch_reason?: string;
 }): LedgerEntry {
   return {
     id: `iter-${args.iter}`,
@@ -241,15 +242,15 @@ export function ledgerFromEvaluation(args: {
     guards: {
       checks: args.evaluation?.checks.ok ?? false,
       reason: args.evaluation?.reason ?? 'no evaluation',
-      ...(args.evaluation?.prescreenMetric ? { prescreen_p99: args.evaluation.prescreenMetric.p99 } : {}),
+      ...(args.evaluation?.prescreenMetric ? { prescreen_value: primaryMetricValue(args.evaluation.prescreenMetric) } : {}),
       ...(args.evaluation?.prescreenMetric && args.evaluation.prescreenDeltaPct !== undefined && args.evaluation.prescreenDeltaPct !== null
         ? { prescreen_delta_pct: args.evaluation.prescreenDeltaPct }
         : {}),
-      ...(args.evaluation?.heldoutMetric ? { heldout_p99: args.evaluation.heldoutMetric.p99 } : {}),
+      ...(args.evaluation?.heldoutMetric ? { heldout_value: primaryMetricValue(args.evaluation.heldoutMetric) } : {}),
       ...(args.evaluation?.heldoutMetric && args.evaluation.heldoutDeltaPct !== undefined && args.evaluation.heldoutDeltaPct !== null
         ? { heldout_delta_pct: args.evaluation.heldoutDeltaPct }
         : {}),
-      ...(args.avenue ? { avenue: args.avenue } : {})
+      ...(args.branch_reason ? { branch_reason: args.branch_reason } : {})
     },
     status: args.status,
     reflection: args.reflection,
@@ -267,7 +268,7 @@ function ledgerCost(wallMs: number, usage: ToolUsageSummary | undefined): Ledger
 }
 
 function decidePrescreen(baseline: MetricStats, candidate: MetricStats, goal: GoalFile): { ok: boolean; deltaPct: number; reason: string } {
-  const deltaPct = metricDeltaPct(baseline.p99, candidate.p99, goal.metric.direction);
+  const deltaPct = metricDeltaPct(primaryMetricValue(baseline), primaryMetricValue(candidate), goal.metric.direction);
   if (deltaPct <= 0) {
     return {
       ok: false,
@@ -280,7 +281,7 @@ function decidePrescreen(baseline: MetricStats, candidate: MetricStats, goal: Go
 
 function decideHeldoutValidation(baseline: MetricStats, candidate: MetricStats, goal: GoalFile, config: WiCiConfig): { ok: boolean; deltaPct: number; reason: string } {
   const direction = goal.metric.direction;
-  const deltaPct = metricDeltaPct(baseline.p99, candidate.p99, direction);
+  const deltaPct = metricDeltaPct(primaryMetricValue(baseline), primaryMetricValue(candidate), direction);
   if (!guardsOk(baseline, candidate, direction)) {
     return { ok: false, deltaPct, reason: 'held-out validation guard regressed' };
   }
@@ -310,16 +311,21 @@ export function parseMetric(output: string): MetricStats {
     fields.set(token.slice(0, index), token.slice(index + 1));
   }
 
-  const required = ['p50', 'p95', 'p99', 'unit', 'n'];
+  const required = ['unit', 'n'];
   for (const key of required) {
     if (!fields.has(key)) throw new Error(`METRIC line missing ${key}: ${line}`);
   }
+  if (!fields.has('value') && !fields.has('p99')) {
+    throw new Error(`METRIC line missing value: ${line}`);
+  }
 
   const samplesRaw = fields.get('samples');
+  const value = fields.has('value') ? numberField(fields, 'value') : numberField(fields, 'p99');
   return {
-    p50: numberField(fields, 'p50'),
-    p95: numberField(fields, 'p95'),
-    p99: numberField(fields, 'p99'),
+    value,
+    p50: fields.has('p50') ? numberField(fields, 'p50') : value,
+    p95: fields.has('p95') ? numberField(fields, 'p95') : value,
+    p99: fields.has('p99') ? numberField(fields, 'p99') : value,
     unit: fields.get('unit') ?? 'ms',
     n: Math.trunc(numberField(fields, 'n')),
     warmup_discarded: fields.has('warmup_discarded') ? Math.trunc(numberField(fields, 'warmup_discarded')) : undefined,
@@ -343,12 +349,12 @@ export function decideImprovement(baseline: MetricStats, candidate: MetricStats,
   reason: string;
 } {
   const direction = goal.metric.direction;
-  const deltaPct = metricDeltaPct(baseline.p99, candidate.p99, direction);
+  const deltaPct = metricDeltaPct(primaryMetricValue(baseline), primaryMetricValue(candidate), direction);
   if (candidate.n < config.evaluation.min_reps) {
     return { improved: false, deltaPct, confidence: 'insufficient-reps', reason: `n=${candidate.n} below min_reps=${config.evaluation.min_reps}` };
   }
   if (!guardsOk(baseline, candidate, direction)) {
-    return { improved: false, deltaPct, confidence: 'guard-regression', reason: 'p50 or p95 guard regressed beyond threshold' };
+    return { improved: false, deltaPct, confidence: 'guard-regression', reason: 'secondary metric guard regressed beyond threshold' };
   }
   if (deltaPct <= config.evaluation.noise_threshold) {
     return { improved: false, deltaPct, confidence: 'below-noise-threshold', reason: `delta ${formatPct(deltaPct)} <= threshold ${formatPct(config.evaluation.noise_threshold)}` };

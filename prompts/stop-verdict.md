@@ -4,4 +4,4 @@ Given the ledger improvement curve, cumulative cost, and recent failed or revert
 
 `{"decision":"continue"|"stop","reason":"short concrete reason"}`
 
-Prefer continuing only when there is a plausible next avenue with meaningful expected value. Stop when recent marginal value is low compared with the cost and risk.
+Prefer continuing only when there is a plausible next direction with meaningful expected value. Stop when recent marginal value is low compared with the cost and risk.

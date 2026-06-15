@@ -5,7 +5,8 @@ import { createSampleTarget } from '../sample.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
 import type { ArchiveState, BaselineFile, LedgerEntry, RunEvent } from '../shared/types.js';
 
-const target = resolve('fixture/diversity-archive-target');
+const target = resolve('fixture/branch-archive-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
@@ -28,7 +29,7 @@ async function main(): Promise<void> {
       }
     }
   );
-  assert(result.exitCode === 0, `diversity archive verifier supervisor run failed:\n${result.all}`);
+  assert(result.exitCode === 0, `branch archive verifier supervisor run failed:\n${result.all}`);
 
   const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
   assert(ledger.length === 5, `expected 5 ledger rows, got ${ledger.length}`);
@@ -58,14 +59,17 @@ async function main(): Promise<void> {
 
   const replan = events.find((event) => event.type === 'REPLAN_STUCK');
   assert(replan, 'missing REPLAN_STUCK event');
-  assert((replan.data as { parent_id?: string } | undefined)?.parent_id === 'iter-1', `replan parent was not archive iter-1: ${JSON.stringify(replan.data)}`);
+  const replanData = replan.data as { parent_id?: string; planner_selects_direction?: boolean; avenue?: string } | undefined;
+  assert(replanData?.parent_id === 'iter-1', `replan parent was not archive iter-1: ${JSON.stringify(replan.data)}`);
+  assert(replanData.planner_selects_direction === true, `replan should delegate direction to planner: ${JSON.stringify(replan.data)}`);
+  assert(replanData.avenue === undefined, `archive branch should not include supervisor-selected avenue: ${JSON.stringify(replan.data)}`);
 
   const branchOutcome = ledger[4];
   assert(branchOutcome.parent_id === 'iter-1', `branch outcome did not record archive parent: ${JSON.stringify(branchOutcome)}`);
-  assert(branchOutcome.guards.avenue, `branch outcome missing avenue guard: ${JSON.stringify(branchOutcome.guards)}`);
+  assert(branchOutcome.guards.avenue === undefined, `branch outcome should not record supervisor-selected avenue: ${JSON.stringify(branchOutcome.guards)}`);
 
   const status = await git(['status', '--short']);
-  assert(status.trim() === '', `target worktree dirty after diversity archive run:\n${status}`);
+  assert(status.trim() === '', `target worktree dirty after branch archive run:\n${status}`);
 
   console.log(
     JSON.stringify(

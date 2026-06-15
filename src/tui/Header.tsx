@@ -1,7 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { RunState } from './useRunState.js';
-import type { GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
+import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
+import { isPlannerSelectedMetricName, primaryMetricValue, primaryMetricName } from '../supervisor/metricFormat.js';
 
 export function Header({ state }: { state: RunState }) {
   const checkpoint = state.checkpoint;
@@ -16,7 +17,8 @@ export function Header({ state }: { state: RunState }) {
       <Text bold>WiCi</Text>
       <Text color={status === 'FAILED' ? 'red' : status === 'STOP' ? 'green' : 'cyan'}>{status}</Text>
       <Text>iter {iter}</Text>
-      <Text>{metricSummary(goal, baseline?.best_metric.p99, baseline?.best_metric.unit)}</Text>
+      <Text>{metricSummary(goal, baseline?.best_metric ? primaryMetricValue(baseline.best_metric) : undefined, baseline?.best_metric.unit)}</Text>
+      <Text>{rollbackSummary(checkpoint)}</Text>
       <Text>{costSummary(state.ledger)}</Text>
       <Text>{elapsedSummary(state.events)}</Text>
       <Text color={last?.level === 'error' ? 'red' : last?.level === 'warn' ? 'yellow' : 'gray'}>{last?.type ?? 'idle'}</Text>
@@ -24,10 +26,22 @@ export function Header({ state }: { state: RunState }) {
   );
 }
 
-export function metricSummary(goal: GoalFile | null, bestP99: number | undefined, unit: string | undefined): string {
-  const metricName = goal?.metric.name ?? 'p99';
+export function rollbackSummary(checkpoint: Checkpoint | null): string {
+  if (!checkpoint) return 'rollback pending';
+  const commit = checkpoint.best_commit;
+  if (!commit) return 'rollback pending';
+  return `rollback ${commit.slice(0, 7)}`;
+}
+
+export function metricSummary(goal: GoalFile | null, bestValue: number | undefined, unit: string | undefined): string {
+  if (!goal) return 'goal pending';
+  if (isPlannerSelectedMetricName(goal.metric.name)) {
+    if (bestValue === undefined) return 'validation pending';
+    return `validation ${formatNumber(bestValue)}${unit ?? goal.metric.unit ?? ''}`;
+  }
+  const metricName = primaryMetricName(goal);
   const metricUnit = unit ?? goal?.metric.unit ?? '';
-  const best = bestP99 === undefined ? 'pending' : `${formatNumber(bestP99)}${metricUnit}`;
+  const best = bestValue === undefined ? 'pending' : `${formatNumber(bestValue)}${metricUnit}`;
   if (goal?.metric.target === undefined || goal.metric.target === null) return `best ${metricName} ${best}`;
   const op = goal.metric.direction === 'minimize' ? '<=' : '>=';
   return `${metricName} ${best} target ${op}${formatNumber(goal.metric.target)}${metricUnit}`;

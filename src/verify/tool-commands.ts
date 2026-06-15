@@ -1,17 +1,29 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
-import { buildInitialPlannerArgs, buildPlanDiffArgs } from '../supervisor/planner.js';
-import { promptPath, schemaPath } from '../shared/paths.js';
+import {
+  buildInitialPlannerArgs,
+  buildInitialPlannerResumeArgs,
+  buildPlanDiffArgs,
+  extractPlannerResponse,
+  extractStructured,
+  plannerProgressFromLine,
+  runInitialPlanner,
+  runPlanDiff
+} from '../supervisor/planner.js';
+import { ensureRunDirs, promptPath, runPaths, schemaPath } from '../shared/paths.js';
+import { parsePlanSteps } from '../supervisor/plan.js';
+import { atomicWriteJson, exists } from '../shared/atomic.js';
+import { loadConfig } from '../shared/config.js';
+import type { GoalFile, WiCiConfig } from '../shared/types.js';
+import { resolveMaxIters } from '../supervisor/index.js';
 
 async function main(): Promise<void> {
-  const planSchema = await readFile(schemaPath('plan'), 'utf8');
-  const diffSchema = await readFile(schemaPath('plan-diff'), 'utf8');
+  const iterSchema = JSON.parse(await readFile(schemaPath('iter-result'), 'utf8')) as { additionalProperties?: unknown };
   const plannerArgs = buildInitialPlannerArgs({
     goalText: 'test',
-    schema: planSchema,
-    effort: 'max',
+    effort: 'default',
     systemPrompt: 'planner prompt'
   });
   const diffArgs = buildPlanDiffArgs({
@@ -19,8 +31,15 @@ async function main(): Promise<void> {
     currentPlan: '# plan',
     goalText: '# GOAL\n\n## Requirements\n- [active] R1: test\n',
     sessionId: 'session-123',
-    schema: diffSchema,
     systemPrompt: 'diff prompt'
+  });
+  const resumeArgs = buildInitialPlannerResumeArgs({
+    goalText: '# GOAL\n\n## Requirements\n- [active] R1: test\n',
+    sessionId: 'session-abc',
+    question: 'Which host?',
+    answer: 'Use the host in the chat request.',
+    effort: 'default',
+    systemPrompt: 'planner prompt'
   });
   const firstCodex = buildExecutorArgs({
     iter: 1,
@@ -36,34 +55,212 @@ async function main(): Promise<void> {
     schemaPath: schemaPath('iter-result'),
     prompt: 'resume'
   });
+  const sparkCodex = buildExecutorArgs({
+    iter: 1,
+    target: resolve('fixture/slow-target'),
+    artifactPath: '.wici/artifacts/iter-spark.txt',
+    schemaPath: schemaPath('iter-result'),
+    prompt: 'execute cheaply',
+    model: 'gpt-5.3-codex-spark'
+  });
 
-  assert(plannerArgs[plannerArgs.indexOf('--json-schema') + 1].trim().startsWith('{'), 'initial planner must pass JSON schema content');
-  assert(!plannerArgs.includes(schemaPath('plan')), 'initial planner must not pass schema file path to claude');
-  assert(diffArgs[diffArgs.indexOf('--json-schema') + 1].trim().startsWith('{'), 'diff planner must pass JSON schema content');
-  assert(!diffArgs.includes(schemaPath('plan-diff')), 'diff planner must not pass schema file path to claude');
+  assert(plannerArgs[plannerArgs.indexOf('--output-format') + 1] === 'stream-json', 'initial planner must stream JSON for progress visibility');
+  assert(plannerArgs.includes('--verbose'), 'stream-json planner output must use Claude verbose mode');
+  assert(!plannerArgs.includes('--effort'), 'initial planner must omit --effort for Claude default effort fast validation runs');
+  assert(!plannerArgs[plannerArgs.indexOf('-p') + 1].includes('ULTRAPLAN'), 'planner prompt must not force ultra/high-effort wording');
+  assert(!plannerArgs.includes('--json-schema'), 'initial planner must not use a JSON schema as a second PLAN');
+  assert(!diffArgs.includes('--json-schema'), 'diff planner must not use a JSON schema as a second PLAN');
+  assert(diffArgs[diffArgs.indexOf('--output-format') + 1] === 'stream-json', 'diff planner must stream JSON for usage visibility');
+  assert(diffArgs.includes('--verbose'), 'diff planner stream-json must use verbose mode');
   assert(plannerArgs[plannerArgs.indexOf('--permission-mode') + 1] === 'plan', 'initial planner must run Claude Code in plan mode');
   assert(diffArgs[diffArgs.indexOf('--permission-mode') + 1] === 'plan', 'diff planner must run Claude Code in plan mode');
-  assert(!plannerArgs.includes('--dangerously-skip-permissions'), 'planner must not bypass permissions outside plan mode');
-  assert(!diffArgs.includes('--dangerously-skip-permissions'), 'planner diff must not bypass permissions outside plan mode');
+  assert(resumeArgs[resumeArgs.indexOf('--permission-mode') + 1] === 'plan', 'planner clarification resume must run Claude Code in plan mode');
+  assert(plannerArgs.includes('--dangerously-skip-permissions'), 'initial planner must preserve native Claude Code autonomy for plan mode');
+  assert(diffArgs.includes('--dangerously-skip-permissions'), 'planner diff must preserve native Claude Code autonomy for plan mode');
+  assert(resumeArgs.includes('--dangerously-skip-permissions'), 'planner clarification resume must preserve native Claude Code autonomy for plan mode');
+  assert(resumeArgs[resumeArgs.indexOf('--resume') + 1] === 'session-abc', 'planner clarification resume must target the Claude session');
+  assert(!plannerArgs.includes('--tools') && !diffArgs.includes('--tools'), 'planner must not override Claude native tool availability');
+  assert(!plannerArgs.includes('--disallowedTools') && !diffArgs.includes('--disallowedTools'), 'planner must not override Claude native tool denials');
   assert(diffArgs[diffArgs.indexOf('-p') + 1].includes('Current GOAL.md:'), 'planner diff must pass markdown GOAL.md text');
   assert(!diffArgs[diffArgs.indexOf('-p') + 1].includes('"requirements"'), 'planner diff must not expose internal goal.json as the goal contract');
 
   const plannerPrompt = await readFile(promptPath('planner'), 'utf8');
   assert(!plannerPrompt.includes('unit=ms n=<integer>'), 'planner prompt must not hardcode metric unit=ms');
-  assert(plannerPrompt.includes('unit=<goal metric unit>'), 'planner prompt must require the GOAL.md metric unit');
-  assert(plannerPrompt.includes('goal direction determine acceptance'), 'planner prompt must let GOAL.md metric direction control acceptance');
+  assert(!plannerPrompt.includes('unit=<goal metric unit>'), 'planner prompt must not require a fixed GOAL.md metric unit schema');
+  assert(plannerPrompt.includes('Fresh V1 does not require `.opt/measure.sh` to follow a WiCi metric schema'), 'planner prompt must keep measurement schemas optional');
+  assert(plannerPrompt.includes('you may emit a simple final line such as `METRIC value=<number>'), 'planner prompt may mention METRIC only as an optional task-specific convention');
+  assert(!plannerPrompt.includes('WiCi treats `value` as the primary scalar'), 'planner prompt must not make WiCi value parsing part of fresh V1');
+  assert(plannerPrompt.includes('## PLAN.md'), 'planner prompt must request markdown PLAN.md artifacts');
+  assert(plannerPrompt.includes('## GOAL.md'), 'planner prompt must allow optional markdown GOAL.md artifacts');
+  assert(plannerPrompt.includes('Native Claude Code tools remain available in plan mode'), 'planner prompt must preserve native Claude plan-mode tools');
+  assert(plannerPrompt.includes('web research or remote discovery'), 'planner prompt must allow planning-time web and remote discovery');
+  assert(plannerPrompt.includes('Do not produce a second JSON representation'), 'planner prompt must prohibit JSON-as-plan');
+  assert(plannerPrompt.includes('a PLAN.md-only workflow is valid'), 'planner prompt must not force .opt scripts for fresh V1 plans');
+  assert(plannerPrompt.includes('Do not create scripts just to satisfy WiCi'), 'planner prompt must keep validation scripts optional');
+  assert(plannerPrompt.includes('this is optional and task-specific rather than a supervisor baseline gate'), 'planner prompt must not turn measure scripts into a supervisor gate');
+
+  const structured = extractStructured(
+    [
+      JSON.stringify({ type: 'system', session_id: 'session-abc' }),
+      JSON.stringify({
+        type: 'result',
+        session_id: 'session-abc',
+        result: [
+          '## PLAN.md',
+          '',
+          '# Plan',
+          '- [ ] S1 Test',
+          '',
+          '## .opt/measure.sh',
+          '',
+          'echo METRIC value=1 unit=score n=5 warmup_discarded=0',
+          '',
+          '## .opt/checks.sh',
+          '',
+          'echo ok'
+        ].join('\n')
+      })
+    ].join('\n')
+  );
+  assert(structured.session_id === 'session-abc', 'planner parser must preserve Claude envelope session id');
+  assert(typeof structured.planMarkdown === 'string', 'planner parser must return plan markdown');
+  assert(structured.planMarkdown.includes('S1'), 'planner parser must extract markdown artifacts from Claude result envelope');
+
+  const question = extractPlannerResponse(
+    JSON.stringify({
+      type: 'result',
+      session_id: 'session-question',
+      result: '## QUESTION\n\nWhich remote host should I plan against?'
+    })
+  );
+  assert(question.kind === 'question', 'planner parser must surface clarification questions');
+  assert(question.question.session_id === 'session-question', 'planner parser must preserve clarification session id');
+  assert(question.question.question.includes('remote host'), 'planner parser must preserve clarification text');
+
+  assertThrows(
+    () =>
+      extractStructured(
+        JSON.stringify({
+          type: 'result',
+          session_id: 'session-json-plan',
+          result: JSON.stringify({
+            planMarkdown: '# Plan\n- [ ] S1 Test',
+            measureSh: 'echo METRIC value=1 unit=score n=5 warmup_discarded=0',
+            checksSh: 'echo ok'
+          })
+        })
+      ),
+    'planner parser must reject JSON-as-plan artifacts'
+  );
+  assertThrows(
+    () =>
+      extractPlannerResponse(
+        JSON.stringify({
+          type: 'result',
+          session_id: 'session-json-question',
+          result: JSON.stringify({
+            question: 'Which remote host should I plan against?'
+          })
+        })
+      ),
+    'planner parser must reject JSON clarification payloads'
+  );
+
+  const fence = '```';
+  const markdownArtifactStructured = extractStructured(
+    JSON.stringify({
+      type: 'result',
+      session_id: 'session-markdown-artifacts',
+      result: [
+        'Planner notes before artifacts.',
+        '',
+        '## GOAL.md',
+        '',
+        `${fence}markdown`,
+        '# GOAL',
+        '',
+        '- Raw requirement: keep the original user text.',
+        fence,
+        '',
+        '## PLAN.md',
+        '',
+        `${fence}markdown`,
+        '# PLAN',
+        '',
+        '## Config contract',
+        '',
+        fence,
+        'A=1',
+        fence,
+        '',
+        '## Steps',
+        '',
+        '### S1 — Do it',
+        '- Action: preserve nested fences while parsing the artifact.',
+        fence,
+        '',
+        '## .opt/checks.sh',
+        '',
+        `${fence}bash`,
+        'echo ok',
+        fence
+      ].join('\n')
+    })
+  );
+  assert(markdownArtifactStructured.goalMarkdown?.includes('Raw requirement'), 'markdown artifact parser must extract optional GOAL.md');
+  assert(markdownArtifactStructured.planMarkdown?.includes('### S1'), 'markdown artifact parser must not truncate PLAN.md at inner headings');
+  assert(markdownArtifactStructured.planMarkdown?.includes('A=1'), 'markdown artifact parser must preserve inner fenced blocks');
+  assert(markdownArtifactStructured.checksSh === 'echo ok', 'markdown artifact parser must extract following shell artifacts');
+
+  const progress = plannerProgressFromLine(
+    JSON.stringify({
+      type: 'assistant',
+      session_id: 'session-abc',
+      message: {
+        usage: {
+          input_tokens: 10,
+          output_tokens: 4,
+          cache_read_input_tokens: 2
+        }
+      }
+    })
+  );
+  assert(progress?.usage.input_tokens === 10, 'planner usage parser must extract input tokens from stream-json events');
+  const systemProgress = plannerProgressFromLine(
+    JSON.stringify({
+      type: 'system',
+      session_id: 'session-abc',
+      usage: {
+        total_tokens: 16152,
+        tool_uses: 1,
+        duration_ms: 13532
+      }
+    })
+  );
+  assert(systemProgress?.usage.total_tokens === 16152, 'planner usage parser must extract system total tokens from stream-json events');
 
   assert(firstCodex.includes('--output-schema'), 'first codex exec missing --output-schema');
   assert(firstCodex.includes('--output-last-message'), 'first codex exec missing --output-last-message');
   assert(resumeCodex.includes('--output-schema'), 'codex resume missing --output-schema');
   assert(resumeCodex.includes('--output-last-message'), 'codex resume missing --output-last-message');
   assert(resumeCodex.includes('--skip-git-repo-check'), 'codex resume missing --skip-git-repo-check');
+  assert(!resumeCodex.includes('-C'), `codex resume must rely on process cwd instead of unsupported -C: ${resumeCodex.join(' ')}`);
+  assert(!firstCodex.includes('gpt-5.3-codex-spark'), 'spark model must not be hardcoded into default executor args');
+  assert(sparkCodex[sparkCodex.indexOf('--model') + 1] === 'gpt-5.3-codex-spark', 'executor must support explicit model override for real canaries');
+  const loadedConfig = await loadConfig('stub');
+  assert(loadedConfig.budget.max_iters === 0, 'default config max_iters=0 should disable WiCi iteration hard caps for real runs');
+  assert(resolveMaxIters(undefined, loadedConfig.budget.max_iters) === Number.POSITIVE_INFINITY, 'configured max_iters=0 should resolve to unbounded');
+  assert(resolveMaxIters(0, loadedConfig.budget.max_iters) === 0, 'explicit --max-iters 0 should remain a setup-only run limit');
+  assert(resolveMaxIters(1, loadedConfig.budget.max_iters) === 1, 'explicit --max-iters should override the unbounded default');
+  assert(iterSchema.additionalProperties === false, 'codex output schema root must set additionalProperties=false');
+  const headingSteps = parsePlanSteps('# Plan\n\n## Steps\n\n### S1 — SSH connectivity\n- Action: connect\n\n### S2 - Measure throughput <!-- status:active iter:1 -->\n');
+  assert(headingSteps.length === 2, `planner heading steps should be executable: ${JSON.stringify(headingSteps)}`);
+  assert(headingSteps[0].id === 'S1' && headingSteps[0].status === 'pending', 'heading step S1 should default to pending');
+  assert(headingSteps[1].id === 'S2' && headingSteps[1].status === 'active', 'heading step S2 should read status comments');
+  await verifyInitialPlannerDoesNotInferBenchmark();
+  await verifyPlanDiffUsage();
 
-  const [claudeHelp, codexResumeHelp] = await Promise.all([
-    execa('claude', ['--help'], { all: true, reject: false }),
-    execa('codex', ['exec', 'resume', '--help'], { all: true, reject: false })
-  ]);
-  assert((claudeHelp.all ?? '').includes('--json-schema <schema>'), 'local claude help does not advertise --json-schema <schema>');
+  const codexResumeHelp = await execa('codex', ['exec', 'resume', '--help'], { all: true, reject: false });
   assert((codexResumeHelp.all ?? '').includes('--output-schema <FILE>'), 'local codex resume help does not advertise --output-schema');
   assert((codexResumeHelp.all ?? '').includes('--output-last-message <FILE>'), 'local codex resume help does not advertise --output-last-message');
 
@@ -71,8 +268,15 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         ok: true,
-        claude_schema_content: true,
+        claude_markdown_plan: true,
+        planner_json_plan_rejected: true,
         claude_plan_mode: true,
+        initial_plan_usage_streamed: true,
+        plan_diff_usage_streamed: true,
+        no_markdown_benchmark_inference: true,
+        codex_output_schema_strict: true,
+        codex_model_override: true,
+        default_iteration_budget_unbounded: true,
         codex_resume_structured_output_flags: true
       },
       null,
@@ -83,6 +287,169 @@ async function main(): Promise<void> {
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function assertThrows(fn: () => unknown, message: string): void {
+  let threw = false;
+  try {
+    fn();
+  } catch {
+    threw = true;
+  }
+  assert(threw, message);
+}
+
+async function verifyPlanDiffUsage(): Promise<void> {
+  const target = resolve('fixture/planner-diff-usage-target');
+  const fakeBin = resolve('fixture/planner-diff-usage-bin');
+  await rm(target, { recursive: true, force: true });
+  await rm(fakeBin, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  const fakeClaude = join(fakeBin, 'claude');
+  await writeFile(
+    fakeClaude,
+    `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.includes('--version')) {
+  console.log('2.1.999 (Fake Claude Code)');
+  process.exit(0);
+}
+console.log(JSON.stringify({
+  type: 'assistant',
+  session_id: 'fake-diff-session',
+  message: { usage: { input_tokens: 17, output_tokens: 5 } }
+}));
+console.log(JSON.stringify({
+  type: 'result',
+  subtype: 'success',
+  session_id: 'fake-diff-session',
+  result: [
+    '## PLAN.md',
+    '',
+    '# Updated Plan',
+    '',
+    '- [ ] S1 Handle the new chat requirement'
+  ].join('\\n')
+}));
+`
+  );
+  await chmod(fakeClaude, 0o755);
+
+  const paths = runPaths(target);
+  await ensureRunDirs(paths);
+  const config = (await loadConfig('real')) as WiCiConfig;
+  config.tools.planner.command = fakeClaude;
+  const goal: GoalFile = {
+    run_id: 'planner-diff-usage',
+    version: 1,
+    requirements: [{ id: 'R1', text: 'Verify planner diff token usage streaming.', source: 'initial', status: 'active' }],
+    acceptance_criteria: [],
+    constraints: [],
+    metric: { name: 'planner-selected validation', direction: 'maximize', target: null, unit: 'score' },
+    budget: config.budget,
+    stop: config.stop
+  };
+  await atomicWriteJson(paths.goal, goal);
+  await writeFile(paths.goalDoc, '# GOAL\n\nVerify planner diff token usage streaming.\n');
+  await writeFile(paths.plan, '# Initial Plan\n\n- [ ] S1 Initial step\n');
+
+  const progress: unknown[] = [];
+  const result = await runPlanDiff(paths, goal, 'fake-diff-session', 'new chat requirement', config, async (item) => {
+    progress.push(item);
+  });
+  assert(result.ok, `planner diff should succeed: ${JSON.stringify(result)}`);
+  assert(progress.length > 0, 'planner diff did not stream PLAN_USAGE progress');
+  assert((progress[0] as { usage?: { input_tokens?: number } }).usage?.input_tokens === 17, `unexpected planner diff usage: ${JSON.stringify(progress)}`);
+  const plan = await readFile(paths.plan, 'utf8');
+  assert(plan.includes('Handle the new chat requirement'), `planner diff did not materialize markdown PLAN.md:\n${plan}`);
+}
+
+async function verifyInitialPlannerDoesNotInferBenchmark(): Promise<void> {
+  const target = resolve('fixture/planner-no-benchmark-inference-target');
+  const fakeBin = resolve('fixture/planner-no-benchmark-inference-bin');
+  await rm(target, { recursive: true, force: true });
+  await rm(fakeBin, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  const fakeClaude = join(fakeBin, 'claude');
+  await writeFile(
+    fakeClaude,
+    `#!/usr/bin/env node
+if (process.argv.includes('--version')) {
+  console.log('2.1.999 (Fake Claude Code)');
+  process.exit(0);
+}
+console.log(JSON.stringify({
+  type: 'assistant',
+  session_id: 'fake-initial-session',
+  message: { usage: { input_tokens: 23, output_tokens: 7 } }
+}));
+console.log(JSON.stringify({
+  type: 'result',
+  subtype: 'success',
+  session_id: 'fake-initial-session',
+  result: [
+    '## PLAN.md',
+    '',
+    '# Plan',
+    '',
+    '## BENCHMARK',
+    '',
+    '- tool: curl',
+    '- command: ./.opt/measure.sh',
+    '- metric: generated_throughput',
+    '- direction: maximize',
+    '- target: 700',
+    '- unit: token/s',
+    '- reason: This is planner prose inside PLAN.md, not a WiCi schema.',
+    '',
+    '## Steps',
+    '',
+    '- [ ] S1 Let Codex run the planner-selected validation.',
+    '',
+    '## .opt/measure.sh',
+    '',
+    'echo METRIC value=701 unit=token/s n=1 warmup_discarded=0',
+    '',
+    '## .opt/checks.sh',
+    '',
+    'echo ok'
+  ].join('\\n')
+}));
+`
+  );
+  await chmod(fakeClaude, 0o755);
+
+  const paths = runPaths(target);
+  await ensureRunDirs(paths);
+  const config = (await loadConfig('real')) as WiCiConfig;
+  config.tools.planner.command = fakeClaude;
+  const goal: GoalFile = {
+    run_id: 'planner-no-benchmark-inference',
+    version: 1,
+    requirements: [{ id: 'R1', text: 'Do not parse planner markdown into supervisor benchmark semantics.', source: 'initial', status: 'active' }],
+    acceptance_criteria: [],
+    constraints: [],
+    metric: { name: 'planner-selected validation', direction: 'maximize', target: null, unit: 'score' },
+    budget: config.budget,
+    stop: config.stop
+  };
+  await atomicWriteJson(paths.goal, goal);
+  await writeFile(paths.goalDoc, '# GOAL\n\nDo not parse planner markdown into supervisor benchmark semantics.\n');
+
+  const progress: unknown[] = [];
+  const result = await runInitialPlanner(paths, goal, config, async (item) => {
+    progress.push(item);
+  });
+  assert(result.ok, `initial planner should succeed: ${JSON.stringify(result)}`);
+  assert(progress.length > 0, 'initial planner did not stream PLAN_USAGE progress');
+  assert((progress[0] as { usage?: { input_tokens?: number } }).usage?.input_tokens === 23, `unexpected initial planner usage: ${JSON.stringify(progress)}`);
+  assert(!(await exists(paths.benchmarkManifest)), 'fresh planner materialization must not infer .opt/benchmark.json from PLAN.md prose');
+  const savedGoal = JSON.parse(await readFile(paths.goal, 'utf8')) as GoalFile;
+  assert(savedGoal.metric.name === goal.metric.name, `fresh planner materialization must not rewrite goal metric: ${JSON.stringify(savedGoal.metric)}`);
+  const plan = await readFile(paths.plan, 'utf8');
+  assert(plan.includes('This is planner prose inside PLAN.md'), `planner prose was not preserved in PLAN.md:\n${plan}`);
 }
 
 await main();

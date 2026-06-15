@@ -43,6 +43,7 @@ program
     const result = await runSupervisor({
       target: resolve(options.target),
       goal: options.goal,
+      goalSource: options.goal ? 'cli_goal' : undefined,
       once: options.once,
       maxIters: options.maxIters,
       resumeIteration: options.resumeIteration,
@@ -108,7 +109,8 @@ program
     const target = await createSampleTarget(options.target, true);
     const result = await runSupervisor({
       target,
-      goal: 'Reduce p99 latency of uniqueSorted while preserving exact sorted unique output.',
+      goal: 'Improve uniqueSorted while preserving exact sorted unique output.',
+      goalSource: 'cli_goal',
       once: true,
       maxIters: 1,
       mode: 'stub'

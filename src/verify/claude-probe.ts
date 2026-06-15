@@ -41,13 +41,12 @@ function fakeConfig(mode: WiCiConfig['tools']['mode']): WiCiConfig {
   return {
     tools: {
       mode,
-      planner: { command: 'claude', effort: 'max' },
+      planner: { command: 'claude', effort: 'default' },
       executor: { command: 'codex', dangerouslyBypassApprovalsAndSandbox: true }
     },
     budget: { max_iters: 20, max_cost_usd: 1, deadline: null },
     stop: { tau: 0.01, K: 3, N: 4, mode: 'auto' },
     retry: { max_attempts_per_step: 2, reverts_before_reset: 5, stall_replan_after: 3 },
-    diversity: { avenues: ['algorithmic complexity', 'data structure change'] },
     evaluation: { noise_threshold: 0.01, min_reps: 5, bootstrap_resamples: 1000, checks_timeout_ms: 300000, measure_timeout_ms: 300000 },
     git: { init_if_missing: false, user_name: 'WiCi Test', user_email: 'wici-test@example.invalid' },
     safety: { container_hint: 'test', forbidden_actions: [] }

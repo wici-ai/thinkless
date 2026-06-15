@@ -3,7 +3,7 @@
     "mode": "auto",
     "planner": {
       "command": "claude",
-      "effort": "max"
+      "effort": "default"
     },
     "executor": {
       "command": "codex",
@@ -11,7 +11,7 @@
     }
   },
   "budget": {
-    "max_iters": 20,
+    "max_iters": 0,
     "max_cost_usd": 0,
     "deadline": null
   },
@@ -26,22 +26,14 @@
     "reverts_before_reset": 5,
     "stall_replan_after": 3
   },
-  "diversity": {
-    "avenues": [
-      "algorithmic complexity",
-      "data structure change",
-      "caching or memoization",
-      "batching or I/O reduction",
-      "concurrency or parallelism"
-    ]
-  },
   "evaluation": {
     "noise_threshold": 0.01,
     "min_reps": 5,
     "bootstrap_resamples": 1000,
     "checks_timeout_ms": 300000,
     "measure_timeout_ms": 300000,
-    "lock_mode": "auto"
+    "lock_mode": "auto",
+    "legacy_optimizer": false
   },
   "git": {
     "init_if_missing": false,

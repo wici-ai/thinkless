@@ -35,7 +35,7 @@ export function App({
   const [startError, setStartError] = useState<string | null>(null);
 
   const launchSupervisor = useCallback(
-    (goal?: string) => {
+    (goal?: string, goalSource?: RunOptions['goalSource']) => {
       if (!supervisor.enabled || startedRef.current) return;
       startedRef.current = true;
       setStarted(true);
@@ -43,15 +43,17 @@ export function App({
       const options: RunOptions = {
         target,
         goal,
+        goalSource,
         maxIters: supervisor.maxIters,
         resumeIteration: supervisor.resumeIteration,
         mode: supervisor.mode,
         lockMode: supervisor.lockMode
       };
       void runSupervisor(options).catch((error: unknown) => {
+        setStartError(error instanceof Error ? error.message : String(error));
+      }).finally(() => {
         startedRef.current = false;
         setStarted(false);
-        setStartError(error instanceof Error ? error.message : String(error));
       });
     },
     [target, supervisor.enabled, supervisor.lockMode, supervisor.maxIters, supervisor.mode, supervisor.resumeIteration]
@@ -59,13 +61,13 @@ export function App({
 
   useEffect(() => {
     if (!supervisor.enabled || !supervisor.initialGoal) return;
-    launchSupervisor(supervisor.initialGoal);
+    launchSupervisor(supervisor.initialGoal, 'tui_goal_option');
   }, [launchSupervisor, supervisor.enabled, supervisor.initialGoal]);
 
   useEffect(() => {
-    if (!supervisor.enabled || supervisor.initialGoal || !state.goal) return;
+    if (!supervisor.enabled || supervisor.initialGoal || !shouldAutoStartExistingRun(state)) return;
     launchSupervisor(undefined);
-  }, [launchSupervisor, state.goal, supervisor.enabled, supervisor.initialGoal]);
+  }, [launchSupervisor, state.goal, state.checkpoint?.supervisor_state, supervisor.enabled, supervisor.initialGoal]);
 
   useInput((_input, key) => {
     if (key.escape) focus('chat');
@@ -88,8 +90,11 @@ export function App({
             target={target}
             interactive={interactive}
             outbox={state.outbox}
+            injections={state.injections}
+            goal={state.goal}
             acceptInitialGoal={acceptInitialGoal}
-            onInitialGoal={launchSupervisor}
+            onInitialGoal={(goal) => launchSupervisor(goal, 'tui_chat')}
+            onInjection={() => launchSupervisor(undefined)}
             systemLine={startError}
           />
         </Box>
@@ -102,6 +107,13 @@ export function App({
       </Box>
     </Box>
   );
+}
+
+export function shouldAutoStartExistingRun(state: ReturnType<typeof useRunState>): boolean {
+  if (!state.goal) return false;
+  const supervisorState = state.checkpoint?.supervisor_state;
+  if (supervisorState === 'STOP' || supervisorState === 'FAILED') return false;
+  return true;
 }
 
 export function shouldAcceptInitialGoalFromChat(input: {
@@ -117,7 +129,6 @@ function hasRunBlackboard(state: ReturnType<typeof useRunState>): boolean {
   return Boolean(
     state.goal ||
       state.checkpoint ||
-      state.baseline ||
       state.events.length > 0 ||
       state.goalDoc.trim() ||
       state.plan.trim() ||

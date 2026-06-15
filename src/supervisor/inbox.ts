@@ -149,6 +149,7 @@ export function applyInjections(goal: GoalFile, injections: Injection[]): { goal
       );
       steer.push(`Drop requirement: ${injection.text}`);
     } else if (injection.kind === 'steer') {
+      next.constraints.push(`Steering: ${injection.text}`);
       steer.push(injection.text);
     } else if (injection.kind === 'answer') {
       const label = injection.reply_to ? `Answer to ${injection.reply_to}` : 'Answer';

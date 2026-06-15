@@ -39,19 +39,6 @@ export function assertRealToolsReady(config: WiCiConfig, report: ToolHealthRepor
   }
 }
 
-export function assertNoPendingToolUpdatesForLongRun(config: WiCiConfig, report: ToolHealthReport | null, maxIters: number): void {
-  if (config.tools.mode === 'stub') return;
-  if (maxIters <= 1) return;
-  const pending = [report?.codex, report?.claude].filter((tool): tool is ToolHealth => Boolean(tool?.updatePending));
-  if (pending.length > 0) {
-    throw new Error(
-      `Refusing to start long run because tool update is pending; run doctor --update between runs first: ${pending
-        .map((tool) => tool.command)
-        .join(', ')}`
-    );
-  }
-}
-
 export async function toolVersionsFromHealth(config: WiCiConfig, report: ToolHealthReport | null): Promise<NonNullable<Checkpoint['tool_versions']>> {
   return {
     mode: config.tools.mode,
@@ -116,8 +103,15 @@ async function inspectTool(command: string, versionArgs: string[], doctorArgs: s
     version: (version.all ?? version.stdout).trim(),
     doctor: doctorOutput,
     updatePending: doctorOutput ? parseCodexUpdatePending(doctorOutput) : undefined,
-    error: version.exitCode === 0 && (!doctor || doctor.exitCode === 0) ? undefined : 'tool reported a non-zero health check'
+    error: version.exitCode === 0 ? parseCodexDoctorError(doctorOutput, doctor?.exitCode ?? 0) : 'tool reported a non-zero version check'
   };
+}
+
+export function parseCodexDoctorError(doctorOutput: string | undefined, exitCode: number): string | undefined {
+  if (!doctorOutput || exitCode === 0) return undefined;
+  const summary = /(\d+)\s+fail degraded/i.exec(doctorOutput);
+  if (summary && Number(summary[1]) === 0) return undefined;
+  return 'tool reported a non-zero health check';
 }
 
 export function parseCodexUpdatePending(doctorOutput: string): boolean | undefined {

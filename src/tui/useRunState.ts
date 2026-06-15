@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import chokidar from 'chokidar';
 import { readFile, readdir } from 'node:fs/promises';
 import { runPaths } from '../shared/paths.js';
-import type { BaselineFile, Checkpoint, GoalFile, LedgerEntry, OutboxMessage, RunEvent } from '../shared/types.js';
+import type { BaselineFile, Checkpoint, GoalFile, Injection, LedgerEntry, OutboxMessage, RunEvent } from '../shared/types.js';
 import { exists } from '../shared/atomic.js';
 
 export interface RunState {
@@ -15,6 +15,7 @@ export interface RunState {
   plan: string;
   events: RunEvent[];
   outbox: OutboxMessage[];
+  injections: Injection[];
 }
 
 export function useRunState(target: string): RunState {
@@ -28,7 +29,8 @@ export function useRunState(target: string): RunState {
     goalDoc: '',
     plan: '',
     events: [],
-    outbox: []
+    outbox: [],
+    injections: []
   });
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export function useRunState(target: string): RunState {
     poller = setInterval(() => {
       void load();
     }, 300);
-    const watcher = chokidar.watch([paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox], {
+    const watcher = chokidar.watch([paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone], {
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 40, pollInterval: 20 }
     });
@@ -65,14 +67,14 @@ export function useRunState(target: string): RunState {
       if (poller) clearInterval(poller);
       void watcher.close();
     };
-  }, [paths.target, paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox]);
+  }, [paths.target, paths.events, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone]);
 
   return state;
 }
 
 async function readState(target: string): Promise<RunState> {
   const paths = runPaths(target);
-  const [goal, checkpoint, baseline, ledger, goalDoc, plan, events, outbox] = await Promise.all([
+  const [goal, checkpoint, baseline, ledger, goalDoc, plan, events, outbox, injections] = await Promise.all([
     readJsonMaybe<GoalFile>(paths.goal),
     readJsonMaybe<Checkpoint>(paths.checkpoint),
     readJsonMaybe<BaselineFile>(paths.baseline),
@@ -80,7 +82,8 @@ async function readState(target: string): Promise<RunState> {
     readTextMaybe(paths.goalDoc),
     readTextMaybe(paths.plan),
     readJsonLinesMaybe<RunEvent>(paths.events),
-    readOutboxMessages(paths.outbox)
+    readOutboxMessages(paths.outbox),
+    readInjectionHistory(paths.inbox, paths.inboxDone)
   ]);
   return {
     target: paths.target,
@@ -91,7 +94,8 @@ async function readState(target: string): Promise<RunState> {
     goalDoc,
     plan,
     events,
-    outbox
+    outbox,
+    injections
   };
 }
 
@@ -122,4 +126,23 @@ async function readOutboxMessages(path: string): Promise<OutboxMessage[]> {
     if (!message) throw new Error(`Invalid outbox message: ${name}`);
     return message;
   })));
+}
+
+async function readInjectionHistory(inbox: string, inboxDone: string): Promise<Injection[]> {
+  const [pending, done] = await Promise.all([readInjectionDir(inbox), readInjectionDir(inboxDone)]);
+  return [...pending, ...done]
+    .sort((a, b) => a.ts.localeCompare(b.ts))
+    .slice(-16);
+}
+
+async function readInjectionDir(path: string): Promise<Injection[]> {
+  if (!(await exists(path))) return [];
+  const names = (await readdir(path)).filter((name) => /^inj-.+\.json$/.test(name)).sort().slice(-24);
+  const items = await Promise.all(
+    names.map(async (name) => {
+      const message = await readJsonMaybe<Injection>(`${path}/${name}`);
+      return message && typeof message.text === 'string' && typeof message.kind === 'string' ? message : null;
+    })
+  );
+  return items.filter((item): item is Injection => Boolean(item));
 }

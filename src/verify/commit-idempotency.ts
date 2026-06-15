@@ -7,6 +7,7 @@ import { createSampleTarget } from '../sample.js';
 import type { BaselineFile, Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/commit-idempotency-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);

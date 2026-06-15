@@ -1,9 +1,19 @@
 import type { GoalFile, MetricStats } from '../shared/types.js';
 
+export const PLANNER_SELECTED_METRIC = 'planner-selected validation';
+
+export function isPlannerSelectedMetricName(name: string): boolean {
+  return name === PLANNER_SELECTED_METRIC || name === 'planner-selected metric';
+}
+
 export function primaryMetricName(goal: GoalFile): string {
   const name = goal.metric.name.trim();
-  if (!name) return 'metric';
-  return name.toLowerCase().includes('p99') ? 'p99' : name;
+  if (!name || isPlannerSelectedMetricName(name)) return 'validation';
+  return name;
+}
+
+export function primaryMetricValue(metric: MetricStats): number {
+  return typeof metric.value === 'number' && Number.isFinite(metric.value) ? metric.value : metric.p99;
 }
 
 export function formatPrimaryMetric(goal: GoalFile, metric: MetricStats): string {
@@ -16,12 +26,12 @@ export function formatPrimaryMetricTransition(goal: GoalFile, before: MetricStat
 
 export function primaryMetricTag(goal: GoalFile, metric: MetricStats): string {
   const name = slug(primaryMetricName(goal));
-  const value = slug(`${Math.round(metric.p99)}${metric.unit}`);
+  const value = slug(`${Math.round(primaryMetricValue(metric))}${metric.unit}`);
   return `${name}-${value}`;
 }
 
 function formatMetricValue(metric: MetricStats): string {
-  return `${formatNumber(metric.p99)}${metric.unit}`;
+  return `${formatNumber(primaryMetricValue(metric))}${metric.unit}`;
 }
 
 function formatNumber(value: number): string {

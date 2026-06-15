@@ -8,6 +8,7 @@ import type { AcceptanceSpec, BaselineFile, GoalFile, OutboxMessage, RunEvent } 
 
 const target = resolve('fixture/acceptance-spec-target');
 const clarifyTarget = resolve('fixture/acceptance-clarify-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await verifyFrozenSpec();
@@ -82,8 +83,8 @@ async function verifyUpfrontClarify(): Promise<void> {
   const goal: GoalFile = {
     run_id: 'acceptance-clarify-run',
     version: 1,
-    requirements: [{ id: 'R1', text: 'Optimize but criteria are intentionally missing', source: 'initial', status: 'active' }],
-    acceptance_criteria: [],
+    requirements: [{ id: 'R1', text: 'Optimize but criteria are intentionally incomplete', source: 'initial', status: 'active' }],
+    acceptance_criteria: [{ id: 'A1', text: 'Intentionally incomplete criterion', check: '' }],
     constraints: [],
     metric: { name: 'p99 latency', direction: 'minimize', target: null, unit: 'ms' },
     budget: { max_iters: 1, max_cost_usd: 0, deadline: null },
@@ -99,7 +100,8 @@ async function verifyUpfrontClarify(): Promise<void> {
   });
   assert(result.exitCode === 0, `acceptance clarify run failed unexpectedly:\n${result.all}`);
   assert((result.all ?? '').includes('awaiting acceptance criteria clarification'), `clarify run returned wrong reason:\n${result.all}`);
-  assert(!(await exists(paths.plan)), 'PLAN.md should not be materialized before acceptance clarification');
+  assert(await exists(paths.plan), 'PLAN.md should be allowed to materialize before legacy acceptance clarification');
+  assert(!(await exists(paths.baseline)), 'baseline should not be initialized before acceptance clarification');
   assert(!(await exists(paths.acceptanceSpec)), 'acceptance.spec.json should not exist before clarification');
 
   const outbox = await readOutboxFiles(paths.outbox);

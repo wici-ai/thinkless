@@ -6,23 +6,22 @@ export interface PlannerBenchmark {
   tool?: string;
   command?: string;
   metric?: string;
+  direction?: GoalFile['metric']['direction'];
+  target?: number | null;
+  unit?: string;
   min_reps?: number;
   warmup_discarded?: number;
   reason?: string;
   alternatives?: BenchmarkManifest['alternatives'];
 }
 
-export async function writeBenchmarkManifest(paths: RunPaths, goal: GoalFile, benchmark?: PlannerBenchmark): Promise<BenchmarkManifest> {
+const DEFAULT_MIN_REPS = 5;
+const DEFAULT_WARMUP_DISCARDED = 0;
+
+export async function writeBenchmarkManifest(paths: RunPaths, goal: GoalFile, benchmark: PlannerBenchmark): Promise<BenchmarkManifest> {
   const manifest = buildBenchmarkManifest(goal, benchmark);
   await atomicWriteJson(paths.benchmarkManifest, manifest);
   return manifest;
-}
-
-export async function ensureBenchmarkManifest(paths: RunPaths, goal: GoalFile): Promise<{ manifest: BenchmarkManifest; created: boolean }> {
-  if (await exists(paths.benchmarkManifest)) {
-    return { manifest: await readBenchmarkManifest(paths), created: false };
-  }
-  return { manifest: await writeBenchmarkManifest(paths, goal), created: true };
 }
 
 export async function readBenchmarkManifest(paths: RunPaths): Promise<BenchmarkManifest> {
@@ -42,25 +41,38 @@ export function formatBenchmarkForPrompt(manifest: BenchmarkManifest): string {
     `- tool: ${manifest.tool}`,
     `- command: ${manifest.command}`,
     `- metric: ${manifest.metric}`,
+    `- direction: ${manifest.direction}`,
+    `- target: ${manifest.target === null || manifest.target === undefined ? 'none' : `${manifest.target}${manifest.unit ?? ''}`}`,
     `- min_reps: ${manifest.min_reps}`,
     `- warmup_discarded: ${manifest.warmup_discarded}`,
     `- reason: ${manifest.reason}`
   ].join('\n');
 }
 
-function buildBenchmarkManifest(goal: GoalFile, benchmark: PlannerBenchmark = {}): BenchmarkManifest {
+function buildBenchmarkManifest(goal: GoalFile, benchmark: PlannerBenchmark): BenchmarkManifest {
+  const tool = clean(benchmark.tool);
+  const command = clean(benchmark.command);
+  const metric = clean(benchmark.metric);
+  const direction = benchmark.direction === 'minimize' || benchmark.direction === 'maximize' ? benchmark.direction : undefined;
+  const reason = clean(benchmark.reason);
+  const minReps = positiveInt(benchmark.min_reps) ?? DEFAULT_MIN_REPS;
+  const warmupDiscarded = nonNegativeInt(benchmark.warmup_discarded) ?? DEFAULT_WARMUP_DISCARDED;
+  if (!tool || !command || !metric || !direction || !reason) {
+    throw new Error(`Planner benchmark is incomplete; expected tool, command, metric, direction, and reason: ${JSON.stringify(benchmark)}`);
+  }
   return {
     version: 1,
     goal_run_id: goal.run_id,
     selected_at: new Date().toISOString(),
-    tool: clean(benchmark.tool) || defaultTool(goal),
-    command: clean(benchmark.command) || './.opt/measure.sh',
-    metric: clean(benchmark.metric) || goal.metric.name || 'p99 latency',
-    min_reps: positiveInt(benchmark.min_reps, 5),
-    warmup_discarded: nonNegativeInt(benchmark.warmup_discarded, 2),
-    reason:
-      clean(benchmark.reason) ||
-      'Default fixture benchmark: .opt/measure.sh wraps the target-specific workload and emits the locked WiCi METRIC line.',
+    tool,
+    command,
+    metric,
+    direction,
+    target: benchmark.target ?? null,
+    unit: clean(benchmark.unit) || undefined,
+    min_reps: minReps,
+    warmup_discarded: warmupDiscarded,
+    reason,
     alternatives: benchmark.alternatives?.filter((item) => clean(item.tool)).map((item) => ({ tool: item.tool, reason: item.reason }))
   };
 }
@@ -72,6 +84,7 @@ function validateBenchmarkManifest(manifest: BenchmarkManifest): void {
     !manifest.tool ||
     !manifest.command ||
     !manifest.metric ||
+    (manifest.direction !== 'minimize' && manifest.direction !== 'maximize') ||
     !Number.isInteger(manifest.min_reps) ||
     manifest.min_reps < 1 ||
     !Number.isInteger(manifest.warmup_discarded) ||
@@ -82,23 +95,14 @@ function validateBenchmarkManifest(manifest: BenchmarkManifest): void {
   }
 }
 
-function defaultTool(goal: GoalFile): string {
-  const text = goal.requirements.map((req) => req.text).join(' ').toLowerCase();
-  if (/\b(http|api|service|endpoint|server|rps|throughput)\b/.test(text)) return 'k6/wrk';
-  if (/\b(pytest|python)\b/.test(text)) return 'pytest-benchmark';
-  if (/\b(rust|criterion)\b/.test(text)) return 'criterion';
-  if (/\b(command|cli|binary|process)\b/.test(text)) return 'hyperfine';
-  return 'node';
-}
-
 function clean(value: string | undefined): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function positiveInt(value: number | undefined, fallback: number): number {
-  return Number.isInteger(value) && value !== undefined && value > 0 ? value : fallback;
+function positiveInt(value: number | undefined): number | null {
+  return Number.isInteger(value) && value !== undefined && value > 0 ? value : null;
 }
 
-function nonNegativeInt(value: number | undefined, fallback: number): number {
-  return Number.isInteger(value) && value !== undefined && value >= 0 ? value : fallback;
+function nonNegativeInt(value: number | undefined): number | null {
+  return Number.isInteger(value) && value !== undefined && value >= 0 ? value : null;
 }

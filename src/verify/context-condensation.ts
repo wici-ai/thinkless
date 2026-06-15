@@ -8,6 +8,7 @@ import type { GoalFile, LedgerEntry } from '../shared/types.js';
 import { writeContextSummary } from '../supervisor/context.js';
 
 const target = resolve('fixture/context-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);

@@ -1,5 +1,14 @@
 # WiCi — Autonomous Long-Horizon Coding TUI Orchestrator
 
+> Current V1 note: this file preserves the original long-horizon optimizer design notes.
+> The active fresh V1 contract is in `Simplified_PLAN.md` and `README.md`: Chat writes
+> `GOAL.md`, Claude Code plan mode writes markdown `PLAN.md` plus optional artifacts,
+> and Codex executes `GOAL.md + PLAN.md` directly. Baseline/checks/measure gating in
+> this historical document belongs only to the explicit legacy optimizer path and must
+> not block fresh V1 execution. Do not use lower sections of this historical file to
+> infer that `.opt` scripts, `baseline.json`, or pre-run measurements are required in
+> the fresh V1 path.
+
 ## Context
 
 **Problem this solves.** Engineers at the user's company are reluctant to hand goals to AI: they over-invest in understanding architecture and repeatedly confirm before letting the AI act. The thesis: given a *clear requirement*, you should let AI **plan rigorously, start running the goal immediately, then keep steering via Q&A while it runs** — the goal is a live, hot-editable state, not a one-shot prompt.

@@ -43,7 +43,6 @@ export interface RunPaths {
   skillsIndex: string;
   context: string;
   goalInterrogations: string;
-  avenues: string;
   archive: string;
   config: string;
 }
@@ -85,7 +84,6 @@ export function runPaths(target: string): RunPaths {
     skillsIndex: join(wici, 'skills.json'),
     context: join(wici, 'context.md'),
     goalInterrogations: join(wici, 'goal-interrogations.jsonl'),
-    avenues: join(wici, 'avenues.json'),
     archive: join(wici, 'archive.json'),
     config: join(TOOL_ROOT, 'wici.config.json')
   };
@@ -120,14 +118,8 @@ export async function ensureTargetGitignore(paths: RunPaths): Promise<void> {
   }
 }
 
-export function schemaPath(name: 'plan' | 'plan-diff' | 'iter-result'): string {
-  const file =
-    name === 'plan'
-      ? 'plan.schema.json'
-      : name === 'plan-diff'
-        ? 'plan-diff.schema.json'
-        : 'iter-result.schema.json';
-  return join(TOOL_ROOT, 'schemas', file);
+export function schemaPath(name: 'iter-result'): string {
+  return join(TOOL_ROOT, 'schemas', `${name}.schema.json`);
 }
 
 export function promptPath(name: 'planner' | 'planner-diff' | 'stop-verdict'): string {

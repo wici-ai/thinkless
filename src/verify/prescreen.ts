@@ -6,6 +6,7 @@ import { runPaths } from '../shared/paths.js';
 import type { BaselineFile, LedgerEntry, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/prescreen-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
@@ -28,15 +29,15 @@ async function main(): Promise<void> {
   assert(ledger[0].status === 'reject', `expected prescreen reject, got ${ledger[0].status}`);
   assert(ledger[0].confidence === 'prescreen-reject', `expected prescreen-reject confidence, got ${ledger[0].confidence}`);
   assert(ledger[0].metric === null, `full measure unexpectedly populated ledger metric: ${JSON.stringify(ledger[0].metric)}`);
-  assert(ledger[0].guards.prescreen_p99 === 120, `ledger missing prescreen p99: ${JSON.stringify(ledger[0].guards)}`);
+  assert(ledger[0].guards.prescreen_value === 120, `ledger missing prescreen value: ${JSON.stringify(ledger[0].guards)}`);
   assert((ledger[0].guards.prescreen_delta_pct as number) < 0, `ledger missing negative prescreen delta: ${JSON.stringify(ledger[0].guards)}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
   const revert = events.find((event) => event.type === 'REVERT');
   assert(revert, 'missing REVERT event for prescreen reject');
   assert(revert.message.includes('cascade pre-screen rejected'), `REVERT event missing prescreen reason: ${JSON.stringify(revert)}`);
-  const data = revert.data as { prescreen_p99?: number; prescreen_delta_pct?: number } | undefined;
-  assert(data?.prescreen_p99 === 120, `REVERT event missing prescreen p99: ${JSON.stringify(revert.data)}`);
+  const data = revert.data as { prescreen_value?: number; prescreen_delta_pct?: number } | undefined;
+  assert(data?.prescreen_value === 120, `REVERT event missing prescreen value: ${JSON.stringify(revert.data)}`);
   assert((data.prescreen_delta_pct ?? 0) < 0, `REVERT event missing negative prescreen delta: ${JSON.stringify(revert.data)}`);
 
   const fullMeasureMarker = await readFile(`${target}/full-measure-ran.txt`, 'utf8').catch(() => '');
@@ -52,7 +53,7 @@ async function main(): Promise<void> {
         target,
         prescreen_pinned: true,
         rejected_before_full_measure: true,
-        prescreen_p99: ledger[0].guards.prescreen_p99
+        prescreen_value: ledger[0].guards.prescreen_value
       },
       null,
       2

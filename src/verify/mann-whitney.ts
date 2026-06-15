@@ -22,7 +22,6 @@ const config: WiCiConfig = {
   budget: { max_iters: 1, max_cost_usd: 0, deadline: null },
   stop: { tau: 0.01, K: 1, N: 1, mode: 'auto' },
   retry: { max_attempts_per_step: 1, reverts_before_reset: 1, stall_replan_after: 1 },
-  diversity: { avenues: [] },
   evaluation: {
     noise_threshold: 0.01,
     min_reps: 5,

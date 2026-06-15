@@ -3,9 +3,10 @@ import { resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
-import type { AvenueState, LedgerEntry, RunEvent } from '../shared/types.js';
+import type { LedgerEntry, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/stuck-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
@@ -29,17 +30,15 @@ async function main(): Promise<void> {
   const plan = await readFile(paths.plan, 'utf8');
   assert(plan.includes('- [!] S2'), 'expected S2 to be marked blocked after retry exhaustion');
   assert(plan.includes('S2 exhausted retry budget'), 'expected stub replan to include retry exhaustion reason');
-  assert(plan.includes('Avenue:'), 'expected stub replan to include a selected avenue');
+  assert(plan.includes('planner-chosen direction'), 'expected replan to delegate direction choice to planner');
+  assert(!plan.includes('Avenue:'), 'replan must not include a supervisor-selected avenue');
 
   const events = await readJsonLines<RunEvent>(paths.events);
   const replanEvent = events.find((event) => event.type === 'REPLAN_STUCK');
   assert(replanEvent, 'missing REPLAN_STUCK event');
-  const avenue = (replanEvent.data as { avenue?: string } | undefined)?.avenue;
-  assert(typeof avenue === 'string' && avenue.length > 0, 'REPLAN_STUCK event missing avenue');
-  assert(plan.includes(`Avenue: ${avenue}`), `PLAN.md missing selected avenue ${avenue}`);
-
-  const avenueState = JSON.parse(await readFile(paths.avenues, 'utf8')) as AvenueState;
-  assert(avenueState.stats.some((stat) => stat.name === avenue && stat.selected === 1), `avenue state did not record selected avenue ${avenue}`);
+  const replanData = replanEvent.data as { planner_selects_direction?: boolean; avenue?: string } | undefined;
+  assert(replanData?.planner_selects_direction === true, `REPLAN_STUCK should delegate direction choice to planner: ${JSON.stringify(replanData)}`);
+  assert(replanData.avenue === undefined, `REPLAN_STUCK must not include a supervisor-selected avenue: ${JSON.stringify(replanData)}`);
 
   const replanCommits = await git(['log', '--oneline', '--grep', 'chore: replan after stalled S2']);
   assert(replanCommits.trim().length > 0, 'missing replan chore commit');
@@ -55,7 +54,7 @@ async function main(): Promise<void> {
         ledger_rows: ledger.length,
         replan_stuck: true,
         s2_blocked: true,
-        avenue
+        planner_selects_direction: true
       },
       null,
       2

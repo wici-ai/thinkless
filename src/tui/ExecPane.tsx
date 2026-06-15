@@ -80,15 +80,49 @@ export function visibleEvents(events: RunEvent[], scrollOffset: number, size: nu
   };
 }
 
-function formatEvent(event: RunEvent): string {
+export function formatEvent(event: RunEvent): string {
   const time = event.ts.slice(11, 19);
-  return `${time} ${event.type} ${event.message}`;
+  const usage = usageSuffix(event);
+  return `${time} ${event.type} ${event.message}${usage}`;
+}
+
+function usageSuffix(event: RunEvent): string {
+  if (/tokens?\b|tok\b|\bin=\d+|\bout=\d+/i.test(event.message)) return '';
+  const usage = usageRecord(event.data);
+  if (!usage) return '';
+  const input = numberField(usage, 'tokens_input') ?? numberField(usage, 'input_tokens');
+  const output = numberField(usage, 'tokens_output') ?? numberField(usage, 'output_tokens');
+  const total = numberField(usage, 'total_tokens');
+  const usd = numberField(usage, 'usd') ?? numberField(usage, 'total_cost_usd') ?? numberField(usage, 'cost_usd');
+  const parts: string[] = [];
+  if (total !== undefined) parts.push(`total=${formatUsageNumber(total)}`);
+  if (input !== undefined) parts.push(`in=${formatUsageNumber(input)}`);
+  if (output !== undefined) parts.push(`out=${formatUsageNumber(output)}`);
+  if (usd !== undefined) parts.push(`$${usd.toFixed(usd < 1 ? 4 : 2)}`);
+  return parts.length > 0 ? ` tok ${parts.join(' ')}` : '';
+}
+
+function usageRecord(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const record = data as Record<string, unknown>;
+  const usage = record.usage;
+  if (usage && typeof usage === 'object' && !Array.isArray(usage)) return usage as Record<string, unknown>;
+  return record;
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function formatUsageNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
 function colorFor(event: RunEvent): string {
   if (event.level === 'error') return 'red';
   if (event.level === 'warn') return 'yellow';
   if (event.type === 'COMMIT') return 'green';
-  if (event.type === 'EXECUTE_START') return 'cyan';
+  if (event.type === 'EXECUTE_START' || event.type === 'EXECUTE_PROGRESS' || event.type === 'PLAN_USAGE') return 'cyan';
   return 'white';
 }

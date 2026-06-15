@@ -4,7 +4,7 @@ import { createSampleTarget } from '../sample.js';
 import { atomicWriteFile } from '../shared/atomic.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
 import type { GoalFile, WiCiConfig } from '../shared/types.js';
-import { runExecutorStep } from '../supervisor/executor.js';
+import { runExecutorStep, type ExecutorProgress } from '../supervisor/executor.js';
 
 const target = resolve('fixture/executor-contract-target');
 
@@ -26,13 +26,24 @@ async function main(): Promise<void> {
   await chmod(fakeCodex, 0o755);
 
   const config = testConfig(fakeCodex);
-  const first = await runExecutorStep(paths, goal(), 'S1', 1, config, undefined, 'remember prior accepted patch');
-  const second = await runExecutorStep(paths, goal(), 'S2', 2, config, 'new operator steering', 'remember prior accepted patch');
+  const progress: ExecutorProgress[] = [];
+  const first = await runExecutorStep(paths, goal(), 'S1', 1, config, undefined, 'remember prior accepted patch', {
+    onProgress: async (item) => {
+      progress.push(item);
+    }
+  });
+  const second = await runExecutorStep(paths, goal(), 'S2', 2, config, 'new operator steering', 'remember prior accepted patch', {
+    onProgress: async (item) => {
+      progress.push(item);
+    }
+  });
 
   assert(first.notes === 'fake codex iter 1', `unexpected first iter notes: ${first.notes}`);
   assert(second.notes === 'fake codex iter 2', `unexpected second iter notes: ${second.notes}`);
   assert(first.invocation.usage?.completed_turns === 1, `first invocation missing completed turn usage: ${JSON.stringify(first.invocation.usage)}`);
   assert(second.invocation.usage?.tokens_input === 102, `second invocation missing parsed token usage: ${JSON.stringify(second.invocation.usage)}`);
+  assert(progress.some((item) => item.kind === 'event' && item.eventType === 'turn.completed'), 'executor progress did not surface turn.completed');
+  assert(progress.some((item) => item.usage.tokens_input === 102), 'executor progress did not carry token usage');
 
   const argsLog = (await readFile(join(paths.wici, 'fake-codex-args.jsonl'), 'utf8'))
     .split('\n')
@@ -41,6 +52,8 @@ async function main(): Promise<void> {
   assert(argsLog.length === 2, `expected two fake codex invocations, got ${argsLog.length}`);
   assert(argsLog[0].args[0] === 'exec' && argsLog[0].args[1] !== 'resume', `first invocation was not codex exec: ${JSON.stringify(argsLog[0].args)}`);
   assert(argsLog[1].args[0] === 'exec' && argsLog[1].args[1] === 'resume', `second invocation was not codex exec resume: ${JSON.stringify(argsLog[1].args)}`);
+  assert(argsLog[0].args.includes('-C'), `first codex exec should set target cwd with -C: ${JSON.stringify(argsLog[0].args)}`);
+  assert(!argsLog[1].args.includes('-C'), `codex exec resume does not support -C and must rely on spawn cwd: ${JSON.stringify(argsLog[1].args)}`);
   for (const item of argsLog) {
     assert(item.args.includes('--dangerously-bypass-approvals-and-sandbox'), `executor missing autonomy flag: ${JSON.stringify(item.args)}`);
     assert(item.args.includes('--json'), `executor missing json flag: ${JSON.stringify(item.args)}`);
@@ -50,7 +63,8 @@ async function main(): Promise<void> {
   }
 
   const secondPrompt = await readFile(join(paths.artifacts, 'iter-2.prompt.txt'), 'utf8');
-  assert(secondPrompt.includes('Continue with plan step S2 from PLAN.md.'), 'resume prompt missing plan step');
+  assert(secondPrompt.includes('Continue executing the current GOAL.md and PLAN.md as one Codex goal.'), 'resume prompt must treat GOAL.md and PLAN.md as one Codex goal');
+  assert(secondPrompt.includes('Supervisor receipt focus: S2.'), 'resume prompt missing supervisor receipt focus');
   assert(secondPrompt.includes('NOTE new requirement or steering input: new operator steering'), 'resume prompt missing steering text');
   assert(secondPrompt.includes('remember prior accepted patch'), 'resume prompt missing retrieved memory');
 
@@ -61,6 +75,8 @@ async function main(): Promise<void> {
   assert(transcript.includes('"turn.completed"'), 'codex transcript missing turn.completed event');
   assert(transcript.includes('"item.completed"'), 'codex transcript missing item.completed event');
 
+  await verifyIdleWatchdog(paths);
+
   console.log(
     JSON.stringify(
       {
@@ -69,12 +85,55 @@ async function main(): Promise<void> {
         fake_codex_invocations: argsLog.length,
         resume_used: true,
         artifact_contract: true,
-        usage_parsed: true
+        usage_parsed: true,
+        streaming_progress: true,
+        idle_watchdog: true
       },
       null,
       2
     )
   );
+}
+
+async function verifyIdleWatchdog(paths: ReturnType<typeof runPaths>): Promise<void> {
+  const hangingCodex = join(paths.wici, 'fake-hanging-codex.mjs');
+  await atomicWriteFile(hangingCodex, hangingCodexScript(), 0o755);
+  await chmod(hangingCodex, 0o755);
+
+  const heartbeatProgress: ExecutorProgress[] = [];
+  let error: unknown;
+  try {
+    await runExecutorStep(
+      paths,
+      goal(),
+      'S1',
+      1,
+      {
+        ...testConfig(hangingCodex),
+        tools: {
+          ...testConfig(hangingCodex).tools,
+          mode: 'real'
+        }
+      },
+      undefined,
+      undefined,
+      {
+        artifactId: 'hang-1',
+        idleTimeoutMs: 100,
+        hardTimeoutMs: 2_000,
+        heartbeatMs: 25,
+        onProgress: async (item) => {
+          heartbeatProgress.push(item);
+        }
+      }
+    );
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert(error instanceof Error, 'hanging fake codex should fail by idle timeout');
+  assert(error.message.includes('Codex executor timed out'), `unexpected hanging fake codex error: ${error.message}`);
+  assert(heartbeatProgress.some((item) => item.kind === 'heartbeat'), 'executor idle watchdog did not emit heartbeat progress');
 }
 
 function goal(): GoalFile {
@@ -84,7 +143,7 @@ function goal(): GoalFile {
     requirements: [{ id: 'R1', text: 'Verify executor contract without invoking real Codex', source: 'initial', status: 'active' }],
     acceptance_criteria: [{ id: 'A1', text: 'executor contract verifier passes', check: 'npm run verify:executor-contract' }],
     constraints: [],
-    metric: { name: 'p99 latency', direction: 'minimize', target: null, unit: 'ms' },
+    metric: { name: 'fixture runtime', direction: 'minimize', target: null, unit: 'ms' },
     budget: { max_iters: 2, max_cost_usd: 1, deadline: null },
     stop: { tau: 0.01, K: 1, N: 1, mode: 'auto' }
   };
@@ -94,13 +153,12 @@ function testConfig(fakeCodex: string): WiCiConfig {
   return {
     tools: {
       mode: 'auto',
-      planner: { command: 'claude', effort: 'max' },
+      planner: { command: 'claude', effort: 'default' },
       executor: { command: fakeCodex, dangerouslyBypassApprovalsAndSandbox: true }
     },
     budget: { max_iters: 2, max_cost_usd: 1, deadline: null },
     stop: { tau: 0.01, K: 1, N: 1, mode: 'auto' },
     retry: { max_attempts_per_step: 1, reverts_before_reset: 1, stall_replan_after: 1 },
-    diversity: { avenues: ['algorithmic complexity'] },
     evaluation: { noise_threshold: 0.01, min_reps: 5, bootstrap_resamples: 1000, checks_timeout_ms: 300000, measure_timeout_ms: 300000 },
     git: { init_if_missing: false, user_name: 'WiCi Bot', user_email: 'wici@example.invalid' },
     safety: { container_hint: 'executor contract fixture', forbidden_actions: ['git push', 'rm -rf outside workspace'] }
@@ -140,6 +198,12 @@ if (outputIndex >= 0 && args[outputIndex + 1]) {
 appendFileSync(join(cwd, '.wici', 'fake-codex-args.jsonl'), JSON.stringify({ args, prompt, iter, cwd }) + '\\n');
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100 + iter, output_tokens: 10 + iter, cost_usd: Number((0.001 * iter).toFixed(3)) } }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'message', iter } }));
+`;
+}
+
+function hangingCodexScript(): string {
+  return `#!/usr/bin/env node
+setInterval(() => {}, 1000);
 `;
 }
 

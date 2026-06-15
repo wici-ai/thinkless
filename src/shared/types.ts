@@ -74,6 +74,7 @@ export interface OutboxMessage {
 }
 
 export interface MetricStats {
+  value?: number;
   p50: number;
   p95: number;
   p99: number;
@@ -124,6 +125,9 @@ export interface BenchmarkManifest {
   tool: string;
   command: string;
   metric: string;
+  direction: 'minimize' | 'maximize';
+  target?: number | null;
+  unit?: string;
   min_reps: number;
   warmup_discarded: number;
   reason: string;
@@ -211,7 +215,7 @@ export interface CurriculumEntry {
   goal_version: number;
   parent_ledger_id: string | null;
   saturated_step_id: string;
-  avenue: string;
+  branch_reason: string;
   stuck_reason: string;
   attempts: number;
   consecutive_failures: number;
@@ -266,10 +270,13 @@ export type SupervisorState =
 
 export interface Checkpoint {
   supervisor_state: SupervisorState;
+  goal_source?: 'tui_chat' | 'tui_goal_option' | 'cli_goal' | 'api_goal';
   next_step: string | null;
   iter: number;
+  setup_iter?: number;
   goal_version: number;
   plan_hash: string | null;
+  best_commit?: string | null;
   ledger_seq: number;
   events_seq: number;
   sessions: {
@@ -287,10 +294,10 @@ export interface Checkpoint {
     };
     checked_at: string;
   };
-  active_avenue?: {
-    name: string;
+  active_branch?: {
     parent_id: string | null;
     selected_at: string;
+    reason?: string;
   };
   drained_inbox: string[];
   updated_at: string;
@@ -312,7 +319,6 @@ export interface CheckpointSnapshot {
     context?: string;
     goal_interrogations?: string;
     archive?: string;
-    avenues?: string;
   };
   created_at: string;
 }
@@ -332,8 +338,8 @@ export interface IterResult {
   step_done: boolean;
   tests_pass: boolean;
   notes: string;
-  changed_files?: string[];
-  next?: string;
+  changed_files: string[];
+  next?: string | null;
 }
 
 export interface EvaluationConfig {
@@ -343,33 +349,13 @@ export interface EvaluationConfig {
   checks_timeout_ms: number;
   measure_timeout_ms: number;
   lock_mode?: 'auto' | 'manual';
+  legacy_optimizer?: boolean;
 }
 
 export interface RetryConfig {
   max_attempts_per_step: number;
   reverts_before_reset: number;
   stall_replan_after: number;
-}
-
-export interface DiversityConfig {
-  avenues: string[];
-}
-
-export interface AvenueStat {
-  name: string;
-  selected: number;
-  successes?: number;
-  failures?: number;
-  downstream_delta_pct?: number;
-  last_sample?: number;
-  last_selected_at?: string;
-  last_parent_id?: string | null;
-  last_outcome_ledger_id?: string;
-}
-
-export interface AvenueState {
-  version: number;
-  stats: AvenueStat[];
 }
 
 export interface WiCiConfig {
@@ -381,13 +367,13 @@ export interface WiCiConfig {
     };
     executor: {
       command: string;
+      model?: string;
       dangerouslyBypassApprovalsAndSandbox: boolean;
     };
   };
   budget: BudgetConfig;
   stop: StopConfig;
   retry: RetryConfig;
-  diversity: DiversityConfig;
   evaluation: EvaluationConfig;
   git: {
     init_if_missing: boolean;
@@ -403,6 +389,7 @@ export interface WiCiConfig {
 export interface RunOptions {
   target: string;
   goal?: string;
+  goalSource?: Checkpoint['goal_source'];
   once?: boolean;
   maxIters?: number;
   mode?: ToolMode;

@@ -5,7 +5,6 @@ import type { RunPaths } from '../shared/paths.js';
 export interface CurriculumInput {
   iter: number;
   stepId: string;
-  avenue: string;
   stuckReason: string;
   attempts: number;
   consecutiveFailures: number;
@@ -19,7 +18,6 @@ export async function appendCurriculumSubgoal(paths: RunPaths, goal: GoalFile, i
       entry.iter === input.iter &&
       entry.goal_version === goal.version &&
       entry.saturated_step_id === input.stepId &&
-      entry.avenue === input.avenue &&
       entry.parent_ledger_id === input.parentId
   );
   if (existing) return existing;
@@ -31,7 +29,7 @@ export async function appendCurriculumSubgoal(paths: RunPaths, goal: GoalFile, i
     goal_version: goal.version,
     parent_ledger_id: input.parentId,
     saturated_step_id: input.stepId,
-    avenue: input.avenue,
+    branch_reason: singleLine(input.stuckReason),
     stuck_reason: singleLine(input.stuckReason),
     attempts: input.attempts,
     consecutive_failures: input.consecutiveFailures,
@@ -52,12 +50,12 @@ export async function readLatestCurriculumSubgoal(paths: RunPaths): Promise<Curr
 }
 
 function buildSubGoal(goal: GoalFile, input: CurriculumInput): string {
-  const parent = input.parentId ? `from parent ${input.parentId}` : 'from the current best baseline';
+  const parent = input.parentId ? `from parent ${input.parentId}` : 'from the current checkpoint';
   const target =
     goal.metric.target === null || goal.metric.target === undefined
       ? ''
       : ` toward ${goal.metric.target}${goal.metric.unit ?? ''}`;
-  return `Explore one bounded ${singleLine(input.avenue)} branch ${parent} for ${input.stepId}: isolate the saturated attempt (${singleLine(input.stuckReason)}) into a smaller measurable change, keep acceptance.spec.json and locked eval scripts unchanged, and only continue if ${goal.metric.name} improves in the configured ${goal.metric.direction} direction${target}.`;
+  return `Ask the planner for one bounded continuation ${parent} for ${input.stepId}: isolate the saturated attempt (${singleLine(input.stuckReason)}) into a smaller PLAN.md change, preserve user-facing GOAL.md requirements, and only continue if the planner-selected validation in PLAN.md still supports the active goal${target}.`;
 }
 
 function safeId(value: string): string {

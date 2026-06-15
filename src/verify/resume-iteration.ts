@@ -7,6 +7,7 @@ import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, CheckpointSnapshot, LedgerEntry, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/resume-iteration-target');
+process.env.WICI_LEGACY_OPTIMIZER = '1';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);

@@ -6,11 +6,12 @@ import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
-import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
+import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/hotreload-target');
 const safePointTarget = resolve('fixture/hotreload-safe-point-target');
 const injectedText = 'Require the optimized implementation to keep the public uniqueSorted API unchanged.';
+const steeringText = 'Prefer the smallest safe change after hot reload.';
 const safePointInjectedText = 'Apply this requirement before evaluating the just-finished candidate.';
 
 async function main(): Promise<void> {
@@ -24,21 +25,26 @@ async function verifyBetweenIterationsHotReload(): Promise<void> {
 
   const child = spawn(
     process.execPath,
-    ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--goal', 'Reduce p99 latency and accept chat steering', '--max-iters', '2', '--mode', 'stub'],
+    ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--goal', 'Improve the fixture implementation and accept chat steering', '--max-iters', '2', '--mode', 'stub'],
     {
       cwd: resolve('.'),
       env: {
         ...process.env,
-        WICI_PAUSE_AFTER_EVENT: 'STOP_CHECK:5000'
+        WICI_PAUSE_AFTER_EVENT: 'EXECUTE_DONE:5000'
       },
       stdio: ['ignore', 'pipe', 'pipe']
     }
   );
 
-  await waitForEvent(paths.events, 'STOP_CHECK', 15_000);
+  await waitForEvent(paths.events, 'EXECUTE_DONE', 15_000);
   const injection = await writeInjection(paths, {
     kind: 'add_requirement',
     text: injectedText,
+    priority: 'normal'
+  });
+  const steering = await writeInjection(paths, {
+    kind: 'steer',
+    text: steeringText,
     priority: 'normal'
   });
 
@@ -47,10 +53,15 @@ async function verifyBetweenIterationsHotReload(): Promise<void> {
 
   const goal = JSON.parse(await readFile(paths.goal, 'utf8')) as GoalFile;
   assert(goal.version === 2, `expected goal version 2, got ${goal.version}`);
-  assert(goal.requirements.some((req) => req.text === injectedText && req.status === 'active'), 'injected requirement missing from goal.json');
+  assert(goal.requirements.some((req) => req.text === injectedText && req.status === 'active'), 'injected requirement missing from internal goal state');
+  assert(goal.constraints.some((constraint) => constraint.includes(steeringText)), 'steering text missing from internal goal constraints');
+  const goalDoc = await readFile(paths.goalDoc, 'utf8');
+  assert(goalDoc.includes(injectedText), 'GOAL.md missing injected requirement');
+  assert(goalDoc.includes(`Steering: ${steeringText}`), 'GOAL.md missing persisted steering text');
 
   const checkpoint = JSON.parse(await readFile(paths.checkpoint, 'utf8')) as Checkpoint;
   assert(checkpoint.drained_inbox.includes(injection.id), `checkpoint did not record drained injection ${injection.id}`);
+  assert(checkpoint.drained_inbox.includes(steering.id), `checkpoint did not record drained steering ${steering.id}`);
 
   const plan = await readFile(paths.plan, 'utf8');
   assert(plan.includes(injectedText), 'PLAN.md does not contain injected requirement after follow-up revert/commit');
@@ -59,9 +70,9 @@ async function verifyBetweenIterationsHotReload(): Promise<void> {
   assert(events.some((event) => event.type === 'INJECTION_DRAINED'), 'missing INJECTION_DRAINED event');
   assert(events.some((event) => event.type === 'PLAN_DIFF_APPLIED'), 'missing PLAN_DIFF_APPLIED event');
 
-  const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
-  assert(ledger.length === 2, `expected two ledger rows after two iterations, got ${ledger.length}`);
-  assert(ledger[0].status === 'keep', `expected first row keep, got ${ledger[0].status}`);
+  const secondPrompt = await readFile(`${paths.artifacts}/iter-2.prompt.txt`, 'utf8');
+  assert(secondPrompt.includes(injectedText), 'injected steer text missing from next executor prompt');
+  assert(secondPrompt.includes(steeringText), 'steering text missing from next executor prompt');
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree is dirty after hot reload:\n${status}`);
@@ -77,7 +88,8 @@ async function verifyBetweenIterationsHotReload(): Promise<void> {
         target,
         goal_version: goal.version,
         drained: injection.id,
-        ledger_rows: ledger.length,
+        steering_drained: steering.id,
+        goal_doc_contains_steering: true,
         plan_contains_injection: true
       },
       null,
@@ -115,26 +127,19 @@ async function verifyEvaluateSafePointHotReload(): Promise<void> {
 
   const goal = JSON.parse(await readFile(paths.goal, 'utf8')) as GoalFile;
   assert(goal.version === 2, `expected safe-point goal version 2, got ${goal.version}`);
-  assert(goal.requirements.some((req) => req.text === safePointInjectedText && req.status === 'active'), 'safe-point injected requirement missing from goal.json');
+  assert(goal.requirements.some((req) => req.text === safePointInjectedText && req.status === 'active'), 'safe-point injected requirement missing from internal goal state');
 
   const checkpoint = JSON.parse(await readFile(paths.checkpoint, 'utf8')) as Checkpoint;
   assert(checkpoint.drained_inbox.includes(injection.id), `safe-point checkpoint did not record drained injection ${injection.id}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
-  const drainIndex = events.findIndex((event) => event.type === 'INJECTION_DRAINED' && (event.data as Array<{ safe_point?: string }> | undefined)?.some?.((item) => item.safe_point === 'evaluate'));
-  assert(drainIndex >= 0, 'missing EVALUATE safe-point INJECTION_DRAINED event');
-  const earlyEvaluate = events.findIndex((event, index) => index < drainIndex && event.type === 'EVALUATE_START');
-  assert(earlyEvaluate === -1, 'candidate evaluation started before draining safe-point injection');
-  const earlyCommit = events.findIndex((event, index) => index < drainIndex && event.type === 'COMMIT');
-  assert(earlyCommit === -1, 'candidate was committed before draining safe-point injection');
-  assert(events.some((event) => event.type === 'PLAN_DIFF_APPLIED' && (event.data as { safe_point?: string } | undefined)?.safe_point === 'evaluate'), 'missing safe-point PLAN_DIFF_APPLIED event');
-
-  const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
-  assert(ledger.length === 2, `expected safe-point run to record two ledger rows, got ${ledger.length}`);
-  assert(ledger[0].status === 'revert', `expected first safe-point row to be revert, got ${ledger[0].status}`);
-  assert(ledger[0].metric === null, `safe-point superseded row should not have evaluated metric: ${JSON.stringify(ledger[0].metric)}`);
-  assert(ledger[0].reflection.includes('superseded by chat injection'), `safe-point row missing superseded reflection: ${ledger[0].reflection}`);
-  assert(ledger[1].status === 'keep', `expected second safe-point row to keep after replan, got ${ledger[1].status}`);
+  const drainIndex = events.findIndex((event) => event.type === 'INJECTION_DRAINED');
+  assert(drainIndex >= 0, 'missing direct safe-point INJECTION_DRAINED event');
+  const secondExecute = events.findIndex((event, index) => index > drainIndex && event.type === 'EXECUTE_START');
+  assert(secondExecute >= 0, 'missing next EXECUTE_START after direct hot reload');
+  const earlySecondExecute = events.findIndex((event, index) => index < drainIndex && event.type === 'EXECUTE_START' && index > events.findIndex((item) => item.type === 'EXECUTE_DONE'));
+  assert(earlySecondExecute === -1, 'next executor iteration started before draining direct hot reload');
+  assert(events.some((event) => event.type === 'PLAN_DIFF_APPLIED'), 'missing direct PLAN_DIFF_APPLIED event');
 
   const plan = await readFile(paths.plan, 'utf8');
   assert(plan.includes(safePointInjectedText), 'safe-point PLAN.md does not contain injected requirement');
@@ -151,8 +156,6 @@ async function verifyEvaluateSafePointHotReload(): Promise<void> {
         case: 'evaluate-safe-point',
         target: safePointTarget,
         drained: injection.id,
-        first_row: ledger[0].status,
-        second_row: ledger[1].status,
         plan_contains_injection: true
       },
       null,

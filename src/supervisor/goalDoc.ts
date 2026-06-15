@@ -1,6 +1,7 @@
 import { atomicWriteFile, atomicWriteJson, exists } from '../shared/atomic.js';
 import type { RunPaths } from '../shared/paths.js';
 import type { GoalFile } from '../shared/types.js';
+import { isPlannerSelectedMetricName } from './metricFormat.js';
 
 export async function saveGoalFiles(paths: RunPaths, goal: GoalFile): Promise<void> {
   await atomicWriteJson(paths.goal, goal);
@@ -13,6 +14,15 @@ export async function ensureGoalDoc(paths: RunPaths, goal: GoalFile): Promise<vo
 }
 
 export function renderGoalMarkdown(goal: GoalFile): string {
+  const plannerSelected = isPlannerSelectedMetricName(goal.metric.name);
+  const acceptanceLines =
+    goal.acceptance_criteria.length > 0
+      ? [
+          '',
+          '## Acceptance Criteria',
+          ...goal.acceptance_criteria.map((criterion) => `- ${criterion.id}: ${criterion.text}\n  - Check: \`${criterion.check}\``)
+        ]
+      : [];
   return `${[
     '# GOAL',
     '',
@@ -21,14 +31,20 @@ export function renderGoalMarkdown(goal: GoalFile): string {
     '',
     '## Requirements',
     ...goal.requirements.map((req) => `- [${req.status}] ${req.id}: ${req.text}`),
+    ...acceptanceLines,
     '',
-    '## Acceptance Criteria',
-    ...goal.acceptance_criteria.map((criterion) => `- ${criterion.id}: ${criterion.text}\n  - Check: \`${criterion.check}\``),
-    '',
-    '## Metric',
-    `- Name: ${goal.metric.name}`,
-    `- Direction: ${goal.metric.direction}`,
-    `- Target: ${goal.metric.target === null || goal.metric.target === undefined ? 'none' : `${goal.metric.target}${goal.metric.unit ?? ''}`}`,
+    '## Validation',
+    ...(plannerSelected
+      ? [
+          '- Planner chooses the concrete validation method in PLAN.md.',
+          '- Optional scripts are planner artifacts, not a supervisor pre-execution gate.',
+          '- Codex executes PLAN.md and reports whether the active requirement is met.'
+        ]
+      : [
+          `- Name: ${goal.metric.name}`,
+          `- Direction: ${goal.metric.direction}`,
+          `- Target: ${goal.metric.target === null || goal.metric.target === undefined ? 'none' : `${goal.metric.target}${goal.metric.unit ?? ''}`}`
+        ]),
     '',
     '## Constraints',
     ...(goal.constraints.length > 0 ? goal.constraints.map((constraint) => `- ${constraint}`) : ['- none']),
@@ -36,6 +52,6 @@ export function renderGoalMarkdown(goal: GoalFile): string {
     '## Notes',
     '- This markdown goal is the user-facing contract for the run.',
     '- WiCi keeps .wici/goal.json only as internal derived state for durable execution.',
-    '- Deployment, SSH, model discovery, benchmark setup, and validation belong in PLAN.md and locked .opt scripts, then Codex executes them inside the loop.'
+    '- Deployment, SSH, model discovery, benchmark setup, and validation belong in PLAN.md and optional .opt scripts, then Codex executes them inside the loop.'
   ].join('\n')}\n`;
 }

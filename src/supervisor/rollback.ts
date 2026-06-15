@@ -9,7 +9,7 @@ export interface RollbackPreview {
   current_commit: string;
   rollback_ref: string;
   rollback_commit: string;
-  source: 'wici/best' | 'baseline.best_commit';
+  source: 'wici/best' | 'baseline.best_commit' | 'checkpoint.best_commit';
   dirty: boolean;
   confirm_required: boolean;
   wici?: NonNullable<Checkpoint['tool_versions']>['wici'];
@@ -23,12 +23,11 @@ export interface RollbackResult extends RollbackPreview {
 
 export async function previewRollback(paths: RunPaths): Promise<RollbackPreview> {
   const baseline = await readJsonFileMaybe<BaselineFile>(paths.baseline);
-  if (!baseline) throw new Error(`Cannot rollback without baseline.json: ${paths.baseline}`);
   const checkpoint = await readJsonFileMaybe<Checkpoint>(paths.checkpoint);
   const bestTag = await resolveBestTag(paths);
-  const rollbackRef = bestTag ?? baseline.best_commit;
+  const rollbackRef = bestTag ?? baseline?.best_commit ?? checkpoint?.best_commit ?? null;
   if (!rollbackRef || rollbackRef === 'NO_HEAD') {
-    throw new Error(`Cannot rollback to invalid best commit: ${rollbackRef}`);
+    throw new Error(`Cannot rollback without wici/best, baseline.best_commit, or checkpoint.best_commit`);
   }
   const rollbackCommit = await revParse(paths, rollbackRef);
   return {
@@ -36,7 +35,7 @@ export async function previewRollback(paths: RunPaths): Promise<RollbackPreview>
     current_commit: await currentCommit(paths),
     rollback_ref: rollbackRef,
     rollback_commit: rollbackCommit,
-    source: bestTag ? 'wici/best' : 'baseline.best_commit',
+    source: bestTag ? 'wici/best' : baseline?.best_commit ? 'baseline.best_commit' : 'checkpoint.best_commit',
     dirty: await hasChanges(paths),
     confirm_required: true,
     wici: checkpoint?.tool_versions?.wici

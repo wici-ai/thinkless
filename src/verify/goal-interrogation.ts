@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
@@ -9,12 +9,13 @@ const target = resolve('fixture/goal-interrogation-target');
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
+  await writeDirectPlanFixture();
   await writeDeterministicMeasure();
   const paths = runPaths(target);
 
   const result = await execa(
     process.execPath,
-    ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--goal', 'Periodically check that behavior still matches goal.json', '--max-iters', '5', '--mode', 'stub'],
+    ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--goal', 'Periodically check that behavior still matches GOAL.md', '--max-iters', '5', '--mode', 'stub'],
     {
       cwd: resolve('.'),
       all: true,
@@ -32,7 +33,9 @@ async function main(): Promise<void> {
   const check = checks[0];
   assert(check.iter === 4, `expected goal interrogation at iter 4, got ${check.iter}`);
   assert(check.goal_version === 1, `expected goal version 1, got ${check.goal_version}`);
-  assert(check.restated_goal.includes('Periodically check that behavior still matches goal.json'), `restated goal missing requirement: ${check.restated_goal}`);
+  assert(check.restated_goal.includes('Periodically check that behavior still matches GOAL.md'), `restated goal missing requirement: ${check.restated_goal}`);
+  assert(!check.restated_goal.includes('Optimize planner-selected validation'), `restated goal leaked internal metric placeholder: ${check.restated_goal}`);
+  assert(check.restated_goal.includes("PLAN.md's planner-defined validation"), `restated goal should defer validation semantics to PLAN.md: ${check.restated_goal}`);
   assert(check.active_requirement_ids.includes('R1'), `active requirement ids missing R1: ${check.active_requirement_ids.join(',')}`);
   assert(check.acceptance_checks.some((item) => item.includes('./.opt/checks.sh')), `acceptance checks missing checks.sh: ${check.acceptance_checks.join(',')}`);
 
@@ -69,6 +72,11 @@ async function main(): Promise<void> {
 }
 
 async function writeDeterministicMeasure(): Promise<void> {
+  await mkdir(`${target}/.opt`, { recursive: true });
+  await writeFile(`${target}/.opt/checks.sh`, '#!/usr/bin/env bash\nset -euo pipefail\nnpm test\n');
+  await writeFile(`${target}/.opt/measure.sh`, '#!/usr/bin/env bash\nset -euo pipefail\nnpm run measure\n');
+  await chmod(`${target}/.opt/checks.sh`, 0o755);
+  await chmod(`${target}/.opt/measure.sh`, 0o755);
   await writeFile(
     `${target}/measure.mjs`,
     `import { readFileSync } from 'node:fs';
@@ -80,6 +88,27 @@ const p50 = samples[3];
 const p95 = samples[6];
 const p99 = samples[6];
 console.log(\`METRIC p50=\${p50} p95=\${p95} p99=\${p99} unit=ms n=\${samples.length} warmup_discarded=2 samples=\${samples.join(',')}\`);
+`
+  );
+}
+
+async function writeDirectPlanFixture(): Promise<void> {
+  await writeFile(
+    `${target}/PLAN.md`,
+    `# WiCi Execution Plan
+
+Goal: Periodically check that behavior still matches GOAL.md while executing a direct markdown plan.
+
+- [ ] S1 Optimize the fixture hot path
+  - Validation: ./.opt/checks.sh && ./.opt/measure.sh
+- [ ] S2 Verify the optimized implementation remains correct
+  - Validation: ./.opt/checks.sh
+- [ ] S3 Re-read PLAN.md and keep following the markdown source of truth
+  - Validation: ./.opt/checks.sh
+- [ ] S4 Record a public execution checkpoint before continuing
+  - Validation: ./.opt/checks.sh
+- [ ] S5 Continue after the periodic goal check with the condensed context available
+  - Validation: ./.opt/checks.sh
 `
   );
 }

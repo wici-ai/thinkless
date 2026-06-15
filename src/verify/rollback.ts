@@ -22,7 +22,7 @@ async function main(): Promise<void> {
 
   const best = await git(['rev-parse', 'wici/best']);
   const headBeforeDirty = await git(['rev-parse', 'HEAD']);
-  assert(best.trim() !== headBeforeDirty.trim(), 'rollback fixture should have a later limit artifact commit after wici/best');
+  assert(best.trim() === headBeforeDirty.trim(), 'direct V1 rollback tag should point at the latest confirmed checkpoint');
 
   await writeFile(`${target}/src/hotpath.js`, `${await readFile(`${target}/src/hotpath.js`, 'utf8')}\n// dirty local attempt\n`);
   await writeFile(`${target}/scratch.tmp`, 'untracked local file\n');
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
 
   await git(['tag', '-d', 'wici/best']);
   const fallbackPreview = await rollback(['--target', target]) as RollbackPreview;
-  assert(fallbackPreview.source === 'baseline.best_commit', `rollback should fall back to baseline.best_commit without tag, got ${fallbackPreview.source}`);
+  assert(fallbackPreview.source === 'checkpoint.best_commit', `direct V1 rollback should fall back to checkpoint.best_commit without tag, got ${fallbackPreview.source}`);
 
   console.log(
     JSON.stringify(

@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "WiCiIterResult",
   "type": "object",
-  "required": ["step_done", "tests_pass", "notes"],
+  "required": ["step_done", "tests_pass", "notes", "changed_files", "next"],
   "properties": {
     "step_done": { "type": "boolean" },
     "tests_pass": { "type": "boolean" },
     "notes": { "type": "string" },
     "changed_files": { "type": "array", "items": { "type": "string" } },
-    "next": { "type": "string" }
+    "next": { "type": ["string", "null"] }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

@@ -2,13 +2,22 @@ import { chmod } from 'node:fs/promises';
 import { atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
 import { loadConfig } from '../shared/config.js';
 import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.js';
-import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, RunOptions, WiCiConfig } from '../shared/types.js';
-import { hashFile, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
+import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, LedgerEntry, RunOptions, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
+import { hashFile, iterationSnapshotPath, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
 import { applyInjections, drainInbox, drainPendingInjectionsById, injectionIds, readPendingInjections } from './inbox.js';
-import { runExecutorStep } from './executor.js';
-import { lockEvalScripts, runInitialPlanner, runPlanDiff, unlockEvalScripts, verifyEvalHashes } from './planner.js';
-import { nextExecutableStep, readPlan, setPlanStepStatus } from './plan.js';
+import { runExecutorStep, type ExecutorProgress } from './executor.js';
+import {
+  lockEvalScripts,
+  runInitialPlanner,
+  runPlanDiff,
+  unlockEvalScripts,
+  verifyEvalHashes,
+  type PlannerClarificationResume,
+  type PlannerQuestion,
+  type PlannerUsageProgress
+} from './planner.js';
+import { nextExecutableStep, parsePlanSteps, readPlan, setPlanStepStatus } from './plan.js';
 import { appendLedger, lastAccepted, readLedger } from './ledger.js';
 import {
   evaluateCandidate,
@@ -21,7 +30,6 @@ import { commitAll, commitAllWithKey, currentCommit, ensureGitIdentity, ensureGi
 import { shouldStop } from './stop.js';
 import {
   assertNoActiveToolVersionDrift,
-  assertNoPendingToolUpdatesForLongRun,
   assertRealToolsReady,
   checkToolHealth,
   toolVersionsFromHealth
@@ -29,12 +37,11 @@ import {
 import { consecutiveGlobalFailures, shouldReplanStuckStep } from './stuck.js';
 import { markOutboxAnswered, readOutbox, writeOutbox } from './outbox.js';
 import { appendLessonFromLedger, formatLessonsForPrompt, readRecentLessons } from './lessons.js';
-import { recordAvenueOutcome, selectAvenue } from './diversity.js';
 import { runScorerSelftest } from './scorerSelftest.js';
 import { combinePromptMemory, readContextForPrompt, writeContextSummary } from './context.js';
 import { maybeInterrogateGoal } from './goalInterrogation.js';
 import { ensureGoalDoc, saveGoalFiles } from './goalDoc.js';
-import { ensureBenchmarkManifest, readBenchmarkForPrompt } from './benchmark.js';
+import { readBenchmarkForPrompt, readBenchmarkManifest } from './benchmark.js';
 import {
   ACCEPTANCE_CLARIFY_REPLY_KEY,
   ensureAcceptanceSpec,
@@ -44,13 +51,14 @@ import {
 import { commitLimitArtifact } from './finalArtifact.js';
 import { recordAcceptedArchiveEntry, restoreLedgerFile, selectArchiveParent } from './archive.js';
 import { formatSkillsForPrompt, recordSkillFromKeep, retrieveSkills } from './skills.js';
-import { appendCurriculumSubgoal } from './curriculum.js';
 import { codexUsageFromError } from './codexRun.js';
-import { formatPrimaryMetricTransition, primaryMetricTag } from './metricFormat.js';
+import { PLANNER_SELECTED_METRIC, formatPrimaryMetricTransition, primaryMetricTag, primaryMetricValue } from './metricFormat.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
 const ACCEPTANCE_SPEC_WAIT_REASON = 'awaiting acceptance criteria clarification';
+const PLANNER_CLARIFY_REPLY_PREFIX = 'planner-clarify-';
+const PLANNER_CLARIFY_WAIT_REASON = 'awaiting planner clarification';
 const STOP_ANSWER_WAIT_REASON = 'awaiting stop answer';
 
 export interface SupervisorResult {
@@ -72,8 +80,9 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     await ensureGitIdentity(paths, config);
     await ensureTargetGitignore(paths);
 
+    const hadGoalBeforeStart = await exists(paths.goal);
     let goal = await ensureGoal(paths, options.goal, config);
-    const maxIters = options.maxIters ?? goal.budget.max_iters ?? config.budget.max_iters;
+    const maxIters = resolveMaxIters(options.maxIters, goal.budget.max_iters ?? config.budget.max_iters);
     let checkpoint = await loadCheckpoint(paths, goal);
     let loadedSnapshot: CheckpointSnapshot | null = null;
     if (options.resumeIteration !== undefined) {
@@ -89,6 +98,12 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       await truncateJsonLines(paths.events, checkpoint.events_seq);
       await truncateJsonLines(paths.ledger, checkpoint.ledger_seq);
       checkpoint.iter = checkpoint.ledger_seq;
+    }
+    if (options.goal && !hadGoalBeforeStart && !checkpoint.goal_source) {
+      checkpoint = {
+        ...checkpoint,
+        goal_source: options.goalSource ?? 'api_goal'
+      };
     }
     await events.init();
     if (loadedSnapshot) {
@@ -108,19 +123,24 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     }
     await saveCheckpoint(paths, checkpoint);
 
-    const toolHealth = config.tools.mode === 'stub' ? null : await checkToolHealth(config, { probeClaude: config.tools.mode === 'real' });
+    const toolHealth = config.tools.mode === 'stub' ? null : await checkToolHealth(config, { probeClaude: false });
     if (toolHealth) assertRealToolsReady(config, toolHealth);
-    assertNoPendingToolUpdatesForLongRun(config, toolHealth, maxIters);
     const currentToolVersions = await toolVersionsFromHealth(config, toolHealth);
     assertNoActiveToolVersionDrift(checkpoint, currentToolVersions);
     checkpoint.tool_versions = currentToolVersions;
     await saveCheckpoint(paths, checkpoint);
     await events.emit('SUPERVISOR_START', `Starting WiCi supervisor in ${paths.target}`, {
       mode: config.tools.mode,
+      goal_source: checkpoint.goal_source ?? null,
       lock_mode: config.evaluation.lock_mode,
       safety: config.safety.container_hint,
       tools: toolHealth
     });
+
+    if (!(await readJsonFileMaybe<BaselineFile>(paths.baseline))) {
+      checkpoint = await recoverIncompleteDirectAttempt(paths, checkpoint, events);
+      await saveCheckpoint(paths, checkpoint);
+    }
 
     const stopAnswer = await handlePendingStopQuestion(paths, checkpoint, events);
     checkpoint = stopAnswer.checkpoint;
@@ -128,25 +148,24 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       return { state: 'STOP', reason: stopAnswer.reason, iter: checkpoint.iter };
     }
 
-    if (config.evaluation.lock_mode === 'manual' && !(await exists(paths.baseline))) {
-      ({ goal, checkpoint } = await drainEvalLockAnswers(paths, goal, checkpoint, events));
-    }
-
-    const setup = await ensurePlanAndBaseline(paths, goal, config, events, checkpoint);
+    const setup = await ensurePlanAndLegacyBaselineState(paths, goal, config, events, checkpoint);
+    goal = setup.goal;
     checkpoint = setup.checkpoint;
     let baseline = setup.baseline;
     if (!baseline) {
-      checkpoint = {
-        ...checkpoint,
-        supervisor_state: 'STOP',
-        goal_version: goal.version,
-        plan_hash: await hashFile(paths.plan),
-        ledger_seq: await lineCount(paths.ledger),
-        events_seq: events.seq
-      };
-      await saveCheckpoint(paths, checkpoint);
-      await events.emit('STOP', setup.waitReason);
-      return { state: 'STOP', reason: setup.waitReason, iter: checkpoint.iter };
+      if (setup.waitReason !== 'PLAN_READY') {
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'STOP',
+          goal_version: goal.version,
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq
+        };
+        await saveCheckpoint(paths, checkpoint);
+        await events.emit('STOP', setup.waitReason);
+        return { state: 'STOP', reason: setup.waitReason, iter: checkpoint.iter };
+      }
+      return runDirectPlanExecution(paths, goal, config, events, checkpoint, maxIters, options);
     }
     checkpoint = await recoverIncompleteAttempt(paths, checkpoint, baseline, events);
     await runStartupScorerSelftest(paths, goal, baseline, config, events);
@@ -190,8 +209,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       const lessonsText = formatLessonsForPrompt(await readRecentLessons(paths));
       const contextText = await readContextForPrompt(paths);
       const memoryText = combinePromptMemory(acceptanceText, benchmarkText, skillText, contextText, lessonsText);
-      const parentId = checkpoint.active_avenue?.parent_id ?? lastAccepted(ledgerBeforeIteration)?.id ?? null;
-      const activeAvenue = checkpoint.active_avenue?.name;
+      const parentId = checkpoint.active_branch?.parent_id ?? lastAccepted(ledgerBeforeIteration)?.id ?? null;
 
       const injections = await drainInbox(paths, checkpoint.drained_inbox);
       if (injections.length > 0) {
@@ -223,7 +241,14 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         }
         checkpoint.supervisor_state = 'PLAN';
         await saveCheckpoint(paths, checkpoint);
-        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, withLessons(steerText ?? '', memoryText), config);
+        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, withLessons(steerText ?? '', memoryText), config, (progress) =>
+          emitPlannerUsage(events, progress, { phase: 'plan_diff' })
+        );
+        const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
+        if (waitingForPlanner) {
+          return { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter };
+        }
+        if (!diff.ok) throw new Error(diff.error ?? 'Planner did not update PLAN.md');
         checkpoint.sessions.planner = diff.sessionId ?? checkpoint.sessions.planner;
         checkpoint.plan_hash = await hashFile(paths.plan);
         if (await hasChanges(paths)) {
@@ -281,7 +306,15 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
 
       let iterResult;
       try {
-        iterResult = await runExecutorStep(paths, goal, step.id, nextIter, config, steerText, memoryText);
+        iterResult = await runExecutorStep(paths, goal, step.id, nextIter, config, steerText, memoryText, {
+          onProgress: async (progress) => {
+            await events.emit('EXECUTE_PROGRESS', formatExecutorProgress(progress), {
+              iter: nextIter,
+              step_id: step.id,
+              progress
+            });
+          }
+        });
         checkpoint.sessions.executor = iterResult.invocation.sessionId ?? checkpoint.sessions.executor;
         await events.emit('EXECUTE_DONE', iterResult.notes, {
           step_done: iterResult.step_done,
@@ -306,12 +339,12 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           usage,
           reflection: 'executor crashed; reverted to best known commit',
           parentId,
-          avenue: activeAvenue
+          branch_reason: checkpoint.active_branch?.reason
         });
         await appendLedger(paths, ledgerEntry);
         await appendLessonFromLedger(paths, ledgerEntry, config);
         await refreshContextSummary(paths, goal, events);
-        checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
+        checkpoint = await recordActiveBranchOutcome(paths, checkpoint, ledgerEntry, events);
         if (await hasChanges(paths)) {
           await commitAll(paths, `chore: record failed WiCi iteration ${nextIter}`);
           await tagBest(paths);
@@ -357,12 +390,12 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           usage: iterResult.invocation.usage,
           reflection: 'superseded by chat injection at EVALUATE safe point; reverted before evaluation',
           parentId,
-          avenue: activeAvenue
+          branch_reason: checkpoint.active_branch?.reason
         });
         await appendLedger(paths, ledgerEntry);
         await appendLessonFromLedger(paths, ledgerEntry, config);
         await refreshContextSummary(paths, goal, events);
-        checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
+        checkpoint = await recordActiveBranchOutcome(paths, checkpoint, ledgerEntry, events);
 
         if (applied.aborted) {
           checkpoint = {
@@ -386,7 +419,14 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           plan_hash: await hashFile(paths.plan)
         };
         await saveCheckpoint(paths, checkpoint);
-        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, withLessons(steerText ?? '', memoryText), config);
+        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, withLessons(steerText ?? '', memoryText), config, (progress) =>
+          emitPlannerUsage(events, progress, { phase: 'plan_diff', safe_point: 'evaluate' })
+        );
+        const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
+        if (waitingForPlanner) {
+          return { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter };
+        }
+        if (!diff.ok) throw new Error(diff.error ?? 'Planner did not update PLAN.md');
         checkpoint.sessions.planner = diff.sessionId ?? checkpoint.sessions.planner;
         checkpoint.plan_hash = await hashFile(paths.plan);
         if (await hasChanges(paths)) {
@@ -438,11 +478,11 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           usage: iterResult.invocation.usage,
           reflection: 'correctness gate failed; reverted',
           parentId,
-          avenue: activeAvenue
+          branch_reason: checkpoint.active_branch?.reason
         });
         await appendLedger(paths, ledgerEntry);
         await appendLessonFromLedger(paths, ledgerEntry, config);
-        checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
+        checkpoint = await recordActiveBranchOutcome(paths, checkpoint, ledgerEntry, events);
         if (await hasChanges(paths)) {
           await commitAll(paths, `chore: record rejected WiCi iteration ${nextIter}`);
           await tagBest(paths);
@@ -477,11 +517,11 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           usage: iterResult.invocation.usage,
           reflection: evaluation.reason,
           parentId,
-          avenue: activeAvenue
+          branch_reason: checkpoint.active_branch?.reason
         });
         await appendLedger(paths, ledgerEntry);
         await appendLessonFromLedger(paths, ledgerEntry, config);
-        checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
+        checkpoint = await recordActiveBranchOutcome(paths, checkpoint, ledgerEntry, events);
         if (await hasChanges(paths)) {
           await commitAll(paths, `chore: record WiCi baseline and ledger for ${commit.slice(0, 7)}`);
         }
@@ -504,8 +544,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           });
         }
         await events.emit('COMMIT', `Accepted improvement and committed ${commit.slice(0, 7)}`, {
-          p99: evaluation.metric.p99,
-          heldout_p99: evaluation.heldoutMetric?.p99,
+          value: primaryMetricValue(evaluation.metric),
+          heldout_value: evaluation.heldoutMetric ? primaryMetricValue(evaluation.heldoutMetric) : undefined,
           delta_pct: evaluation.deltaPct,
           heldout_delta_pct: evaluation.heldoutDeltaPct,
           confidence: evaluation.confidence,
@@ -516,9 +556,9 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         await saveCheckpoint(paths, checkpoint);
         await events.emit('REVERT', evaluation.reason, {
           delta_pct: evaluation.deltaPct,
-          prescreen_p99: evaluation.prescreenMetric?.p99,
+          prescreen_value: evaluation.prescreenMetric ? primaryMetricValue(evaluation.prescreenMetric) : undefined,
           prescreen_delta_pct: evaluation.prescreenDeltaPct,
-          heldout_p99: evaluation.heldoutMetric?.p99,
+          heldout_value: evaluation.heldoutMetric ? primaryMetricValue(evaluation.heldoutMetric) : undefined,
           heldout_delta_pct: evaluation.heldoutDeltaPct,
           confidence: evaluation.confidence,
           p_value: evaluation.pValue
@@ -537,11 +577,11 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           usage: iterResult.invocation.usage,
           reflection: evaluation.reason,
           parentId,
-          avenue: activeAvenue
+          branch_reason: checkpoint.active_branch?.reason
         });
         await appendLedger(paths, ledgerEntry);
         await appendLessonFromLedger(paths, ledgerEntry, config);
-        checkpoint = await recordActiveAvenueOutcome(paths, config, checkpoint, ledgerEntry, events);
+        checkpoint = await recordActiveBranchOutcome(paths, checkpoint, ledgerEntry, events);
         if (await hasChanges(paths)) {
           await commitAll(paths, `chore: record rejected WiCi iteration ${nextIter}`);
           await tagBest(paths);
@@ -609,34 +649,38 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           }, archiveParent.nonBest ? 'warn' : 'info');
         }
         await setPlanStepStatus(paths, step.id, 'blocked', checkpoint.iter);
-        const avenue = await selectAvenue(paths, config, branchParentId);
-        checkpoint.active_avenue = {
-          name: avenue.name,
+        checkpoint.active_branch = {
           parent_id: branchParentId,
-          selected_at: new Date().toISOString()
+          selected_at: new Date().toISOString(),
+          reason: stuck.reason
         };
-        const curriculum = await appendCurriculumSubgoal(paths, goal, {
-          iter: checkpoint.iter,
-          stepId: step.id,
-          avenue: avenue.name,
-          stuckReason: stuck.reason,
-          attempts: stuck.attempts,
-          consecutiveFailures: stuck.consecutiveFailures,
-          parentId: branchParentId
-        });
-        await events.emit('CURRICULUM_SUBGOAL', `Generated curriculum sub-goal for ${step.id}`, {
-          id: curriculum.id,
+        await events.emit('BRANCH_REPLAN_REQUEST', `Requesting planner-selected replan for ${step.id}`, {
           step_id: step.id,
-          avenue: avenue.name,
           parent_id: branchParentId,
-          sub_goal: curriculum.sub_goal
+          stuck_reason: stuck.reason,
+          attempts: stuck.attempts,
+          consecutive_failures: stuck.consecutiveFailures
         });
         await refreshContextSummary(paths, goal, events);
         const replanText = withLessons(
-          `${stuck.reason}. Avenue: ${avenue.name}. Curriculum sub-goal: ${curriculum.sub_goal} Try this different optimization avenue; preserve completed steps and do not rewrite locked eval scripts.`,
+          [
+            `${stuck.reason}.`,
+            `Step ${step.id} is blocked after ${stuck.attempts} attempt(s) and ${stuck.consecutiveFailures} consecutive failure(s).`,
+            branchParentId ? `Branch parent ledger id: ${branchParentId}.` : '',
+            'Analyze GOAL.md, PLAN.md, the ledger, and lessons, then produce a minimal plan diff with a new planner-chosen direction.',
+            'Do not rely on a supervisor-provided category; choose the next approach from the evidence.',
+            'Preserve completed steps and keep planner-provided validation artifacts consistent with PLAN.md.'
+          ].filter(Boolean).join(' '),
           memoryText
         );
-        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, replanText, config);
+        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, replanText, config, (progress) =>
+          emitPlannerUsage(events, progress, { phase: 'stuck_replan', step_id: step.id })
+        );
+        const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
+        if (waitingForPlanner) {
+          return { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter };
+        }
+        if (!diff.ok) throw new Error(diff.error ?? 'Planner did not update PLAN.md');
         checkpoint.sessions.planner = diff.sessionId ?? checkpoint.sessions.planner;
         checkpoint.plan_hash = await hashFile(paths.plan);
         if (await hasChanges(paths)) {
@@ -669,9 +713,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           step_id: step.id,
           attempts: stuck.attempts,
           consecutive_failures: stuck.consecutiveFailures,
-          avenue: avenue.name,
           parent_id: branchParentId,
-          sample: avenue.sample
+          planner_selects_direction: true
         }, 'warn');
         steerText = undefined;
         continue;
@@ -696,7 +739,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       if (options.once) break;
     }
 
-    const limitReason = `Reached max_iters=${maxIters}`;
+    const limitReason = `Reached max_iters=${maxItersLabel(maxIters)}`;
     const artifact = await commitLimitArtifact(paths, goal, baseline, await readLedger(paths), limitReason);
     await events.emit('LIMIT_ARTIFACT_COMMIT', artifact.reused ? `Reused limit artifact commit ${artifact.commit.slice(0, 7)}` : `Committed limit artifact ${artifact.commit.slice(0, 7)}`, artifact);
     checkpoint = {
@@ -713,10 +756,320 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     const reason = error instanceof Error ? error.message : String(error);
     await writeOutbox(paths, { kind: 'error', text: reason }).catch(() => undefined);
     await events.emit('FAILED', reason, undefined, 'error');
+    const failedCheckpoint = await readJsonFileMaybe<Checkpoint>(paths.checkpoint).catch(() => null);
+    if (failedCheckpoint) {
+      const ledgerSeq = await lineCount(paths.ledger);
+      await saveCheckpoint(paths, {
+        ...failedCheckpoint,
+        supervisor_state: 'FAILED',
+        iter: ledgerSeq,
+        ledger_seq: ledgerSeq,
+        events_seq: events.seq
+      });
+    }
     return { state: 'FAILED', reason, iter: 0 };
   } finally {
     await releaseLock();
   }
+}
+
+async function runDirectPlanExecution(
+  paths: ReturnType<typeof runPaths>,
+  goal: GoalFile,
+  config: WiCiConfig,
+  events: EventWriter,
+  checkpoint: Checkpoint,
+  maxIters: number,
+  options: RunOptions
+): Promise<SupervisorResult> {
+  let steerText: string | undefined;
+
+  while (checkpoint.iter < maxIters) {
+    const injections = await drainInbox(paths, checkpoint.drained_inbox);
+    if (injections.length > 0) {
+      const applied = applyInjections(goal, injections);
+      goal = applied.goal;
+      steerText = applied.steerText;
+      const drainedIds = injectionIds(injections);
+      checkpoint.drained_inbox = [...checkpoint.drained_inbox, ...drainedIds];
+      checkpoint.goal_version = goal.version;
+      for (const answer of injections.filter((item) => item.kind === 'answer' && item.reply_to)) {
+        const marked = await markOutboxAnswered(paths, answer.reply_to!, answer.text);
+        await events.emit('OUTBOX_ANSWERED', `Applied answer for ${answer.reply_to}`, {
+          reply_to: answer.reply_to,
+          outbox_id: marked?.id ?? null
+        });
+      }
+      await saveGoalFiles(paths, goal);
+      await events.emit(
+        'INJECTION_DRAINED',
+        `Applied ${drainedIds.length} chat injection(s)`,
+        injections.map((item) => ({ id: item.id, ids: item.coalesced_ids ?? [item.id], kind: item.kind, mode: 'direct' }))
+      );
+      if (applied.aborted) {
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'STOP',
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq,
+          plan_hash: await hashFile(paths.plan)
+        };
+        await saveCheckpoint(paths, checkpoint);
+        await writeOutbox(paths, { kind: 'info', text: 'Urgent abort injection requested stop' });
+        await events.emit('STOP', 'Urgent abort injection requested stop', undefined, 'warn');
+        return { state: 'STOP', reason: 'urgent abort injection', iter: checkpoint.iter };
+      }
+
+      checkpoint = {
+        ...checkpoint,
+        supervisor_state: 'PLAN',
+        ledger_seq: await lineCount(paths.ledger),
+        events_seq: events.seq,
+        plan_hash: await hashFile(paths.plan)
+      };
+      await saveCheckpoint(paths, checkpoint);
+      const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, steerText ?? '', config, (progress) =>
+        emitPlannerUsage(events, progress, { phase: 'direct_plan_diff' })
+      );
+      const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
+      if (waitingForPlanner) {
+        return { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter };
+      }
+      if (!diff.ok) throw new Error(diff.error ?? 'Planner did not update PLAN.md');
+      checkpoint.sessions.planner = diff.sessionId ?? checkpoint.sessions.planner;
+      checkpoint.plan_hash = await hashFile(paths.plan);
+      if (await hasChanges(paths)) {
+        const commit = await commitAll(paths, `chore: apply WiCi goal v${goal.version} plan update`);
+        await events.emit('GIT_COMMIT', `Created direct plan update checkpoint ${commit.slice(0, 7)}`, {
+          commit,
+          mode: 'direct'
+        });
+        await tagBest(paths);
+      }
+      await events.emit('PLAN_DIFF_APPLIED', 'Planner updated PLAN.md for new input', { steerText, mode: 'direct' });
+    }
+
+    const plan = await readPlan(paths);
+    const step = nextExecutableStep(plan);
+    if (!step) {
+      checkpoint = {
+        ...checkpoint,
+        supervisor_state: 'STOP',
+        next_step: null,
+        ledger_seq: await lineCount(paths.ledger),
+        events_seq: events.seq,
+        plan_hash: await hashFile(paths.plan)
+      };
+      await saveCheckpoint(paths, checkpoint);
+      await writeOutbox(paths, { kind: 'info', text: 'PLAN.md has no pending executable steps.' });
+      await events.emit('STOP', 'PLAN.md has no pending executable steps.');
+      return { state: 'STOP', reason: 'PLAN.md complete', iter: checkpoint.iter };
+    }
+
+    const nextIter = checkpoint.iter + 1;
+    const iterationStarted = Date.now();
+    const contextText = await readContextForPrompt(paths);
+    checkpoint = {
+      ...checkpoint,
+      supervisor_state: 'EXECUTE',
+      iter: nextIter,
+      next_step: step.id,
+      goal_version: goal.version,
+      plan_hash: await hashFile(paths.plan),
+      ledger_seq: await lineCount(paths.ledger),
+      events_seq: events.seq
+    };
+    await setPlanStepStatus(paths, step.id, 'active', nextIter);
+    await saveCheckpoint(paths, checkpoint);
+    await events.emit('EXECUTE_START', `Iteration ${nextIter}: executing ${step.id}`, { step, mode: 'direct' });
+
+    try {
+      const iterResult = await runExecutorStep(paths, goal, step.id, nextIter, config, steerText, contextText, {
+        onProgress: async (progress) => {
+          await events.emit('EXECUTE_PROGRESS', formatExecutorProgress(progress), {
+            iter: nextIter,
+            step_id: step.id,
+            mode: 'direct',
+            progress
+          });
+        }
+      });
+      checkpoint.sessions.executor = iterResult.invocation.sessionId ?? checkpoint.sessions.executor;
+      await events.emit('EXECUTE_DONE', iterResult.notes, {
+        step_done: iterResult.step_done,
+        tests_pass: iterResult.tests_pass,
+        changed_files: iterResult.changed_files,
+        usage: iterResult.invocation.usage,
+        mode: 'direct'
+      });
+      await setPlanStepStatus(paths, step.id, iterResult.step_done && iterResult.tests_pass ? 'done' : 'pending', nextIter);
+      let directBestCommit = checkpoint.best_commit ?? null;
+      if (await hasChanges(paths)) {
+        const commit = await commitAll(paths, `chore: WiCi direct iteration ${nextIter} ${step.id}`);
+        directBestCommit = commit;
+        await events.emit('GIT_COMMIT', `Created direct execution checkpoint ${commit.slice(0, 7)}`, {
+          commit,
+          iter: nextIter,
+          step_id: step.id,
+          mode: 'direct'
+        });
+        await tagBest(paths);
+      }
+      const directStatus: LedgerEntry['status'] = iterResult.step_done && iterResult.tests_pass ? 'keep' : 'reject';
+      const ledgerEntry = directLedgerEntry({
+        iter: nextIter,
+        stepId: step.id,
+        status: directStatus,
+        commit: directBestCommit,
+        wallMs: Date.now() - iterationStarted,
+        usage: iterResult.invocation.usage,
+        notes: iterResult.notes,
+        stepDone: iterResult.step_done,
+        testsPass: iterResult.tests_pass,
+        changedFiles: iterResult.changed_files
+      });
+      await appendLedger(paths, ledgerEntry);
+      const ledgerAfterIteration = await readLedger(paths);
+      const goalCheck = await maybeInterrogateGoal(paths, goal, ledgerAfterIteration);
+      if (goalCheck) {
+        await events.emit('GOAL_INTERROGATION', 'Periodic direct-path check compared GOAL.md with recent execution history', goalCheck, goalCheck.aligned ? 'info' : 'warn');
+      }
+      await refreshContextSummary(paths, goal, events);
+      checkpoint = {
+        ...checkpoint,
+        supervisor_state: 'REFLECT',
+        next_step: step.id,
+        best_commit: directBestCommit,
+        ledger_seq: await lineCount(paths.ledger),
+        events_seq: events.seq,
+        plan_hash: await hashFile(paths.plan)
+      };
+      await saveCheckpoint(paths, checkpoint);
+      if (await hasChanges(paths)) {
+        const stateCommit = await commitAll(paths, `chore: record WiCi direct iteration ${nextIter} state`);
+        await events.emit('GIT_COMMIT', `Created direct state checkpoint ${stateCommit.slice(0, 7)}`, {
+          commit: stateCommit,
+          iter: nextIter,
+          step_id: step.id,
+          mode: 'direct_state'
+        });
+        await tagBest(paths);
+      }
+      steerText = undefined;
+      if (options.once) break;
+    } catch (error) {
+      const usage = codexUsageFromError(error);
+      const reason = errorMessage(error);
+      await events.emit('EXECUTE_RECOVERABLE_FAILURE', reason, usage ? { usage, mode: 'direct' } : { mode: 'direct' }, 'warn');
+      const ledgerEntry = directLedgerEntry({
+        iter: nextIter,
+        stepId: step.id,
+        status: 'crash',
+        commit: checkpoint.best_commit ?? null,
+        wallMs: Date.now() - iterationStarted,
+        usage,
+        notes: reason,
+        stepDone: false,
+        testsPass: false,
+        changedFiles: []
+      });
+      await appendLedger(paths, ledgerEntry);
+      await setPlanStepStatus(paths, step.id, 'pending', nextIter);
+      await refreshContextSummary(paths, goal, events);
+      checkpoint = {
+        ...checkpoint,
+        supervisor_state: 'REFLECT',
+        next_step: step.id,
+        ledger_seq: await lineCount(paths.ledger),
+        events_seq: events.seq,
+        plan_hash: await hashFile(paths.plan)
+      };
+      await saveCheckpoint(paths, checkpoint);
+      if (await hasChanges(paths)) {
+        const stateCommit = await commitAll(paths, `chore: record WiCi direct recovery ${nextIter} ${step.id}`);
+        await events.emit('GIT_COMMIT', `Created direct recovery checkpoint ${stateCommit.slice(0, 7)}`, {
+          commit: stateCommit,
+          iter: nextIter,
+          step_id: step.id,
+          mode: 'direct_recovery'
+        });
+      }
+      steerText = recoverySteerText(step.id, nextIter, reason);
+      await writeOutbox(paths, {
+        kind: 'info',
+        text: `Executor attempt ${nextIter} failed and was recorded; WiCi will continue the same goal so Codex can diagnose, update PLAN.md, and retry. Reason: ${reason}`
+      });
+      if (options.once) break;
+      continue;
+    }
+  }
+
+  const reason = `Reached max_iters=${maxItersLabel(maxIters)}`;
+  checkpoint = {
+    ...checkpoint,
+    supervisor_state: 'STOP',
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq,
+    plan_hash: await hashFile(paths.plan)
+  };
+  await saveCheckpoint(paths, checkpoint);
+  await writeOutbox(paths, { kind: 'info', text: reason });
+  await events.emit('STOP', reason);
+  return { state: 'STOP', reason, iter: checkpoint.iter };
+}
+
+export function resolveMaxIters(explicitMaxIters: number | undefined, configuredMaxIters: number): number {
+  if (explicitMaxIters !== undefined) return explicitMaxIters;
+  return configuredMaxIters > 0 ? configuredMaxIters : Number.POSITIVE_INFINITY;
+}
+
+function maxItersLabel(maxIters: number): string {
+  return Number.isFinite(maxIters) ? String(maxIters) : 'unbounded';
+}
+
+function directLedgerEntry(args: {
+  iter: number;
+  stepId: string;
+  status: LedgerEntry['status'];
+  commit: string | null;
+  wallMs: number;
+  usage?: ToolUsageSummary;
+  notes: string;
+  stepDone: boolean;
+  testsPass: boolean;
+  changedFiles: string[];
+}): LedgerEntry {
+  return {
+    id: `iter-${args.iter}`,
+    ts: new Date().toISOString(),
+    iter: args.iter,
+    step_id: args.stepId,
+    commit: args.commit,
+    hypothesis: `Execute PLAN.md step ${args.stepId}`,
+    metric: null,
+    baseline: null,
+    delta_pct: null,
+    confidence: 'direct-executor-receipt',
+    ci_low: null,
+    ci_high: null,
+    p_value: null,
+    cost: {
+      wall_ms: args.wallMs,
+      ...(args.usage?.tokens_input !== undefined ? { tokens_input: args.usage.tokens_input } : {}),
+      ...(args.usage?.tokens_output !== undefined ? { tokens_output: args.usage.tokens_output } : {}),
+      ...(args.usage?.usd !== undefined ? { usd: args.usage.usd } : {})
+    },
+    guards: {
+      direct: true,
+      step_done: args.stepDone,
+      tests_pass: args.testsPass,
+      changed_files: args.changedFiles.length,
+      reason: args.notes.slice(0, 240)
+    },
+    status: args.status,
+    reflection: args.notes,
+    parent_id: null
+  };
 }
 
 async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | undefined, config: WiCiConfig): Promise<GoalFile> {
@@ -725,8 +1078,10 @@ async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | und
     await ensureGoalDoc(paths, existing);
     return existing;
   }
-  const initialText = text ?? 'Reduce p99 latency while preserving correctness.';
-  const inferred = inferInitialMetric(initialText);
+  if (!text?.trim()) {
+    throw new Error('Initial goal is required. In the TUI, type the first goal in Chat; for headless run, pass --goal.');
+  }
+  const initialText = text.trim();
   const goal: GoalFile = {
     run_id: `run-${Date.now()}`,
     version: 1,
@@ -738,20 +1093,14 @@ async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | und
         status: 'active'
       }
     ],
-    acceptance_criteria: [
-      {
-        id: 'A1',
-        text: 'Locked checks pass before any performance result is accepted.',
-        check: './.opt/checks.sh'
-      },
-      {
-        id: 'A2',
-        text: inferred.acceptanceText,
-        check: './.opt/measure.sh'
-      }
-    ],
-    constraints: ['Do not edit .opt/checks.sh or .opt/measure.sh after lock.', 'Commit confirmed improvements and revert regressions.'],
-    metric: inferred.metric,
+    acceptance_criteria: [],
+    constraints: ['Keep GOAL.md and PLAN.md as the source of truth.', 'Commit confirmed progress and keep rollback available.'],
+    metric: {
+      name: PLANNER_SELECTED_METRIC,
+      direction: 'maximize',
+      target: null,
+      unit: undefined
+    },
     budget: config.budget,
     stop: config.stop
   };
@@ -759,74 +1108,73 @@ async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | und
   return goal;
 }
 
-function inferInitialMetric(text: string): { metric: GoalFile['metric']; acceptanceText: string } {
-  const throughput = inferTokenThroughput(text);
-  if (throughput) {
-    return {
-      metric: {
-        name: 'token throughput',
-        direction: 'maximize',
-        target: throughput,
-        unit: 'token/s'
-      },
-      acceptanceText: `Measured token throughput reaches or exceeds ${throughput}token/s and accepted candidates improve beyond the configured gate.`
-    };
-  }
-
-  return {
-    metric: {
-      name: 'p99 latency',
-      direction: 'minimize',
-      target: null,
-      unit: 'ms'
-    },
-    acceptanceText: 'A candidate is committed only when p99 latency improves beyond the configured gate.'
-  };
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
-function inferTokenThroughput(text: string): number | null {
-  const normalized = text.replace(/，|。|、/g, ' ');
-  const patterns = [
-    /(\d+(?:\.\d+)?)\s*(?:tokens?\s*\/\s*s|tok\s*\/\s*s|tps)\b/i,
-    /(\d+(?:\.\d+)?)\s*tokens?\s*(?:per|\/)?\s*(?:sec|second)\b/i,
-    /(\d+(?:\.\d+)?)\s*(?:token|tokens|tok)\s*\/\s*秒/i,
-    /每秒\s*(\d+(?:\.\d+)?)\s*(?:token|tokens|tok)/i
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(normalized);
-    if (!match) continue;
-    const value = Number(match[1]);
-    if (Number.isFinite(value) && value > 0) return value;
-  }
-  return null;
+function recoverySteerText(stepId: string, iter: number, reason: string): string {
+  return [
+    `Previous executor attempt ${iter} for ${stepId} failed: ${reason}`,
+    'Continue the same GOAL.md rather than blocking.',
+    'First diagnose logs, process state, remote state, and changed files.',
+    'If PLAN.md or .opt scripts caused the failure, update them before retrying.',
+    'If a long command is needed, run it with visible progress or log tailing so the TUI receives output.',
+    'Do not repeat the exact same silent failing command unless you can justify why conditions changed.'
+  ].join('\n');
 }
 
-async function ensurePlanAndBaseline(
+async function ensurePlanAndLegacyBaselineState(
   paths: ReturnType<typeof runPaths>,
   goal: GoalFile,
   config: WiCiConfig,
   events: EventWriter,
   checkpoint: Checkpoint
-): Promise<{ baseline: BaselineFile | null; waitReason: string; checkpoint: Checkpoint }> {
+): Promise<{ baseline: BaselineFile | null; waitReason: string; checkpoint: Checkpoint; goal: GoalFile }> {
   let createdSetup = false;
-  const acceptance = await ensureAcceptanceSpec(paths, goal);
-  if (!acceptance.ok) {
-    await ensureAcceptanceSpecQuestion(paths, events, acceptance.reason ?? 'Acceptance criteria need clarification.');
-    return { baseline: null, waitReason: ACCEPTANCE_SPEC_WAIT_REASON, checkpoint };
-  }
-  if (acceptance.created) {
-    createdSetup = true;
-    await events.emit('ACCEPTANCE_SPEC_FROZEN', 'Frozen machine-checkable acceptance criteria in acceptance.spec.json', {
-      criteria: acceptance.spec?.criteria.map((criterion) => ({ id: criterion.id, check: criterion.check })) ?? []
-    });
+  let plannerResume: PlannerClarificationResume | undefined;
+  const plannerClarification = await drainPlannerClarificationAnswer(paths, goal, checkpoint, events);
+  goal = plannerClarification.goal;
+  checkpoint = plannerClarification.checkpoint;
+  plannerResume = plannerClarification.resume;
+  if (plannerClarification.waiting) {
+    return { baseline: null, waitReason: PLANNER_CLARIFY_WAIT_REASON, checkpoint, goal };
   }
 
-  const hasPlan = (await exists(paths.plan)) && (await exists(paths.measure)) && (await exists(paths.checks));
+  const hasPlan = await exists(paths.plan);
   if (!hasPlan) {
     await unlockEvalScripts(paths);
     checkpoint = await saveSetupCheckpoint(paths, checkpoint, goal, events, 'PLAN');
-    await events.emit('PLAN_START', 'Planner is materializing PLAN.md and locked eval scripts');
-    const result = await runInitialPlanner(paths, goal, config);
+    await events.emit('PLAN_START', 'Planner is materializing PLAN.md and optional validation scripts');
+    let result: Awaited<ReturnType<typeof runInitialPlanner>>;
+    try {
+      result = await runInitialPlanner(paths, goal, config, (progress) => emitPlannerUsage(events, progress, { phase: plannerResume ? 'initial_resume' : 'initial' }), plannerResume);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await events.emit('PLAN_FAILED', message, undefined, 'error');
+      throw error;
+    }
+    if (result.needsInput) {
+      checkpoint = {
+        ...checkpoint,
+        sessions: {
+          ...checkpoint.sessions,
+          planner: result.sessionId ?? checkpoint.sessions.planner
+        },
+        events_seq: events.seq
+      };
+      await saveCheckpoint(paths, checkpoint);
+      await ensurePlannerQuestion(paths, events, goal, result.needsInput);
+      checkpoint = {
+        ...checkpoint,
+        events_seq: events.seq
+      };
+      await saveCheckpoint(paths, checkpoint);
+      return { baseline: null, waitReason: PLANNER_CLARIFY_WAIT_REASON, checkpoint, goal };
+    }
+    if (!result.ok) {
+      throw new Error(result.error ?? 'Planner did not materialize PLAN.md');
+    }
+    goal = (await readJsonFileMaybe<GoalFile>(paths.goal)) ?? goal;
     checkpoint = {
       ...checkpoint,
       sessions: {
@@ -837,47 +1185,179 @@ async function ensurePlanAndBaseline(
       events_seq: events.seq
     };
     await saveCheckpoint(paths, checkpoint);
-    await events.emit('PLAN_DONE', result.stdout ?? 'planner completed', { sessionId: result.sessionId });
+    await events.emit('PLAN_DONE', 'Planner materialized PLAN.md and optional validation scripts', {
+      sessionId: result.sessionId,
+      stdout_artifact: `.wici/artifacts/planner-${plannerResume ? 'initial-resume' : 'initial'}.stdout.jsonl`
+    });
     checkpoint = {
       ...checkpoint,
       events_seq: events.seq
     };
     await saveCheckpoint(paths, checkpoint);
-    const benchmark = await ensureBenchmarkManifest(paths, goal);
-    await events.emit('BENCHMARK_SELECTED', 'Recorded benchmark selection in .opt/benchmark.json', {
-      tool: benchmark.manifest.tool,
-      command: benchmark.manifest.command,
-      metric: benchmark.manifest.metric,
-      created: benchmark.created
-    });
+    if (await exists(paths.benchmarkManifest)) {
+      const benchmark = await readBenchmarkManifest(paths);
+      await events.emit('BENCHMARK_SELECTED', 'Planner-generated benchmark note is available in .opt/benchmark.json', {
+        tool: benchmark.tool,
+        command: benchmark.command,
+        metric: benchmark.metric,
+        direction: benchmark.direction,
+        target: benchmark.target,
+        unit: benchmark.unit,
+        source: 'planner'
+      });
+    }
     createdSetup = true;
   } else {
-    const benchmark = await ensureBenchmarkManifest(paths, goal);
-    if (benchmark.created) {
-      await events.emit('BENCHMARK_SELECTED', 'Recorded benchmark selection in .opt/benchmark.json', {
-        tool: benchmark.manifest.tool,
-        command: benchmark.manifest.command,
-        metric: benchmark.manifest.metric
+    if (plannerResume) {
+      checkpoint = await saveSetupCheckpoint(paths, checkpoint, goal, events, 'PLAN');
+      await events.emit('PLAN_START', 'Planner is resuming PLAN.md update after Chat clarification');
+      const diff = await runPlanDiff(
+        paths,
+        goal,
+        plannerResume.sessionId ?? checkpoint.sessions.planner,
+        `Planner clarification answer:\nQuestion: ${plannerResume.question ?? '(not recorded)'}\nAnswer:\n${plannerResume.answer}`,
+        config,
+        (progress) => emitPlannerUsage(events, progress, { phase: 'plan_diff_resume' })
+      );
+      const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
+      if (waitingForPlanner) {
+        return { baseline: null, waitReason: PLANNER_CLARIFY_WAIT_REASON, checkpoint: waitingForPlanner, goal };
+      }
+      if (!diff.ok) throw new Error(diff.error ?? 'Planner did not update PLAN.md');
+      checkpoint = {
+        ...checkpoint,
+        sessions: {
+          ...checkpoint.sessions,
+          planner: diff.sessionId ?? checkpoint.sessions.planner
+        },
+        plan_hash: await hashFile(paths.plan),
+        events_seq: events.seq
+      };
+      await saveCheckpoint(paths, checkpoint);
+      await events.emit('PLAN_DIFF_APPLIED', 'Planner updated PLAN.md after Chat clarification', {
+        mode: 'clarification_resume'
       });
-      createdSetup = true;
     }
-    if (await exists(paths.baseline)) {
+    if (await exists(paths.benchmarkManifest)) {
+      const benchmark = await readBenchmarkManifest(paths);
+      await events.emit('BENCHMARK_SELECTED', 'Using existing planner-generated benchmark note from .opt/benchmark.json', {
+        tool: benchmark.tool,
+        command: benchmark.command,
+        metric: benchmark.metric,
+        direction: benchmark.direction,
+        target: benchmark.target,
+        unit: benchmark.unit,
+        source: 'existing'
+      });
+    }
+    if (config.evaluation.legacy_optimizer === true && (await exists(paths.baseline))) {
       await chmod(paths.measure, 0o555).catch(() => undefined);
       await chmod(paths.checks, 0o555).catch(() => undefined);
       await chmod(paths.benchmarkManifest, 0o444).catch(() => undefined);
     }
   }
 
-  let baseline: BaselineFile | null = await readJsonFileMaybe<BaselineFile>(paths.baseline);
+  const legacyBaselineExists = await exists(paths.baseline);
+  const legacyOptimizerEnabled = config.evaluation.legacy_optimizer === true;
+  if (legacyBaselineExists && !legacyOptimizerEnabled) {
+    await events.emit('LEGACY_BASELINE_IGNORED', 'Existing baseline.json ignored; fresh V1 executes PLAN.md directly unless legacy optimizer is explicitly enabled', {
+      baseline: 'baseline.json'
+    });
+  }
+  let baseline: BaselineFile | null = legacyOptimizerEnabled ? await readJsonFileMaybe<BaselineFile>(paths.baseline) : null;
+  if (!baseline && !legacyOptimizerEnabled) {
+    let directBestCommit = checkpoint.best_commit ?? null;
+    if (createdSetup && (await hasChanges(paths))) {
+      const commit = await commitAll(paths, 'chore: initialize WiCi plan');
+      directBestCommit = commit;
+      await events.emit('GIT_COMMIT', `Created initial plan checkpoint ${commit.slice(0, 7)}`, {
+        commit,
+        mode: 'direct'
+      });
+      await tagBest(paths);
+    } else if (!createdSetup && (await hasChanges(paths))) {
+      await events.emit('DIRTY_TARGET_ON_START', 'Existing target has uncommitted changes; direct execution will leave rollback decisions to git history', undefined, 'warn');
+    }
+    checkpoint = {
+      ...checkpoint,
+      supervisor_state: 'EXECUTE',
+      goal_version: goal.version,
+      plan_hash: await hashFile(paths.plan),
+      best_commit: directBestCommit,
+      ledger_seq: await lineCount(paths.ledger),
+      events_seq: events.seq
+    };
+    await saveCheckpoint(paths, checkpoint);
+    if (checkpoint.iter === 0 && !(await exists(iterationSnapshotPath(paths, 0)))) {
+      const headCommit = await currentCommit(paths);
+      await saveIterationSnapshot(paths, checkpoint, goal, {
+        headCommit,
+        bestCommit: headCommit
+      });
+      if (await hasChanges(paths)) {
+        const snapshotCommit = await commitAll(paths, 'chore: record WiCi direct snapshot iter 0');
+        directBestCommit = snapshotCommit;
+        await events.emit('GIT_COMMIT', `Created direct snapshot checkpoint ${snapshotCommit.slice(0, 7)}`, {
+          commit: snapshotCommit,
+          iter: 0,
+          mode: 'direct_snapshot'
+        });
+        await tagBest(paths);
+        checkpoint = {
+          ...checkpoint,
+          best_commit: directBestCommit,
+          events_seq: events.seq
+        };
+        await saveCheckpoint(paths, checkpoint);
+      }
+    }
+    return { baseline: null, waitReason: 'PLAN_READY', checkpoint, goal };
+  }
+
+  if (!baseline && config.evaluation.lock_mode === 'manual') {
+    ({ goal, checkpoint } = await drainEvalLockAnswers(paths, goal, checkpoint, events));
+  }
+  if (legacyOptimizerEnabled && goal.acceptance_criteria.length === 0) {
+    goal = {
+      ...goal,
+      acceptance_criteria: [
+        {
+          id: 'A1',
+          text: 'Legacy optimizer checks pass before any measured result is accepted.',
+          check: './.opt/checks.sh'
+        },
+        {
+          id: 'A2',
+          text: 'Legacy optimizer measurement runs before any measured result is accepted.',
+          check: './.opt/measure.sh'
+        }
+      ]
+    };
+    await saveGoalFiles(paths, goal);
+    createdSetup = true;
+  }
+
+  const acceptance = await ensureAcceptanceSpec(paths, goal);
+  if (!acceptance.ok) {
+    await ensureAcceptanceSpecQuestion(paths, events, acceptance.reason ?? 'Acceptance criteria need clarification.');
+    return { baseline: null, waitReason: ACCEPTANCE_SPEC_WAIT_REASON, checkpoint, goal };
+  }
+  if (acceptance.created) {
+    createdSetup = true;
+    await events.emit('ACCEPTANCE_SPEC_FROZEN', 'Frozen machine-checkable acceptance criteria in acceptance.spec.json', {
+      criteria: acceptance.spec?.criteria.map((criterion) => ({ id: criterion.id, check: criterion.check })) ?? []
+    });
+  }
+
   if (!baseline) {
     if (config.evaluation.lock_mode === 'manual' && !hasEvalLockApproval(goal)) {
       await ensureEvalLockQuestion(paths, events);
-      return { baseline: null, waitReason: EVAL_LOCK_WAIT_REASON, checkpoint };
+      return { baseline: null, waitReason: EVAL_LOCK_WAIT_REASON, checkpoint, goal };
     }
     checkpoint = await saveSetupCheckpoint(paths, checkpoint, goal, events, 'MEASURE');
-    await events.emit('BASELINE_START', 'Running checks and measure to initialize baseline');
+    await events.emit('BASELINE_START', 'Running checks and measure to initialize legacy optimizer baseline');
     baseline = await initializeBaseline(paths, goal, config);
-    await events.emit('BASELINE_DONE', 'Initialized baseline metric', baseline.best_metric);
+    await events.emit('BASELINE_DONE', 'Initialized legacy optimizer baseline metric', baseline.best_metric);
     createdSetup = true;
   } else {
     await verifyEvalHashes(paths, baseline.eval_sha256);
@@ -900,7 +1380,7 @@ async function ensurePlanAndBaseline(
     await events.emit('DIRTY_TARGET_ON_START', 'Existing target has uncommitted changes; recovery will decide whether to keep or revert them', undefined, 'warn');
   }
 
-  return { baseline, waitReason: '', checkpoint };
+  return { baseline, waitReason: '', checkpoint, goal };
 }
 
 async function saveSetupCheckpoint(
@@ -920,6 +1400,67 @@ async function saveSetupCheckpoint(
   };
   await saveCheckpoint(paths, next);
   return next;
+}
+
+async function drainPlannerClarificationAnswer(
+  paths: ReturnType<typeof runPaths>,
+  goal: GoalFile,
+  checkpoint: Awaited<ReturnType<typeof loadCheckpoint>>,
+  events: EventWriter
+): Promise<{ goal: GoalFile; checkpoint: Awaited<ReturnType<typeof loadCheckpoint>>; resume?: PlannerClarificationResume; waiting: boolean }> {
+  const pending = await pendingPlannerQuestion(paths);
+  if (!pending?.reply_key) return { goal, checkpoint, waiting: false };
+
+  const injections = await drainInbox(paths, checkpoint.drained_inbox, 8, ['answer'], pending.reply_key);
+  if (injections.length === 0) return { goal, checkpoint, waiting: true };
+
+  const pendingTs = Date.parse(pending.ts);
+  const fresh = injections.filter((item) => Date.parse(item.ts) >= pendingTs);
+  const stale = injections.filter((item) => !fresh.includes(item));
+  const applied = fresh.length > 0 ? applyInjections(goal, fresh) : { goal, steerText: undefined, aborted: false };
+  const nextCheckpoint = {
+    ...checkpoint,
+    drained_inbox: [...checkpoint.drained_inbox, ...injectionIds(injections)],
+    goal_version: applied.goal.version
+  };
+
+  if (fresh.length > 0) {
+    const answerText = fresh.map((item) => item.text).join('\n');
+    const marked = await markOutboxAnswered(paths, pending.reply_key, answerText);
+    await events.emit('OUTBOX_ANSWERED', `Applied planner clarification for ${pending.reply_key}`, {
+      reply_to: pending.reply_key,
+      outbox_id: marked?.id ?? null
+    });
+    await saveGoalFiles(paths, applied.goal);
+    await events.emit(
+      'INJECTION_DRAINED',
+      `Applied ${fresh.length} planner clarification answer(s)`,
+      injections.map((item) => ({ id: item.id, kind: item.kind, reply_to: item.reply_to, fresh: fresh.includes(item) }))
+    );
+    await saveCheckpoint(paths, nextCheckpoint);
+    const data = plannerQuestionData(pending.data);
+    return {
+      goal: applied.goal,
+      checkpoint: nextCheckpoint,
+      waiting: false,
+      resume: {
+        sessionId: data.sessionId ?? checkpoint.sessions.planner,
+        question: data.question ?? pending.text,
+        answer: answerText
+      }
+    };
+  }
+
+  if (stale.length > 0) {
+    await events.emit(
+      'PLANNER_CLARIFY_ANSWER_IGNORED',
+      'Ignored planner clarification answer written before the question',
+      stale.map((item) => ({ id: item.id, ts: item.ts, question_ts: pending.ts })),
+      'warn'
+    );
+  }
+  await saveCheckpoint(paths, nextCheckpoint);
+  return { goal, checkpoint: nextCheckpoint, waiting: true };
 }
 
 async function drainEvalLockAnswers(
@@ -1052,6 +1593,75 @@ async function ensureEvalLockQuestion(paths: ReturnType<typeof runPaths>, events
   });
 }
 
+async function ensurePlannerQuestion(
+  paths: ReturnType<typeof runPaths>,
+  events: EventWriter,
+  goal: GoalFile,
+  question: PlannerQuestion
+): Promise<void> {
+  const pending = await pendingPlannerQuestion(paths);
+  if (pending) {
+    await events.emit('PLANNER_CLARIFY_REQUIRED', 'Waiting for existing planner clarification', {
+      reply_key: pending.reply_key,
+      outbox_id: pending.id,
+      session_id: plannerQuestionData(pending.data).sessionId
+    });
+    return;
+  }
+
+  const replyKey = `${PLANNER_CLARIFY_REPLY_PREFIX}v${goal.version}-${Date.now()}`;
+  const message = await writeOutbox(paths, {
+    kind: 'question',
+    text: `Planner needs clarification before producing PLAN.md. ${question.question}`,
+    replyKey,
+    data: {
+      sessionId: question.session_id,
+      planner_question: question.question,
+      questions: question.questions,
+      reason: question.reason
+    }
+  });
+  await events.emit('PLANNER_CLARIFY_REQUIRED', 'Planner needs clarification before producing PLAN.md', {
+    reply_key: replyKey,
+    outbox_id: message.id,
+    session_id: question.session_id,
+    reason: question.reason
+  }, 'warn');
+}
+
+async function stopForPlannerDiffClarification(
+  paths: ReturnType<typeof runPaths>,
+  events: EventWriter,
+  goal: GoalFile,
+  checkpoint: Checkpoint,
+  diff: Awaited<ReturnType<typeof runPlanDiff>>
+): Promise<Checkpoint | null> {
+  if (!diff.needsInput) return null;
+  let next = {
+    ...checkpoint,
+    supervisor_state: 'STOP' as const,
+    sessions: {
+      ...checkpoint.sessions,
+      planner: diff.sessionId ?? checkpoint.sessions.planner
+    },
+    goal_version: goal.version,
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq,
+    plan_hash: await hashFile(paths.plan)
+  };
+  await saveCheckpoint(paths, next);
+  await ensurePlannerQuestion(paths, events, goal, diff.needsInput);
+  await events.emit('STOP', PLANNER_CLARIFY_WAIT_REASON, {
+    session_id: diff.sessionId ?? checkpoint.sessions.planner
+  });
+  next = {
+    ...next,
+    events_seq: events.seq
+  };
+  await saveCheckpoint(paths, next);
+  return next;
+}
+
 async function ensureAcceptanceSpecQuestion(paths: ReturnType<typeof runPaths>, events: EventWriter, reason: string): Promise<void> {
   const pending = (await readOutbox(paths, 50)).find((message) => message.reply_key === ACCEPTANCE_CLARIFY_REPLY_KEY && !message.answered);
   if (pending) {
@@ -1084,8 +1694,23 @@ async function pendingEvalLockQuestion(paths: ReturnType<typeof runPaths>) {
   return (await readOutbox(paths, 50)).find((message) => message.reply_key === EVAL_LOCK_REPLY_KEY && !message.answered);
 }
 
+async function pendingPlannerQuestion(paths: ReturnType<typeof runPaths>) {
+  return [...(await readOutbox(paths, 100))]
+    .reverse()
+    .find((message) => message.reply_key?.startsWith(PLANNER_CLARIFY_REPLY_PREFIX) && !message.answered);
+}
+
 async function pendingStopQuestion(paths: ReturnType<typeof runPaths>) {
   return (await readOutbox(paths, 50)).find((message) => message.reply_key?.startsWith('stop-') && !message.answered);
+}
+
+function plannerQuestionData(data: unknown): { sessionId?: string; question?: string } {
+  if (!data || typeof data !== 'object') return {};
+  const record = data as Record<string, unknown>;
+  return {
+    sessionId: typeof record.sessionId === 'string' ? record.sessionId : undefined,
+    question: typeof record.planner_question === 'string' ? record.planner_question : undefined
+  };
 }
 
 function isStopApproval(text: string): boolean {
@@ -1129,6 +1754,46 @@ async function recoverIncompleteAttempt(
   };
 }
 
+async function recoverIncompleteDirectAttempt(
+  paths: ReturnType<typeof runPaths>,
+  checkpoint: Awaited<ReturnType<typeof loadCheckpoint>>,
+  events: EventWriter
+): Promise<Awaited<ReturnType<typeof loadCheckpoint>>> {
+  const inFlightStates = new Set(['PLAN', 'EXECUTE', 'REFLECT']);
+  if (!inFlightStates.has(checkpoint.supervisor_state)) return checkpoint;
+
+  if (await hasChanges(paths)) {
+    const bestCommit = checkpoint.best_commit ?? 'NO_HEAD';
+    await revertToBest(paths, bestCommit);
+    if (checkpoint.next_step) {
+      await setPlanStepStatus(paths, checkpoint.next_step, 'pending');
+    }
+    await events.emit('RECOVER_REVERT', 'Reverted unconfirmed direct-path work to the last WiCi checkpoint', {
+      state: checkpoint.supervisor_state,
+      best_commit: checkpoint.best_commit ?? null,
+      step_id: checkpoint.next_step,
+      mode: 'direct'
+    }, 'warn');
+  } else if (checkpoint.next_step) {
+    await setPlanStepStatus(paths, checkpoint.next_step, 'pending');
+    await events.emit('RECOVER_REPLAY', 'Reset direct-path active step for replay after interrupted run', {
+      state: checkpoint.supervisor_state,
+      step_id: checkpoint.next_step,
+      mode: 'direct'
+    }, 'warn');
+  }
+
+  return {
+    ...checkpoint,
+    supervisor_state: 'EXECUTE',
+    iter: checkpoint.ledger_seq,
+    next_step: null,
+    plan_hash: await hashFile(paths.plan),
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq
+  };
+}
+
 async function runStartupScorerSelftest(paths: ReturnType<typeof runPaths>, goal: GoalFile, baseline: BaselineFile, config: WiCiConfig, events: EventWriter): Promise<void> {
   const result = await runScorerSelftest(paths, goal, baseline, config);
   if (!result) return;
@@ -1150,26 +1815,24 @@ async function runStartupScorerSelftest(paths: ReturnType<typeof runPaths>, goal
   });
 }
 
-async function recordActiveAvenueOutcome(
+async function recordActiveBranchOutcome(
   paths: ReturnType<typeof runPaths>,
-  config: WiCiConfig,
   checkpoint: Awaited<ReturnType<typeof loadCheckpoint>>,
   ledgerEntry: ReturnType<typeof ledgerFromEvaluation>,
   events: EventWriter
 ): Promise<Awaited<ReturnType<typeof loadCheckpoint>>> {
-  if (!checkpoint.active_avenue) return checkpoint;
-  const avenueName = checkpoint.active_avenue.name;
-  const state = await recordAvenueOutcome(paths, config, avenueName, ledgerEntry);
-  await events.emit('AVENUE_OUTCOME', `Recorded outcome for avenue ${avenueName}`, {
-    avenue: avenueName,
+  if (!checkpoint.active_branch) return checkpoint;
+  const branch = checkpoint.active_branch;
+  await events.emit('BRANCH_OUTCOME', branch.parent_id ? `Recorded outcome for branch from ${branch.parent_id}` : 'Recorded outcome for planner-selected branch', {
+    parent_id: branch.parent_id,
     ledger_id: ledgerEntry.id,
     status: ledgerEntry.status,
     delta_pct: ledgerEntry.delta_pct,
-    stats: state.stats.find((item) => item.name === avenueName)
+    reason: branch.reason
   });
   const next = {
     ...checkpoint,
-    active_avenue: undefined
+    active_branch: undefined
   };
   await saveCheckpoint(paths, next);
   return next;
@@ -1223,4 +1886,38 @@ async function hardBackstop(paths: ReturnType<typeof runPaths>, goal: GoalFile):
 
 function withLessons(text: string, lessonsText: string): string {
   return lessonsText ? `${text}\n\n${lessonsText}` : text;
+}
+
+function formatPlannerUsage(progress: PlannerUsageProgress): string {
+  const usage = progress.usage;
+  const input = usage.input_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cacheCreate = usage.cache_creation_input_tokens ?? 0;
+  const total = usage.total_tokens ?? input + output + cacheRead + cacheCreate;
+  const cost = typeof progress.totalCostUsd === 'number' ? ` cost=$${progress.totalCostUsd.toFixed(4)}` : '';
+  const web = usage.server_tool_use
+    ? ` web=${usage.server_tool_use.web_search_requests ?? 0}/${usage.server_tool_use.web_fetch_requests ?? 0}`
+    : '';
+  return `Planner tokens total=${total} in=${input} out=${output} cache=${cacheRead + cacheCreate}${web}${cost}`;
+}
+
+async function emitPlannerUsage(events: EventWriter, progress: PlannerUsageProgress, extra: Record<string, unknown> = {}): Promise<void> {
+  await events.emit('PLAN_USAGE', formatPlannerUsage(progress), { ...progress, ...extra });
+}
+
+function formatExecutorProgress(progress: ExecutorProgress): string {
+  const usage = progress.usage;
+  const input = usage.tokens_input ?? 0;
+  const output = usage.tokens_output ?? 0;
+  const tokenText = input || output ? ` tokens in=${input} out=${output}` : '';
+  const cost = typeof usage.usd === 'number' ? ` cost=$${usage.usd.toFixed(4)}` : '';
+  const idle = ` idle=${Math.round(progress.idleMs / 1000)}s`;
+  const wall = ` wall=${Math.round(progress.wallMs / 1000)}s`;
+  const counts = `events=${usage.events} turns=${usage.completed_turns} items=${usage.completed_items}`;
+  if (progress.kind === 'heartbeat') {
+    return `Codex running ${counts}${tokenText}${cost}${wall}${idle}`;
+  }
+  const event = progress.eventType ? ` ${progress.eventType}` : '';
+  return `Codex event${event} ${counts}${tokenText}${cost}${wall}${idle}`;
 }
