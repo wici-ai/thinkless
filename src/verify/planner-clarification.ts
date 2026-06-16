@@ -169,6 +169,10 @@ if (args.includes('--version')) {
   console.log('2.1.999 (Fake Claude Code)');
   process.exit(0);
 }
+if (args[0] === 'update') {
+  console.log('updated');
+  process.exit(0);
+}
 const prompt = args[args.indexOf('-p') + 1] || '';
 const isResume = args.includes('--resume');
 function emit(payload) {

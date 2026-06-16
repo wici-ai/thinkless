@@ -56,7 +56,11 @@ async function main(): Promise<void> {
   assert(files.readme.includes('Goal and Execution panes start empty'), 'README must document blank Goal/Execution initial state');
   assert(files.readme.includes('The absence of `.opt` scripts is a valid fresh V1 path'), 'README must document no-script PLAN.md execution as valid fresh V1 behavior');
   assert(files.readme.includes('default `max_iters` is `0`') && files.readme.includes('disable WiCi\'s own cost and iteration hard stops'), 'README must document unbounded default real-run budgets');
-  assert(files.readme.includes('pending updates are not a WiCi supervisor start gate'), 'README must keep doctor/update checks out of the supervisor start gate');
+  assert(
+    files.readme.includes('automatically checks for Codex/Claude updates at run boundaries') &&
+      files.readme.includes('pending updates are not a WiCi supervisor start gate'),
+    'README must document automatic Codex/Claude update checks without reintroducing a pending-update start gate'
+  );
   assert(files.config.includes('"max_iters": 0'), 'default config must not impose an iteration hard cap');
   assert(files.toolCommands.includes('default_iteration_budget_unbounded'), 'tool command verifier must cover unbounded default iteration budget');
   assert(files.readme.includes('wakes the stopped supervisor') && files.readme.includes('resumes the same Claude planner session'), 'README must document Chat answer resume after planner clarification');
@@ -83,11 +87,11 @@ async function main(): Promise<void> {
   assert(files.app.includes('shouldAutoStartExistingRun'), 'TUI must distinguish attach-time auto-start from stopped runs');
   assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'TUI must wake the supervisor after chat writes an inbox injection');
   assert(files.tuiHotreloadPty.includes('pty_hot_reload') && files.tuiHotreloadPty.includes('PLAN_DIFF_APPLIED'), 'TUI PTY verifier must prove follow-up Chat hot reload reaches plan diff');
-  assert(files.app.includes('goal={state.goal}'), 'TUI must pass durable initial goal state into Chat history');
+  assert(files.app.includes('goal={state.goal}'), 'TUI must pass durable goal state into Chat');
   assert(files.chat.includes('isInitialGoalText'), 'ChatPane must distinguish initial natural-language goals from slash commands');
   assert(files.chat.includes('onInjection?.()'), 'ChatPane must notify App after non-initial chat input');
   assert(files.chat.includes('buildChatHistory'), 'ChatPane must render persisted Chat history');
-  assert(files.chat.includes('initial goal:'), 'ChatPane must restore the first Chat goal in durable history');
+  assert(files.chat.includes('currentGoalSummary') && !files.chat.includes('initial goal:'), 'ChatPane must restore the current goal outside transcript history');
   assert(files.runState.includes('readInjectionHistory') && files.runState.includes('paths.inboxDone'), 'TUI state must load drained Chat injections for durable history');
   assert(files.header.includes('goal pending'), 'Header must keep the pre-goal state generic');
   assert(files.header.includes('validation pending'), 'Header must keep planner-selected metric display generic');
@@ -138,7 +142,7 @@ async function main(): Promise<void> {
   assert(files.executor.includes('Current GOAL.md:') && files.executor.includes('Current PLAN.md:'), 'executor prompt must embed GOAL.md and PLAN.md as Codex goal input');
   assert(files.executor.includes('as one Codex goal') && files.executor.includes('Supervisor receipt focus'), 'executor prompt must feed GOAL.md + PLAN.md as one Codex goal while keeping only a thin receipt focus');
   assert(!files.executor.includes('Execute plan step ${stepId} from PLAN.md.'), 'executor prompt must not reduce fresh V1 execution to a single supervisor-controlled plan step');
-  assert(files.executor.includes("'exec',\n    'resume'"), 'executor must support codex exec resume for long-running goal continuity');
+  assert(files.executor.includes('startCodexAppServerTurn') && files.executor.includes("'exec',\n    'resume'"), 'executor must support app-server steering with codex exec resume fallback');
   assert(files.directNoScripts.includes('executed_without_opt_scripts'), 'direct no-scripts verifier must cover PLAN.md execution without .opt scripts');
   assert(files.existingGoal.includes('continued_without_new_goal') && files.existingGoal.includes('reused_goal_run_id'), 'existing-goal verifier must prove same-target continuation without a new --goal');
 	  assert(files.directNoScripts.includes("!events.some((event) => event.type === 'BASELINE_START')"), 'direct no-scripts verifier must reject baseline gating');
@@ -153,7 +157,8 @@ async function main(): Promise<void> {
   assert(files.hotreload.includes('PLAN_DIFF_APPLIED'), 'hot reload verifier must cover planner diff after chat input');
   assert(files.hotreload.includes('checkpoint.drained_inbox.includes'), 'hot reload verifier must cover drained inbox idempotency');
   assert(files.hotreload.includes('goal_doc_contains_steering') && files.inbox.includes('Steering:'), 'hot reload must persist steering text into GOAL.md');
-  assert(files.packageJson.includes('verify:hotreload-resume') && files.readme.includes('codex exec resume --last'), 'hot reload must verify Codex resume continuity after PLAN_DIFF_APPLIED');
+  assert(files.packageJson.includes('verify:app-server-hotreload') && files.readme.includes('turn/steer'), 'hot reload must verify app-server active-turn steering');
+  assert(files.packageJson.includes('verify:hotreload-resume') && files.readme.includes('codex exec resume --last'), 'hot reload must keep Codex exec resume continuity as fallback');
   assert(files.durability.includes('direct_recovered') && files.durability.includes("mode === 'direct'"), 'durability verifier must cover direct V1 crash recovery');
   assert(files.goalDoc.includes('GOAL.md') && files.goalDoc.includes('snapshot_preserved_goal_doc'), 'goal-doc verifier must cover durable human-readable GOAL.md');
 

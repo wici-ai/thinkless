@@ -4,14 +4,23 @@ import { join } from 'node:path';
 import { execa } from 'execa';
 import { atomicWriteFile, atomicWriteJson, exists } from '../shared/atomic.js';
 import { schemaPath, type RunPaths } from '../shared/paths.js';
-import type { GoalFile, IterResult, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
+import type { Checkpoint, GoalFile, IterResult, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
 import { CodexRunError, appendCodexRunTranscript, assertCodexRunSucceeded, parseCodexRunEvents, syntheticCodexRunEvent } from './codexRun.js';
 import { formatSafetyForPrompt } from './safety.js';
+import { startCodexAppServerTurn } from './codexAppServer.js';
 
 const EXECUTOR_IDLE_TIMEOUT_MS = 60 * 60_000;
 const EXECUTOR_HARD_TIMEOUT_MS = 12 * 60 * 60_000;
 const EXECUTOR_HEARTBEAT_MS = 30_000;
 const EXECUTOR_FIRST_MEANINGFUL_EVENT_TIMEOUT_MS = 5 * 60_000;
+// Bound in-memory output so a multi-hour exec step cannot grow a string past
+// V8's ~512MB max length or exhaust the heap. Full output is on disk already.
+const OUTPUT_TAIL_CHARS = 256 * 1024;
+const MAX_USAGE_ERRORS = 50;
+
+function tailChars(text: string, max: number): string {
+  return text.length > max ? text.slice(text.length - max) : text;
+}
 
 export interface ExecutorProgress {
   kind: 'event' | 'heartbeat';
@@ -30,6 +39,15 @@ export interface ExecutorRunOptions {
   hardTimeoutMs?: number;
   heartbeatMs?: number;
   firstMeaningfulEventTimeoutMs?: number;
+}
+
+export interface ExecutorController {
+  backend: 'app-server' | 'exec' | 'stub';
+  threadId?: string;
+  turnId?: string;
+  done: Promise<IterResult & { invocation: ToolInvocationResult }>;
+  steer: (text: string) => Promise<boolean>;
+  interrupt: () => Promise<void>;
 }
 
 export class ExecutorPreemptedError extends Error {
@@ -109,6 +127,91 @@ export async function runExecutorStep(
   const iterResult = await runStubExecutor(paths, goal, stepId, iter);
   const usage = await appendCodexRunTranscript(paths, syntheticCodexRunEvent(iter, iterResult.notes));
   return { ...iterResult, invocation: { ok: true, sessionId: 'stub-executor', stdout: iterResult.notes, usage } };
+}
+
+export async function startExecutorStep(
+  paths: RunPaths,
+  goal: GoalFile,
+  stepId: string,
+  iter: number,
+  config: WiCiConfig,
+  checkpoint: Checkpoint,
+  steerText?: string,
+  lessonsText?: string,
+  options: ExecutorRunOptions = {}
+): Promise<ExecutorController> {
+  const backend = config.tools.executor.backend ?? 'auto';
+  const available = await commandExists(config.tools.executor.command);
+  if (config.tools.mode === 'real' && !available) {
+    throw new Error(`Executor command not found in real mode: ${config.tools.executor.command}`);
+  }
+
+  if (config.tools.mode !== 'stub' && available && shouldAttemptAppServerBackend(backend)) {
+    try {
+      const safetyText = formatSafetyForPrompt(config);
+      const artifactId = options.artifactId ?? `iter-${iter}`;
+      const prompt = await buildExecutorPrompt(paths, stepId, iter, artifactId, safetyText, steerText, lessonsText, Boolean(checkpoint.sessions.executorApp?.threadId));
+      await atomicWriteFile(join(paths.artifacts, `${artifactId}.prompt.txt`), `${prompt}\n`);
+      const startedAt = Date.now();
+      let lastEventAt = startedAt;
+      const turn = await startCodexAppServerTurn({
+        paths,
+        config,
+        checkpoint,
+        prompt,
+        artifactId,
+        onRawNotification: async (_line, usage, method) => {
+          const now = Date.now();
+          await options.onProgress?.({
+            kind: 'event',
+            eventType: method,
+            usage,
+            wallMs: now - startedAt,
+            idleMs: now - lastEventAt
+          });
+          lastEventAt = now;
+        }
+      });
+      return {
+        backend: 'app-server',
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        done: turn.done.then(async (result) => {
+          assertCodexRunSucceeded(result.usage, 'codex app-server reported failure event');
+          const iterResult = await readIterResult(paths, artifactId);
+          return {
+            ...iterResult,
+            invocation: {
+              ok: true,
+              sessionId: turn.threadId,
+              stdout: result.stdout,
+              usage: result.usage
+            }
+          };
+        }),
+        steer: turn.steer,
+        interrupt: turn.interrupt
+      };
+    } catch (error) {
+      if (backend === 'app-server') {
+        throw error;
+      }
+    }
+  }
+
+  const done = runExecutorStep(paths, goal, stepId, iter, config, steerText, lessonsText, options);
+  return {
+    backend: config.tools.mode === 'stub' || !available ? 'stub' : 'exec',
+    done,
+    steer: async () => false,
+    interrupt: async () => undefined
+  };
+}
+
+function shouldAttemptAppServerBackend(backend: NonNullable<WiCiConfig['tools']['executor']['backend']>): boolean {
+  if (backend === 'exec') return false;
+  if (backend === 'app-server') return true;
+  return !process.env.WICI_FAKE_TARGET;
 }
 
 async function buildExecutorPrompt(
@@ -308,7 +411,7 @@ async function runCodexProcess(
   child.stdout?.setEncoding('utf8');
   child.stdout?.on('data', (chunk: string) => {
     markActivity();
-    stdout += chunk;
+    stdout = tailChars(stdout + chunk, OUTPUT_TAIL_CHARS);
     appendTranscript(chunk);
     stdoutLineBuffer = consumeLines(stdoutLineBuffer, chunk);
     requestPreemptCheck();
@@ -316,7 +419,7 @@ async function runCodexProcess(
   child.stderr?.setEncoding('utf8');
   child.stderr?.on('data', (chunk: string) => {
     markActivity();
-    stderr += chunk;
+    stderr = tailChars(stderr + chunk, OUTPUT_TAIL_CHARS);
     appendTranscript(chunk);
     stderrLineBuffer = consumeLines(stderrLineBuffer, chunk);
     requestPreemptCheck();
@@ -432,6 +535,7 @@ function mergeUsageSummary(target: ExecutorProgress['usage'], delta: ExecutorPro
   if (delta.usd !== undefined) target.usd = Number(((target.usd ?? 0) + delta.usd).toFixed(8));
   target.failed ||= delta.failed;
   target.errors.push(...delta.errors);
+  if (target.errors.length > MAX_USAGE_ERRORS) target.errors = target.errors.slice(-MAX_USAGE_ERRORS);
   if (delta.parse_errors !== undefined) target.parse_errors = (target.parse_errors ?? 0) + delta.parse_errors;
 }
 

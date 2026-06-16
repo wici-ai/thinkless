@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import chokidar from 'chokidar';
-import { readFile, readdir } from 'node:fs/promises';
+import { open, readFile, readdir } from 'node:fs/promises';
 import { runPaths } from '../shared/paths.js';
 import type { BaselineFile, ChatLogEntry, Checkpoint, GoalFile, Injection, LedgerEntry, OutboxMessage, RunEvent } from '../shared/types.js';
 import { exists } from '../shared/atomic.js';
+
+const UI_REFRESH_DEBOUNCE_MS = 250;
+const JSONL_TAIL_BYTES = 384 * 1024;
+const CODEX_RUN_TAIL_BYTES = 256 * 1024;
+const CODEX_RUN_MAX_LINE_CHARS = 2_000;
+const CODEX_RUN_LINES = 240;
 
 export interface RunState {
   target: string;
@@ -64,7 +70,7 @@ export function useRunState(target: string): RunState {
       timer = setTimeout(() => {
         timer = null;
         void load();
-      }, 30);
+      }, UI_REFRESH_DEBOUNCE_MS);
     };
 
     void load();
@@ -123,11 +129,11 @@ async function readState(target: string): Promise<RunState> {
     readJsonMaybe<GoalFile>(paths.goal),
     readJsonMaybe<Checkpoint>(paths.checkpoint),
     readJsonMaybe<BaselineFile>(paths.baseline),
-    readJsonLinesMaybe<LedgerEntry>(paths.ledger),
+    readJsonLinesTailMaybe<LedgerEntry>(paths.ledger, 200),
     readTextMaybe(paths.goalDoc),
     readTextMaybe(paths.plan),
-    readJsonLinesMaybe<RunEvent>(paths.events),
-    readRawLinesMaybe(paths.codexRun, 600),
+    readJsonLinesTailMaybe<RunEvent>(paths.events, 500),
+    readRawLinesMaybe(paths.codexRun, CODEX_RUN_LINES),
     readOutboxMessages(paths.outbox),
     readInjectionHistory(paths.inbox, paths.inboxDone),
     readChatLog(paths.chat)
@@ -149,12 +155,16 @@ async function readState(target: string): Promise<RunState> {
 }
 
 async function readRawLinesMaybe(path: string, limit: number): Promise<string[]> {
-  const raw = await readTextMaybe(path);
-  return raw.split('\n').filter((line) => line.trim()).slice(-limit);
+  return readTailLinesMaybe(path, limit, {
+    maxBytes: CODEX_RUN_TAIL_BYTES,
+    maxLineChars: CODEX_RUN_MAX_LINE_CHARS,
+    dropPartialFirstLine: false,
+    truncationLabel: 'see .wici/codex-run.jsonl for the full raw line'
+  });
 }
 
 async function readChatLog(path: string): Promise<ChatLogEntry[]> {
-  const entries = await readJsonLinesMaybe<ChatLogEntry>(path);
+  const entries = await readJsonLinesTailMaybe<ChatLogEntry>(path, 80);
   return entries.filter((entry) => entry && typeof entry.text === 'string' && (entry.role === 'user' || entry.role === 'assistant')).slice(-40);
 }
 
@@ -171,11 +181,72 @@ async function readJsonMaybe<T>(path: string): Promise<T | null> {
 
 async function readJsonLinesMaybe<T>(path: string): Promise<T[]> {
   const raw = await readTextMaybe(path);
-  return raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as T);
+  return parseJsonLines<T>(raw.split('\n'));
+}
+
+async function readJsonLinesTailMaybe<T>(path: string, limit: number): Promise<T[]> {
+  const lines = await readTailLinesMaybe(path, limit, {
+    maxBytes: JSONL_TAIL_BYTES,
+    dropPartialFirstLine: true
+  });
+  return parseJsonLines<T>(lines);
+}
+
+function parseJsonLines<T>(lines: string[]): T[] {
+  const parsed: T[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      parsed.push(JSON.parse(trimmed) as T);
+    } catch {
+      // Tail reads can start in the middle of a JSONL record; ignore that fragment.
+    }
+  }
+  return parsed;
+}
+
+async function readTailLinesMaybe(
+  path: string,
+  limit: number,
+  options: {
+    maxBytes?: number;
+    maxLineChars?: number;
+    dropPartialFirstLine?: boolean;
+    truncationLabel?: string;
+  } = {}
+): Promise<string[]> {
+  if (!(await exists(path))) return [];
+  const maxBytes = options.maxBytes ?? JSONL_TAIL_BYTES;
+  const handle = await open(path, 'r');
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, maxBytes);
+    const position = Math.max(0, size - length);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, position);
+    const raw = buffer.toString('utf8');
+    let lines = raw.split('\n');
+    if (position > 0 && raw.length > 0 && !raw.startsWith('\n') && !raw.startsWith('\r')) {
+      if (options.dropPartialFirstLine ?? true) {
+        lines = lines.slice(1);
+      } else {
+        lines[0] = `[tail clipped] ${lines[0]}`;
+      }
+    }
+    return lines
+      .filter((line) => line.trim())
+      .slice(-limit)
+      .map((line) => clipLine(line, options.maxLineChars, options.truncationLabel));
+  } finally {
+    await handle.close();
+  }
+}
+
+function clipLine(line: string, maxChars?: number, label = 'full line on disk'): string {
+  if (!maxChars || line.length <= maxChars) return line;
+  const suffix = ` ... [truncated ${line.length - maxChars} chars; ${label}]`;
+  return `${line.slice(0, Math.max(0, maxChars - suffix.length))}${suffix}`;
 }
 
 async function readOutboxMessages(path: string): Promise<OutboxMessage[]> {
@@ -188,19 +259,20 @@ async function readOutboxMessages(path: string): Promise<OutboxMessage[]> {
 }
 
 async function readInjectionHistory(inbox: string, inboxDone: string): Promise<Injection[]> {
-  const [pending, done] = await Promise.all([readInjectionDir(inbox), readInjectionDir(inboxDone)]);
+  const [pending, done] = await Promise.all([readInjectionDir(inbox), readInjectionDir(inboxDone, true)]);
   return [...pending, ...done]
     .sort((a, b) => a.ts.localeCompare(b.ts))
     .slice(-16);
 }
 
-async function readInjectionDir(path: string): Promise<Injection[]> {
+async function readInjectionDir(path: string, forceApplied = false): Promise<Injection[]> {
   if (!(await exists(path))) return [];
   const names = (await readdir(path)).filter((name) => /^inj-.+\.json$/.test(name)).sort().slice(-24);
   const items = await Promise.all(
-    names.map(async (name) => {
+    names.map(async (name): Promise<Injection | null> => {
       const message = await readJsonMaybe<Injection>(`${path}/${name}`);
-      return message && typeof message.text === 'string' && typeof message.kind === 'string' ? message : null;
+      if (!message || typeof message.text !== 'string' || typeof message.kind !== 'string') return null;
+      return forceApplied ? { ...message, applied: true } : message;
     })
   );
   return items.filter((item): item is Injection => Boolean(item));

@@ -43,8 +43,8 @@ export interface ChatTurnResult {
  * concrete change, returns an UPDATE which we route through the normal inbox
  * hot-reload (add_requirement/steer → applyInjections → runPlanDiff). When no
  * real `claude` is available (stub mode / missing CLI / failure), we degrade to
- * the legacy behavior: treat the message as a verbatim add_requirement so the
- * existing hot-reload still works. This function never throws.
+ * a local blackboard answer for questions, and only queue non-question messages
+ * as requirements. This function never throws.
  */
 export async function runChatTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
   await appendChat(ctx.paths, { ts: timestamp(), role: 'user', text: ctx.userText });
@@ -62,12 +62,11 @@ export async function runChatTurn(ctx: ChatTurnContext): Promise<ChatTurnResult>
 }
 
 async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
-  const degrade: ChatTurnResult = { reply: '', update: { kind: 'add_requirement', text: ctx.userText }, degraded: true };
   try {
     const config = await loadConfig(ctx.mode);
-    if (config.tools.mode === 'stub') return degrade;
+    if (config.tools.mode === 'stub') return buildFallbackChatTurn(ctx, 'Claude Chat is unavailable in stub mode.');
     const command = config.tools.planner.command;
-    if (!(await commandExists(command))) return degrade;
+    if (!(await commandExists(command))) return buildFallbackChatTurn(ctx, `Claude Chat command not found: ${command}.`);
 
     const systemPrompt = await readFile(promptPath('chat'), 'utf8');
     const safetyText = formatSafetyForPrompt(config);
@@ -87,16 +86,62 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
         hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
       });
     }
-    if (result.timeoutReason || result.exitCode !== 0) return degrade;
+    if (result.timeoutReason || result.exitCode !== 0) return buildFallbackChatTurn(ctx, result.timeoutReason ? `Claude Chat timed out: ${result.timeoutReason}.` : `Claude Chat exited with code ${result.exitCode}.`);
 
     const parsed = parseChatResponse(result.stdout);
-    if (!parsed) return degrade;
+    if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, 'Claude Chat returned no usable reply.');
     if (parsed.sessionId) await writeChatSession(ctx.paths, parsed.sessionId);
     // Respect the agent's judgment: a reply with no UPDATE is pure conversation.
     return { reply: parsed.reply, update: parsed.update, degraded: false };
-  } catch {
-    return degrade;
+  } catch (error) {
+    return buildFallbackChatTurn(ctx, error instanceof Error ? error.message : String(error));
   }
+}
+
+export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Claude Chat unavailable.'): ChatTurnResult {
+  if (isLikelyQuestion(ctx.userText)) {
+    return {
+      reply: buildFallbackStatusReply(ctx, reason),
+      degraded: true
+    };
+  }
+  return {
+    reply: `Chat agent is currently unavailable (${reason}). I queued your message as a new requirement so the supervisor can process it when it resumes.`,
+    update: { kind: 'add_requirement', text: ctx.userText },
+    degraded: true
+  };
+}
+
+function buildFallbackStatusReply(ctx: ChatTurnContext, reason: string): string {
+  const planStep = currentPlanStep(ctx.plan);
+  const lastEvent = ctx.recentEvents.at(-1);
+  const recent = ctx.recentEvents
+    .slice(-5)
+    .map((event) => `- ${event.ts.slice(11, 19)} ${event.type}: ${truncateForChat(event.message, 180)}`)
+    .join('\n') || '- no recent events';
+  return [
+    `Chat agent is degraded right now (${reason}), so this is a local blackboard summary.`,
+    '',
+    planStep ? `Current plan step: ${planStep}` : 'Current plan step: not found in PLAN.md.',
+    lastEvent ? `Latest event: ${lastEvent.type} — ${truncateForChat(lastEvent.message, 220)}` : 'Latest event: none recorded.',
+    '',
+    'Recent events:',
+    recent
+  ].join('\n');
+}
+
+function currentPlanStep(plan: string): string | undefined {
+  const active = plan.split('\n').find((line) => /^\s*-\s+\[>\]\s+S\d+/i.test(line));
+  if (active) return active.trim();
+  const pending = plan.split('\n').find((line) => /^\s*-\s+\[\s\]\s+S\d+/i.test(line));
+  return pending?.trim();
+}
+
+function isLikelyQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  if (/[?？]$/.test(normalized)) return true;
+  return /(进展|状态|怎么样|咋回事|怎么回事|为什么|为何|吗|么|是否|是不是|有没有|哪里|多少|何时|什么时候|how|what|why|status|progress|running|stuck|error)/i.test(normalized);
 }
 
 export function buildChatArgs(input: { userPrompt: string; systemPrompt: string; safetyText?: string; sessionId?: string }): string[] {

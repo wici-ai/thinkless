@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   assert(argsLog[0].args[0] === 'exec' && argsLog[0].args[1] !== 'resume', `first invocation should be fresh exec: ${JSON.stringify(argsLog[0].args)}`);
   assert(argsLog[1].args[0] === 'exec' && argsLog[1].args[1] === 'resume', `second invocation should resume: ${JSON.stringify(argsLog[1].args)}`);
   assert(argsLog[1].prompt.includes('Previous executor attempt 1 for S1 failed'), 'recovery prompt should include previous failure');
-  assert(argsLog[1].prompt.includes('You may edit PLAN.md'), 'recovery prompt should authorize plan updates');
+  assert(argsLog[1].prompt.includes('If PLAN.md or .opt scripts caused the failure, update them before retrying.'), 'recovery prompt should authorize plan updates');
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree should be clean after recovery:\n${status}`);
@@ -100,6 +100,10 @@ if (args.includes('--version')) {
   console.log('2.1.999 (Fake Claude Code)');
   process.exit(0);
 }
+if (args[0] === 'update') {
+  console.log('updated');
+  process.exit(0);
+}
 if (args.includes('--json-schema')) {
   console.log(JSON.stringify({ ok: true }));
   process.exit(0);
@@ -121,6 +125,10 @@ import { dirname, join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
   console.log('codex-cli 0.999.0');
+  process.exit(0);
+}
+if (args[0] === 'update') {
+  console.log('updated');
   process.exit(0);
 }
 if (args[0] === 'doctor') {

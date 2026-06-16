@@ -14,7 +14,7 @@ This audit records what is currently proven, what is covered by automated checks
 | Real pseudo-terminal Chat input can submit the first blank-run goal and start execution | `npm run verify:tui-chat-pty` report `pty_chat_first` and `goal_source: tui_chat` | Covered |
 | Chat-first TUI can drive the real-mode planner/executor subprocess path without using stub execution | `npm run verify:tui-real-fake-chat` report `pty_chat_first_real_mode_fake_clis`, `PLAN_USAGE`, and `EXECUTE_PROGRESS` evidence | Covered |
 | Real pseudo-terminal Chat input can answer planner clarification questions and resume the planner session | `npm run verify:tui-planner-clarification-pty` report `pty_planner_clarification`, `question_answered`, and `planner_session` | Covered |
-| Chat pane restores initial goal, user steering, and planner answers from the blackboard | `npm run verify:tui-structure`, `npm run verify:v1-requirements` | Covered |
+| Chat pane restores current goal, user steering, and planner answers from the blackboard without repeating the initial goal in transcript history | `npm run verify:tui-structure`, `npm run verify:v1-requirements` | Covered |
 | TUI does not directly write supervisor-owned GOAL/PLAN/checkpoint/ledger/event files; only ChatPane writes inbox injections | `npm run verify:tui-structure` report `chat_writes_only_inbox`, `goal_and_exec_read_only`, and static file-write API checks | Covered |
 | Blank Goal/Execution panes do not create run files before Chat | `npm run verify:tui-chat-intake`, `npm run verify:demo-tui` | Covered |
 | Initial goal provenance is not written retroactively on an existing run | `npm run verify:tui-chat-intake` report `goal_source_not_retroactive` | Covered |
@@ -54,7 +54,7 @@ This audit records what is currently proven, what is covered by automated checks
 | Optional planner scripts and historical `baseline.json` files are not a supervisor baseline gate in fresh V1 | `npm run verify:v1-requirements`, `npm run verify:docs-sync`, `Simplified_PLAN.md`; no `.opt` scripts are required to start Codex | Covered |
 | Legacy optimizer behavior remains isolated from fresh V1 and is checked through an explicit aggregate | `npm run verify:legacy-optimizer`; README legacy optimizer section | Covered |
 | Codex transcript is saved for real canaries | `npm run verify:tag-gate`, evidence bundle `.wici/codex-run.jsonl` | Covered |
-| Codex token usage is captured | `npm run verify:codex-run-usage`, `npm run verify:executor-contract` | Covered |
+| Codex token usage is captured | `npm run verify:codex-run-usage`, `npm run verify:executor-contract`, `npm run verify:app-server-hotreload` | Covered |
 | Codex model can be overridden for real validation without hardcoding | `npm run verify:tool-commands` | Covered |
 | `codex exec resume` avoids unsupported `-C` | `npm run verify:executor-contract`, `npm run verify:tool-commands` | Covered |
 | Existing `GOAL.md` / `PLAN.md` can continue without passing a new `--goal` | `npm run verify:existing-goal` report `continued_without_new_goal` and `reused_goal_run_id` | Covered |
@@ -66,9 +66,10 @@ This audit records what is currently proven, what is covered by automated checks
 | Requirement | Evidence | Status |
 | --- | --- | --- |
 | Later Chat input updates the goal without restarting the TUI | `npm run verify:hotreload`, `npm run verify:tui-chat-intake` | Covered |
-| Pending Chat input can preempt an active direct Codex run at the next executor output/heartbeat | `npm run verify:direct-preempt` report `preempted_active_executor`, `EXECUTE_PREEMPTED`, and resumed executor evidence | Covered |
+| Preferred hot reload steers an active Codex app-server turn without restarting execution | `npm run verify:app-server-hotreload` reports `app_server_steer`, records `EXECUTE_STEERED`, and verifies app-server received `turn/steer` | Covered |
+| Legacy `codex exec` fallback can preempt an active direct Codex run at the next executor output/heartbeat | `npm run verify:direct-preempt` report `preempted_active_executor`, `EXECUTE_PREEMPTED`, and resumed executor evidence | Covered |
 | Real pseudo-terminal follow-up Chat input hot-reloads GOAL/PLAN before the next Codex iteration | `npm run verify:tui-hotreload-pty` report `pty_hot_reload`, `goal_version: 2`, and `ledger_rows: 2` | Covered |
-| Hot reload preserves Codex execution continuity instead of starting a fresh executor context | `npm run verify:hotreload-resume` report `codex_resume_after_hot_reload`; `npm run verify:executor-contract` | Covered |
+| Hot reload preserves Codex execution continuity instead of starting a fresh executor context | `npm run verify:app-server-hotreload` covers active-turn steering; `npm run verify:hotreload-resume` and `npm run verify:executor-contract` cover legacy resume fallback | Covered |
 | Hot-reload steering is persisted into `GOAL.md`, not only passed as a transient prompt note | `npm run verify:hotreload` report `goal_doc_contains_steering`; `npm run verify:v1-requirements` | Covered |
 | Safe-point inbox draining is idempotent through `drained_inbox[]` | `npm run verify:hotreload` | Covered |
 | `checkpoint.json`, `events.jsonl`, and `ledger.jsonl` support direct V1 crash recovery and resume | `npm run verify:v1-slice`, `npm run verify:direct-recovery`, `npm run verify:durability` report `direct_recovered`, `npm run verify:setup-state` | Covered |

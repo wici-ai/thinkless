@@ -4,8 +4,10 @@ import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
 import { runChatTurn } from '../supervisor/chatAgent.js';
 import type { ChatLogEntry, GoalFile, Injection, OutboxMessage, RunEvent, ToolMode } from '../shared/types.js';
-import { mouseScrollDelta } from './input.js';
-import { PAGE_SIZE, scrollBy, viewport, wrapLines } from './viewport.js';
+import { isMouseInput, mouseScrollDelta } from './input.js';
+import { PAGE_SIZE, scrollBy, wrapLines, wrappedViewport } from './viewport.js';
+
+type ChatColor = 'white' | 'gray' | 'cyan' | 'cyanBright' | 'green' | 'yellow' | 'red' | 'magenta';
 
 export function ChatPane({
   target,
@@ -13,6 +15,7 @@ export function ChatPane({
   outbox = [],
   injections = [],
   goal = null,
+  supervisorState,
   goalDoc = '',
   plan = '',
   events = [],
@@ -30,6 +33,7 @@ export function ChatPane({
   outbox?: OutboxMessage[];
   injections?: Injection[];
   goal?: GoalFile | null;
+  supervisorState?: string;
   goalDoc?: string;
   plan?: string;
   events?: RunEvent[];
@@ -45,24 +49,27 @@ export function ChatPane({
   const { isFocused } = useFocus({ id: 'chat', autoFocus: true, isActive: interactive });
   const [value, setValue] = useState('');
   const valueRef = useRef('');
-  const [lines, setLines] = useState<string[]>([]);
+  const [localLines, setLocalLines] = useState<ChatHistoryLine[]>([]);
   const [busy, setBusy] = useState(false);
   const history = buildChatHistory(outbox, injections, goal, chat);
-  const displayLines = wrapLines(
-    [
-      ...history.map((line) => line.text),
-      ...outbox
-        .filter((message) => !message.answered)
-        .slice(-5)
-        .map((message) => `${message.kind}${message.answered ? ' answered' : ''}: ${message.text}`),
-      ...(systemLine ? [systemLine] : []),
-      ...lines,
-      ...(busy ? ['chatting'] : [])
-    ],
-    contentWidth
-  );
+  const goalSummary = currentGoalSummary(goal);
+  const activeOutbox = outbox.filter((message) => isActiveOutboxMessage(message, supervisorState));
+  const sourceLines = [
+    ...history,
+    ...buildActiveOutboxLines(activeOutbox),
+    ...(systemLine ? blockLines('system', systemLine, 'red', `system-${systemLine}`) : []),
+    ...localLines,
+    ...(busy ? [{ id: 'busy', ts: timestampSortKey(), text: 'Assistant is thinking...', color: 'yellow' as ChatColor, bold: true }] : [])
+  ];
   const [scrollOffset, setScrollOffset] = useState(0);
-  const view = viewport(displayLines, scrollOffset, viewportHeight);
+  const view = wrappedViewport(
+    sourceLines,
+    contentWidth,
+    scrollOffset,
+    viewportHeight,
+    (line) => line.text,
+    (line, text, wrapIndex) => ({ ...line, id: `${line.id}-wrap-${wrapIndex}`, text })
+  );
 
   const setInputValue = (next: string) => {
     valueRef.current = next;
@@ -76,7 +83,6 @@ export function ChatPane({
     setInputValue('');
     if (acceptInitialGoal && onInitialGoal && isInitialGoalText(text)) {
       onInitialGoal(text);
-      setLines((prev) => [...prev.slice(-8), `goal: ${text}`]);
       return;
     }
     const paths = runPaths(target);
@@ -96,7 +102,10 @@ export function ChatPane({
             : text.startsWith('/steer ')
               ? await writeInjection(paths, { kind: 'steer', text: text.slice('/steer '.length), priority: 'normal' })
             : await writeAnswer(paths, text, latestQuestion!.reply_key);
-      setLines((prev) => [...prev.slice(-8), `${injection.kind}: ${text}`]);
+      setLocalLines((prev) => [
+        ...prev.slice(-12),
+        ...blockLines('queued command', `${injection.kind}: ${text}`, 'yellow', `local-${Date.now()}`)
+      ]);
       onInjection?.();
       return;
     }
@@ -123,27 +132,28 @@ export function ChatPane({
       setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
       return;
     }
-    if (key.upArrow) {
+    if (isMouseInput(input)) return;
+    if (key.upArrow || input === 'k') {
       setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
       return;
     }
-    if (key.downArrow) {
+    if (key.downArrow || input === 'j') {
       setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
       return;
     }
-    if (key.pageUp) {
+    if (key.pageUp || input === 'u') {
       setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
       return;
     }
-    if (key.pageDown) {
+    if (key.pageDown || input === 'd') {
       setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
       return;
     }
-    if (key.home) {
+    if (key.home || input === 'g') {
       setScrollOffset(view.maxScroll);
       return;
     }
-    if (key.end) {
+    if (key.end || input === 'G') {
       setScrollOffset(0);
       return;
     }
@@ -174,19 +184,26 @@ export function ChatPane({
       <Text bold color={isFocused ? 'cyan' : 'white'}>
         CHAT
       </Text>
+      <Text color="cyan">{goalSummary}</Text>
       <Box flexDirection="column" flexGrow={1}>
         {view.lines.map((line, index) => (
-          <Text key={`${view.start + index}-${line}`} color={chatLineColor(line)}>
-            {line || ' '}
+          <Text key={`${view.start + index}-${line.id}`} color={line.color} bold={line.bold}>
+            {line.text || ' '}
           </Text>
         ))}
       </Box>
       <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>
-        {view.end}/{displayLines.length || 0}
+        {view.end}/{view.total || 0}
       </Text>
-      <Box>
-        <Text color={isFocused ? 'cyan' : 'gray'}>{'>'} </Text>
-        <Text color={isFocused && interactive ? 'white' : 'gray'}>{value || ' '}</Text>
+      <Box flexDirection="column" borderStyle="single" borderColor={isFocused ? 'cyan' : 'gray'} paddingX={1}>
+        <Text color={isFocused ? 'cyan' : 'gray'} bold>
+          YOU
+        </Text>
+        {wrapLines([value || ' '], Math.max(1, contentWidth - 2)).slice(-3).map((line, index) => (
+          <Text key={`input-${index}-${line}`} color={isFocused && interactive ? 'white' : 'gray'}>
+            {line || ' '}
+          </Text>
+        ))}
       </Box>
     </Box>
   );
@@ -222,7 +239,8 @@ interface ChatHistoryLine {
   id: string;
   ts: string;
   text: string;
-  color: string;
+  color: ChatColor;
+  bold?: boolean;
 }
 
 export function buildChatHistory(
@@ -230,72 +248,88 @@ export function buildChatHistory(
   injections: Injection[],
   goal: GoalFile | null = null,
   chat: ChatLogEntry[] = [],
-  limit = 80
+  limit = Number.POSITIVE_INFINITY
 ): ChatHistoryLine[] {
-  const initialGoalLines = (goal?.requirements ?? [])
-    .filter((requirement) => requirement.source === 'initial')
-    .map((requirement): ChatHistoryLine => ({
-      id: `${goal?.run_id ?? 'goal'}-${requirement.id}`,
-      ts: '0000-00-00T00:00:00.000Z',
-      text: clip(`initial goal: ${requirement.text}`),
-      color: 'gray'
-    }));
+  const injectionStatus = new Map<string, string>();
+  for (const injection of injections) {
+    injectionStatus.set(`${injection.kind}:${injection.text}`, injection.applied ? 'applied' : 'queued');
+  }
   const chatLines = chat.flatMap((entry, index): ChatHistoryLine[] => {
     const text = entry.text.trim();
     if (!text) return [];
-    return [
-      {
-        id: `chat-${index}-${entry.role}`,
-        ts: entry.ts,
-        text: clip(`${entry.role === 'user' ? 'you' : 'claude'}: ${text}`),
-        color: entry.role === 'user' ? 'white' : 'cyanBright'
-      }
-    ];
+    const label = entry.role === 'user' ? 'you' : 'assistant';
+    const color: ChatColor = entry.role === 'user' ? 'green' : 'cyanBright';
+    const bodyColor: ChatColor = entry.role === 'user' ? 'white' : 'cyanBright';
+    const blocks = blockLines(label, text, color, `chat-${index}-${entry.role}`, entry.ts, bodyColor);
+    if (entry.update) {
+      const status = injectionStatus.get(`${entry.update.kind}:${entry.update.text}`) ?? 'queued';
+      blocks.push(...blockLines(`update ${status}`, entry.update.text, status === 'applied' ? 'green' : 'yellow', `chat-${index}-${entry.role}-update`, entry.ts));
+    }
+    blocks.push({
+      id: `chat-${index}-${entry.role}-gap`,
+      ts: entry.ts,
+      text: '',
+      color: 'gray'
+    });
+    return blocks;
   });
   const questionLines = outbox
     .filter((message) => message.answered && message.answer_text)
     .flatMap((message): ChatHistoryLine[] => [
-      {
-        id: `${message.id}-q`,
-        ts: message.ts,
-        text: clip(`planner: ${message.text}`),
-        color: message.kind === 'error' ? 'red' : 'cyan'
-      },
-      {
-        id: `${message.id}-a`,
-        ts: message.answered_at ?? message.ts,
-        text: clip(`answer: ${message.answer_text ?? ''}`),
-        color: 'gray'
-      }
+      { id: `${message.id}-gap`, ts: message.ts, text: '', color: 'gray' },
+      ...blockLines(message.kind === 'error' ? 'error' : 'question', message.text, message.kind === 'error' ? 'red' : 'magenta', `${message.id}-q`, message.ts),
+      ...blockLines('answer', message.answer_text ?? '', 'green', `${message.id}-a`, message.answered_at ?? message.ts, 'white')
     ]);
-  const injectionLines = injections.map((injection): ChatHistoryLine => ({
-    id: injection.id,
-    ts: injection.ts,
-    text: clip(`${labelForInjection(injection)}: ${injection.text}`),
-    color: injection.priority === 'urgent' ? 'yellow' : 'gray'
-  }));
-  return [...initialGoalLines, ...questionLines, ...injectionLines, ...chatLines]
-    .sort((a, b) => a.ts.localeCompare(b.ts) || a.id.localeCompare(b.id))
-    .slice(-limit);
+  const sorted = [...questionLines, ...chatLines].sort((a, b) => a.ts.localeCompare(b.ts) || a.id.localeCompare(b.id));
+  return Number.isFinite(limit) ? sorted.slice(-limit) : sorted;
 }
 
-function labelForInjection(injection: Injection): string {
-  if (injection.kind === 'add_requirement') return injection.applied ? 'requirement applied' : 'requirement pending';
-  if (injection.kind === 'steer') return injection.applied ? 'steer applied' : 'steer pending';
-  if (injection.kind === 'answer') return injection.applied ? 'answer applied' : 'answer pending';
-  if (injection.kind === 'drop_requirement') return injection.applied ? 'drop applied' : 'drop pending';
-  return injection.priority === 'urgent' ? 'abort requested' : 'abort';
+export function currentGoalSummary(goal: GoalFile | null): string {
+  if (!goal) return 'Current goal: none';
+  const active = goal.requirements.filter((requirement) => requirement.status === 'active');
+  const first = active[0]?.text.trim() || 'no active requirement';
+  const suffix = active.length > 1 ? ` (+${active.length - 1})` : '';
+  return `Current goal v${goal.version}: ${truncate(first, 96)}${suffix}`;
 }
 
-function clip(text: string): string {
-  return text;
+function buildActiveOutboxLines(outbox: OutboxMessage[]): ChatHistoryLine[] {
+  return outbox
+    .slice(-5)
+    .flatMap((message) => blockLines(message.kind, message.text, message.kind === 'error' ? 'red' : 'magenta', `active-${message.id}`, message.ts));
 }
 
-function chatLineColor(line: string): string {
-  if (line.startsWith('claude:') || line === 'chatting') return 'cyanBright';
-  if (line.startsWith('you:')) return 'white';
-  if (line.startsWith('question') || line.startsWith('planner:')) return 'cyan';
-  if (line.startsWith('error')) return 'red';
-  if (line.startsWith('stop_verdict')) return 'yellow';
-  return 'gray';
+function isActiveOutboxMessage(message: OutboxMessage, supervisorState: string | undefined): boolean {
+  if (message.answered) return false;
+  if (message.kind === 'question') return true;
+  if (message.kind !== 'error') return false;
+  return supervisorState !== 'STOP' && supervisorState !== 'FAILED';
+}
+
+function blockLines(
+  label: string,
+  text: string,
+  headerColor: ChatColor,
+  id: string,
+  ts = timestampSortKey(),
+  bodyColor: ChatColor = 'white'
+): ChatHistoryLine[] {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  return [
+    { id: `${id}-00-gap`, ts, text: '', color: 'gray' },
+    { id: `${id}-01-label`, ts, text: label.toUpperCase(), color: headerColor, bold: true },
+    ...lines.map((line, index): ChatHistoryLine => ({
+      id: `${id}-02-body-${index.toString().padStart(4, '0')}`,
+      ts,
+      text: `  ${line}`,
+      color: bodyColor
+    }))
+  ];
+}
+
+function timestampSortKey(): string {
+  return new Date().toISOString();
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, Math.max(0, limit - 3))}...` : text;
 }

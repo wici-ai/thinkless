@@ -1,12 +1,13 @@
 import { chmod } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
 import { loadConfig } from '../shared/config.js';
 import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.js';
-import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, LedgerEntry, RunOptions, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
+import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, IterResult, LedgerEntry, RunOptions, ToolInvocationResult, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
 import { hashFile, iterationSnapshotPath, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
 import { applyInjections, drainInbox, drainPendingInjectionsById, injectionIds, readPendingInjections } from './inbox.js';
-import { isExecutorPreempted, runExecutorStep, type ExecutorProgress } from './executor.js';
+import { isExecutorPreempted, runExecutorStep, startExecutorStep, type ExecutorProgress } from './executor.js';
 import {
   lockEvalScripts,
   runInitialPlanner,
@@ -29,10 +30,12 @@ import {
 import { commitAll, commitAllWithKey, currentCommit, ensureGitIdentity, ensureGitRepo, hasChanges, tagBest, tagPerf, revertToBest, resetToCommit } from './gitgate.js';
 import { shouldStop } from './stop.js';
 import {
-  assertNoActiveToolVersionDrift,
   assertRealToolsReady,
   checkToolHealth,
-  toolVersionsFromHealth
+  reconcileToolVersionDrift,
+  shouldAutoUpdateToolsAtBoundary,
+  toolVersionsFromHealth,
+  updateToolsBetweenRuns
 } from './selfupdate.js';
 import { consecutiveGlobalFailures, shouldReplanStuckStep } from './stuck.js';
 import { markOutboxAnswered, readOutbox, writeOutbox } from './outbox.js';
@@ -123,12 +126,24 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     }
     await saveCheckpoint(paths, checkpoint);
 
-    const toolHealth = config.tools.mode === 'stub' ? null : await checkToolHealth(config, { probeClaude: false });
+    const didAutoUpdateTools = shouldAutoUpdateToolsAtBoundary(config, checkpoint);
+    const toolHealth =
+      config.tools.mode === 'stub'
+        ? null
+        : didAutoUpdateTools
+          ? await updateToolsBetweenRuns(config)
+          : await checkToolHealth(config, { probeClaude: false });
     if (toolHealth) assertRealToolsReady(config, toolHealth);
     const currentToolVersions = await toolVersionsFromHealth(config, toolHealth);
-    assertNoActiveToolVersionDrift(checkpoint, currentToolVersions);
+    const toolDrift = reconcileToolVersionDrift(checkpoint, currentToolVersions);
     checkpoint.tool_versions = currentToolVersions;
     await saveCheckpoint(paths, checkpoint);
+    if (didAutoUpdateTools) {
+      await events.emit('TOOL_UPDATE_CHECK', 'Checked Codex/Claude updates at a run boundary', { tools: toolHealth });
+    }
+    if (toolDrift.accepted.length > 0) {
+      await events.emit('TOOL_VERSION_ACCEPTED', `Accepted external tool version drift: ${toolDrift.accepted.join('; ')}`, { drift: toolDrift.accepted });
+    }
     await events.emit('SUPERVISOR_START', `Starting WiCi supervisor in ${paths.target}`, {
       mode: config.tools.mode,
       goal_source: checkpoint.goal_source ?? null,
@@ -785,68 +800,12 @@ async function runDirectPlanExecution(
   let steerText: string | undefined;
 
   while (checkpoint.iter < maxIters) {
-    const injections = await drainInbox(paths, checkpoint.drained_inbox);
-    if (injections.length > 0) {
-      const applied = applyInjections(goal, injections);
-      goal = applied.goal;
-      steerText = applied.steerText;
-      const drainedIds = injectionIds(injections);
-      checkpoint.drained_inbox = [...checkpoint.drained_inbox, ...drainedIds];
-      checkpoint.goal_version = goal.version;
-      for (const answer of injections.filter((item) => item.kind === 'answer' && item.reply_to)) {
-        const marked = await markOutboxAnswered(paths, answer.reply_to!, answer.text);
-        await events.emit('OUTBOX_ANSWERED', `Applied answer for ${answer.reply_to}`, {
-          reply_to: answer.reply_to,
-          outbox_id: marked?.id ?? null
-        });
-      }
-      await saveGoalFiles(paths, goal);
-      await events.emit(
-        'INJECTION_DRAINED',
-        `Applied ${drainedIds.length} chat injection(s)`,
-        injections.map((item) => ({ id: item.id, ids: item.coalesced_ids ?? [item.id], kind: item.kind, mode: 'direct' }))
-      );
-      if (applied.aborted) {
-        checkpoint = {
-          ...checkpoint,
-          supervisor_state: 'STOP',
-          ledger_seq: await lineCount(paths.ledger),
-          events_seq: events.seq,
-          plan_hash: await hashFile(paths.plan)
-        };
-        await saveCheckpoint(paths, checkpoint);
-        await writeOutbox(paths, { kind: 'info', text: 'Urgent abort injection requested stop' });
-        await events.emit('STOP', 'Urgent abort injection requested stop', undefined, 'warn');
-        return { state: 'STOP', reason: 'urgent abort injection', iter: checkpoint.iter };
-      }
-
-      checkpoint = {
-        ...checkpoint,
-        supervisor_state: 'PLAN',
-        ledger_seq: await lineCount(paths.ledger),
-        events_seq: events.seq,
-        plan_hash: await hashFile(paths.plan)
-      };
-      await saveCheckpoint(paths, checkpoint);
-      const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, steerText ?? '', config, (progress) =>
-        emitPlannerUsage(events, progress, { phase: 'direct_plan_diff' })
-      );
-      const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
-      if (waitingForPlanner) {
-        return { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter };
-      }
-      if (!diff.ok) throw new Error(diff.error ?? 'Planner did not update PLAN.md');
-      checkpoint.sessions.planner = diff.sessionId ?? checkpoint.sessions.planner;
-      checkpoint.plan_hash = await hashFile(paths.plan);
-      if (await hasChanges(paths)) {
-        const commit = await commitAll(paths, `chore: apply WiCi goal v${goal.version} plan update`);
-        await events.emit('GIT_COMMIT', `Created direct plan update checkpoint ${commit.slice(0, 7)}`, {
-          commit,
-          mode: 'direct'
-        });
-        await tagBest(paths);
-      }
-      await events.emit('PLAN_DIFF_APPLIED', 'Planner updated PLAN.md for new input', { steerText, mode: 'direct' });
+    const pendingUpdate = await applyDirectPendingInjections(paths, goal, checkpoint, config, events);
+    goal = pendingUpdate.goal;
+    checkpoint = pendingUpdate.checkpoint;
+    steerText = pendingUpdate.steerText ?? steerText;
+    if (pendingUpdate.stop) {
+      return pendingUpdate.stop;
     }
 
     const plan = await readPlan(paths);
@@ -884,18 +843,27 @@ async function runDirectPlanExecution(
     await events.emit('EXECUTE_START', `Iteration ${nextIter}: executing ${step.id}`, { step, mode: 'direct' });
 
     try {
-      const iterResult = await runExecutorStep(paths, goal, step.id, nextIter, config, steerText, contextText, {
-        onProgress: async (progress) => {
-          await events.emit('EXECUTE_PROGRESS', formatExecutorProgress(progress), {
-            iter: nextIter,
-            step_id: step.id,
-            mode: 'direct',
-            progress
-          });
-        },
-        shouldPreempt: () => hasPendingChatInput(paths, checkpoint)
+      const run = await runDirectExecutorWithHotReload({
+        paths,
+        goal,
+        checkpoint,
+        stepId: step.id,
+        iter: nextIter,
+        config,
+        events,
+        steerText,
+        contextText
       });
+      goal = run.goal;
+      checkpoint = run.checkpoint;
+      steerText = run.steerText ?? steerText;
+      if (run.stop) return run.stop;
+      if (!run.result) throw new Error('Executor stopped without a result');
+      const iterResult = run.result;
       checkpoint.sessions.executor = iterResult.invocation.sessionId ?? checkpoint.sessions.executor;
+      if (run.executorApp) {
+        checkpoint.sessions.executorApp = run.executorApp;
+      }
       await events.emit('EXECUTE_DONE', iterResult.notes, {
         step_done: iterResult.step_done,
         tests_pass: iterResult.tests_pass,
@@ -1060,6 +1028,212 @@ async function runDirectPlanExecution(
   await writeOutbox(paths, { kind: 'info', text: reason });
   await events.emit('STOP', reason);
   return { state: 'STOP', reason, iter: checkpoint.iter };
+}
+
+async function applyDirectPendingInjections(
+  paths: ReturnType<typeof runPaths>,
+  goal: GoalFile,
+  checkpoint: Checkpoint,
+  config: WiCiConfig,
+  events: EventWriter
+): Promise<{ goal: GoalFile; checkpoint: Checkpoint; steerText?: string; stop?: SupervisorResult }> {
+  const injections = await drainInbox(paths, checkpoint.drained_inbox);
+  if (injections.length === 0) return { goal, checkpoint };
+
+  const applied = applyInjections(goal, injections);
+  goal = applied.goal;
+  const steerText = applied.steerText;
+  const drainedIds = injectionIds(injections);
+  checkpoint = {
+    ...checkpoint,
+    drained_inbox: [...checkpoint.drained_inbox, ...drainedIds],
+    goal_version: goal.version
+  };
+  for (const answer of injections.filter((item) => item.kind === 'answer' && item.reply_to)) {
+    const marked = await markOutboxAnswered(paths, answer.reply_to!, answer.text);
+    await events.emit('OUTBOX_ANSWERED', `Applied answer for ${answer.reply_to}`, {
+      reply_to: answer.reply_to,
+      outbox_id: marked?.id ?? null
+    });
+  }
+  await saveGoalFiles(paths, goal);
+  await events.emit(
+    'INJECTION_DRAINED',
+    `Applied ${drainedIds.length} chat injection(s)`,
+    injections.map((item) => ({ id: item.id, ids: item.coalesced_ids ?? [item.id], kind: item.kind, mode: 'direct' }))
+  );
+  if (applied.aborted) {
+    checkpoint = {
+      ...checkpoint,
+      supervisor_state: 'STOP',
+      ledger_seq: await lineCount(paths.ledger),
+      events_seq: events.seq,
+      plan_hash: await hashFile(paths.plan)
+    };
+    await saveCheckpoint(paths, checkpoint);
+    await writeOutbox(paths, { kind: 'info', text: 'Urgent abort injection requested stop' });
+    await events.emit('STOP', 'Urgent abort injection requested stop', undefined, 'warn');
+    return { goal, checkpoint, steerText, stop: { state: 'STOP', reason: 'urgent abort injection', iter: checkpoint.iter } };
+  }
+
+  checkpoint = {
+    ...checkpoint,
+    supervisor_state: 'PLAN',
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq,
+    plan_hash: await hashFile(paths.plan)
+  };
+  await saveCheckpoint(paths, checkpoint);
+  const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, steerText ?? '', config, (progress) =>
+    emitPlannerUsage(events, progress, { phase: 'direct_plan_diff' })
+  );
+  const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
+  if (waitingForPlanner) {
+    return { goal, checkpoint, steerText, stop: { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter } };
+  }
+  if (!diff.ok) throw new Error(diff.error ?? 'Planner did not update PLAN.md');
+  checkpoint = {
+    ...checkpoint,
+    sessions: {
+      ...checkpoint.sessions,
+      planner: diff.sessionId ?? checkpoint.sessions.planner
+    },
+    plan_hash: await hashFile(paths.plan)
+  };
+  if (await hasChanges(paths)) {
+    const commit = await commitAll(paths, `chore: apply WiCi goal v${goal.version} plan update`);
+    await events.emit('GIT_COMMIT', `Created direct plan update checkpoint ${commit.slice(0, 7)}`, {
+      commit,
+      mode: 'direct'
+    });
+    await tagBest(paths);
+  }
+  await events.emit('PLAN_DIFF_APPLIED', 'Planner updated PLAN.md for new input', { steerText, mode: 'direct' });
+  return { goal, checkpoint, steerText };
+}
+
+async function runDirectExecutorWithHotReload(input: {
+  paths: ReturnType<typeof runPaths>;
+  goal: GoalFile;
+  checkpoint: Checkpoint;
+  stepId: string;
+  iter: number;
+  config: WiCiConfig;
+  events: EventWriter;
+  steerText?: string;
+  contextText?: string;
+}): Promise<{
+  goal: GoalFile;
+  checkpoint: Checkpoint;
+  steerText?: string;
+  result?: IterResult & { invocation: ToolInvocationResult };
+  executorApp?: NonNullable<Checkpoint['sessions']['executorApp']>;
+  stop?: SupervisorResult;
+}> {
+  let goal = input.goal;
+  let checkpoint = input.checkpoint;
+  let steerText = input.steerText;
+  const controller = await startExecutorStep(input.paths, goal, input.stepId, input.iter, input.config, checkpoint, steerText, input.contextText, {
+    onProgress: async (progress) => {
+      await input.events.emit('EXECUTE_PROGRESS', formatExecutorProgress(progress), {
+        iter: input.iter,
+        step_id: input.stepId,
+        mode: 'direct',
+        progress
+      });
+    },
+    shouldPreempt: () => hasPendingChatInput(input.paths, checkpoint)
+  });
+
+  if (controller.backend === 'app-server' && controller.threadId) {
+    checkpoint = {
+      ...checkpoint,
+      sessions: {
+        ...checkpoint.sessions,
+        executorApp: {
+          threadId: controller.threadId,
+          activeTurnId: controller.turnId,
+          updatedAt: new Date().toISOString()
+        }
+      }
+    };
+    await saveCheckpoint(input.paths, checkpoint);
+    await input.events.emit('EXECUTE_APP_SERVER_START', 'Codex app-server turn started', {
+      thread_id: controller.threadId,
+      turn_id: controller.turnId,
+      mode: 'direct'
+    });
+  }
+
+  if (controller.backend !== 'app-server') {
+    const result = await controller.done;
+    return { goal, checkpoint, steerText, result };
+  }
+
+  while (true) {
+    const outcome = await Promise.race([
+      controller.done.then((result) => ({ kind: 'done' as const, result })),
+      delay(1_000).then(() => ({ kind: 'tick' as const }))
+    ]);
+    if (outcome.kind === 'done') {
+      const executorApp = controller.threadId
+        ? {
+            threadId: controller.threadId,
+            updatedAt: new Date().toISOString()
+          }
+        : undefined;
+      return { goal, checkpoint, steerText, result: outcome.result, executorApp };
+    }
+
+    if (!(await hasPendingChatInput(input.paths, checkpoint))) continue;
+    const update = await applyDirectPendingInjections(input.paths, goal, checkpoint, input.config, input.events);
+    goal = update.goal;
+    checkpoint = update.checkpoint;
+    if (update.stop) {
+      await controller.interrupt();
+      return { goal, checkpoint, steerText: update.steerText ?? steerText, stop: update.stop };
+    }
+    if (!update.steerText) continue;
+    checkpoint = {
+      ...checkpoint,
+      supervisor_state: 'EXECUTE',
+      next_step: input.stepId,
+      plan_hash: await hashFile(input.paths.plan),
+      ledger_seq: await lineCount(input.paths.ledger),
+      events_seq: input.events.seq
+    };
+    await saveCheckpoint(input.paths, checkpoint);
+    const steerPrompt = buildActiveTurnSteerPrompt(update.steerText);
+    const steered = await controller.steer(steerPrompt);
+    if (steered) {
+      steerText = undefined;
+      await input.events.emit('EXECUTE_STEERED', 'Steered active Codex app-server turn with updated GOAL.md and PLAN.md', {
+        thread_id: controller.threadId,
+        turn_id: controller.turnId,
+        mode: 'direct',
+        steerText: update.steerText
+      });
+    } else {
+      steerText = update.steerText;
+      await input.events.emit('EXECUTE_STEER_DEFERRED', 'Active Codex turn could not be steered; carrying update into the next turn', {
+        thread_id: controller.threadId,
+        turn_id: controller.turnId,
+        mode: 'direct',
+        steerText
+      }, 'warn');
+    }
+  }
+}
+
+function buildActiveTurnSteerPrompt(steerText: string): string {
+  return [
+    'WiCi hot reload update:',
+    steerText,
+    '',
+    'GOAL.md and PLAN.md have been updated on disk. Re-read both files before making further changes.',
+    'Continue the current task in this same workspace and preserve useful completed work.',
+    'Apply only the necessary changes implied by the updated goal/plan, then continue toward the existing result JSON receipt.'
+  ].join('\n');
 }
 
 export function resolveMaxIters(explicitMaxIters: number | undefined, configuredMaxIters: number): number {

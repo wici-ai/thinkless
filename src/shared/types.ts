@@ -1,4 +1,5 @@
 export type ToolMode = 'real' | 'auto' | 'stub';
+export type ExecutorBackend = 'auto' | 'app-server' | 'exec';
 
 export type RequirementStatus = 'active' | 'dropped' | 'done';
 
@@ -292,6 +293,11 @@ export interface Checkpoint {
   sessions: {
     planner?: string;
     executor?: string;
+    executorApp?: {
+      threadId: string;
+      activeTurnId?: string;
+      updatedAt: string;
+    };
   };
   tool_versions?: {
     mode: ToolMode;
@@ -371,12 +377,14 @@ export interface RetryConfig {
 export interface WiCiConfig {
   tools: {
     mode: ToolMode;
+    auto_update?: boolean;
     planner: {
       command: string;
       effort: string;
     };
     executor: {
       command: string;
+      backend?: ExecutorBackend;
       model?: string;
       dangerouslyBypassApprovalsAndSandbox: boolean;
     };

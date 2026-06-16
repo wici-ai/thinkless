@@ -94,6 +94,10 @@ if (args.includes('--version')) {
   console.log('2.1.999 (Fake Claude Code)');
   process.exit(0);
 }
+if (args[0] === 'update') {
+  console.log('updated');
+  process.exit(0);
+}
 const isResume = args.includes('--resume');
 console.log(JSON.stringify({
   type: 'assistant',
@@ -141,6 +145,10 @@ import { dirname, join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
   console.log('codex-cli 0.999.0');
+  process.exit(0);
+}
+if (args[0] === 'update') {
+  console.log('updated');
   process.exit(0);
 }
 if (args[0] === 'doctor') {

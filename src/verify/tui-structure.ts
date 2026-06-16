@@ -2,13 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
-import { buildChatHistory } from '../tui/ChatPane.js';
+import { buildChatHistory, currentGoalSummary } from '../tui/ChatPane.js';
 import { codexDisplayLines, formatEvent, visibleEvents } from '../tui/ExecPane.js';
 import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
-import { mouseScrollDelta } from '../tui/input.js';
-import { viewport, wrapLines } from '../tui/viewport.js';
-import { summarizePlanForChat } from '../supervisor/chatAgent.js';
+import { disableMouseReporting, isMouseInput, mouseScrollDelta, parseMouseInput } from '../tui/input.js';
+import { viewport, wrapLines, wrappedViewport } from '../tui/viewport.js';
+import { buildFallbackChatTurn, summarizePlanForChat } from '../supervisor/chatAgent.js';
 
 const tuiRoot = join(TOOL_ROOT, 'src', 'tui');
 
@@ -21,6 +21,7 @@ async function main(): Promise<void> {
     header: await source('Header.tsx'),
     input: await source('input.ts'),
     state: await source('useRunState.ts'),
+    crashHandlers: await readFile(join(TOOL_ROOT, 'src', 'shared', 'crashHandlers.ts'), 'utf8'),
     cli: await readFile(join(TOOL_ROOT, 'src', 'cli.tsx'), 'utf8')
   };
 
@@ -31,22 +32,31 @@ async function main(): Promise<void> {
 
   assert(files.app.includes('useInput') && files.app.includes('useFocusManager'), 'App must keep keyboard focus management at the top level');
   assert(files.app.includes('enableMouseReporting'), 'App must enable terminal mouse reporting for pane-local wheel scroll');
+  assert(files.input.includes('disableMouseReporting') && files.input.includes("'SIGINT'") && !files.input.includes('?1002h'), 'TUI mouse mode must avoid motion tracking and install cleanup handlers');
+  assert(files.app.includes('parseMouseInput') && files.app.includes("focus('exec')"), 'App must focus panes from mouse clicks');
   assert(files.app.includes("focus('chat')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat pane');
   assert(files.app.includes('<ChatPane') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render the three V1 panes');
   assert(files.app.includes('shouldAcceptInitialGoalFromChat'), 'App must route blank-run chat input to the initial supervisor goal');
   assert(files.app.includes('shouldAutoStartExistingRun'), 'App must avoid auto-restarting stopped runs while still supporting resume on attach');
   assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'App must wake the supervisor after Chat writes an inbox injection');
+  assert(files.app.includes('appendSupervisorError') && files.app.includes('Supervisor error:'), 'App must persist supervisor crashes without flooding the Chat transcript');
   assert(files.app.includes("launchSupervisor(supervisor.initialGoal, 'tui_goal_option')"), 'App must keep --goal as an explicit automation shortcut');
   assert(files.app.includes("launchSupervisor(goal, 'tui_chat')"), 'App must mark blank-run Chat intake as TUI Chat source');
   assert(files.app.includes('goal={state.goal}'), 'App must pass durable goal state into Chat history');
+  assert(files.app.includes('supervisorState={state.checkpoint?.supervisor_state}'), 'App must pass terminal supervisor state into Chat so stale errors do not occupy the input pane');
   assertNoControlWrites('App', files.app);
 
   assert(files.chat.includes("useFocus({ id: 'chat'"), 'ChatPane must have a stable focus id');
   assert(files.chat.includes('isActive: interactive && isFocused'), 'ChatPane input and scroll must be gated on focus');
   assert(files.chat.includes('writeInjection'), 'ChatPane must write chat input through writeInjection');
   assert(files.chat.includes('buildChatHistory'), 'ChatPane must render persisted chat history');
-  assert(files.chat.includes('viewport(') && files.chat.includes('wrapLines'), 'ChatPane must render full wrapped content through a scroll viewport');
-  assert(files.chat.includes('mouseScrollDelta'), 'ChatPane must support pane-local mouse wheel scroll');
+  assert(files.chat.includes('currentGoalSummary'), 'ChatPane must keep current goal in a compact header outside transcript history');
+  assert(files.chat.includes('isActiveOutboxMessage') && files.chat.includes("supervisorState !== 'STOP'") && files.chat.includes("supervisorState !== 'FAILED'"), 'ChatPane must hide stale error outbox messages after terminal run states');
+  assert(files.chat.includes('wrappedViewport') && files.chat.includes('line.color') && files.chat.includes('line.bold'), 'ChatPane must preserve per-line role styling instead of guessing colors from text prefixes');
+  assert(!files.chat.includes('chatLineColor'), 'ChatPane must not color chat by fragile string-prefix guessing');
+  assert(files.chat.includes('Number.POSITIVE_INFINITY'), 'ChatPane must not truncate long chat turns before the scroll viewport');
+  assert(files.chat.includes('wrappedViewport') && files.chat.includes('wrapLines'), 'ChatPane must render full wrapped content through a scroll viewport');
+  assert(files.chat.includes('mouseScrollDelta') && files.chat.includes('isMouseInput'), 'ChatPane must support pane-local mouse wheel scroll and ignore raw mouse escape text');
   assert(files.chat.includes('acceptInitialGoal') && files.chat.includes('onInitialGoal'), 'ChatPane must support initial goal intake before inbox injections');
   assert(files.chat.includes('onInjection?.()'), 'ChatPane must notify App after writing inbox injections');
   assert(files.chat.includes('isInitialGoalText'), 'ChatPane must distinguish initial natural-language goals from slash commands');
@@ -57,7 +67,7 @@ async function main(): Promise<void> {
   assert(files.chat.includes("kind: 'steer'"), 'ChatPane must support steering injections');
   assert(files.chat.includes("kind: 'abort'"), 'ChatPane must support urgent abort injections');
   assertNoControlWrites('ChatPane', files.chat);
-  assert(!files.chat.includes("? `${") && !files.chat.includes("...'"), 'ChatPane must not intentionally ellipsize content');
+  assert(!files.chat.includes('initial goal:') && !files.chat.includes('`goal: ${text}`'), 'ChatPane transcript must not repeat the initial goal as history');
 
   assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
   assert(files.goal.includes('useInput') && files.goal.includes('isActive: isFocused'), 'GoalPane scroll input must be gated on focus');
@@ -65,7 +75,7 @@ async function main(): Promise<void> {
   assert(!files.goal.includes('goal?.requirements'), 'GoalPane must not use internal goal.json requirements as the primary goal UI');
   assert(files.goal.includes('buildPlanDiffView'), 'GoalPane must compute a visible PLAN diff');
   assert(files.goal.includes('GOAL / PLAN'), 'GoalPane title must be English');
-  assert(files.goal.includes('viewport(') && files.goal.includes('wrapLines'), 'GoalPane must render full GOAL.md and PLAN.md through a scroll viewport');
+  assert(files.goal.includes('wrappedViewport'), 'GoalPane must render full GOAL.md and PLAN.md through a lazy scroll viewport');
   assert(files.goal.includes('mouseScrollDelta') && files.goal.includes("input === 'k'"), 'GoalPane must support wheel and vim-style scroll keys');
   assertNoControlWrites('GoalPane', files.goal);
   assert(!files.goal.includes("? `${") && !files.goal.includes("...'"), 'GoalPane must not intentionally ellipsize content');
@@ -77,7 +87,7 @@ async function main(): Promise<void> {
   }
   assert(files.exec.includes('visibleEvents') && files.exec.includes('scrollOffset'), 'ExecPane must render an in-pane scroll viewport');
   assert(files.exec.includes('mouseScrollDelta') && files.exec.includes("input === 'k'"), 'ExecPane must support wheel and vim-style scroll keys');
-  assert(files.exec.includes('codexDisplayLines') && files.exec.includes('state.codexTranscript'), 'ExecPane must render Codex transcript text fields');
+  assert(files.exec.includes('codexDisplayLines') && files.exec.includes('displayCodexRecord') && files.exec.includes('state.codexTranscript'), 'ExecPane must render readable Codex transcript lines');
   assert(files.exec.includes('EXECUTION'), 'ExecPane title must be English');
   assertNoControlWrites('ExecPane', files.exec);
   assert(!files.goal.includes('writeInjection'), 'GoalPane must not write inbox injections');
@@ -94,7 +104,10 @@ async function main(): Promise<void> {
   }
   assert(files.state.includes('paths.inbox') && files.state.includes('paths.inboxDone'), 'useRunState watcher must include persisted Chat inbox history');
   assert(files.state.includes('readInjectionHistory'), 'useRunState must read persisted Chat injection history');
-  assert(files.state.includes('setTimeout') && files.state.includes('30'), 'useRunState must coalesce rapid file updates');
+  assert(files.state.includes('readInjectionDir(inboxDone, true)'), 'useRunState must treat injections moved to inbox/done as applied');
+  assert(files.state.includes('readTailLinesMaybe') && files.state.includes('CODEX_RUN_MAX_LINE_CHARS'), 'useRunState must tail and cap large Codex transcript lines instead of decoding whole jsonl files into the TUI');
+  assert(files.state.includes('readJsonLinesTailMaybe<RunEvent>(paths.events') && files.state.includes('readRawLinesMaybe(paths.codexRun'), 'useRunState must tail high-churn event and Codex transcript files');
+  assert(files.state.includes('setTimeout') && files.state.includes('UI_REFRESH_DEBOUNCE_MS'), 'useRunState must coalesce rapid file updates');
   assertNoFileWriteApis('useRunState', files.state);
   assertOnlyChatPaneWritesInbox(files);
 
@@ -102,10 +115,15 @@ async function main(): Promise<void> {
   assert(files.cli.includes(".option('--no-supervisor'"), 'tui command must support read-only/manual launch without supervisor');
   assert(files.cli.includes(".option('--no-fullscreen'"), 'tui command must support non-fullscreen rendering for verification');
   assert(files.cli.includes('initialGoal: options.goal'), 'tui --goal must be explicit automation input, not an implicit default goal');
+  assert(!files.cli.includes('prodEnv'), 'CLI must not force NODE_ENV=production because that prevents Ink from rendering the TUI');
+  assert(!files.cli.includes('withFullScreen'), 'CLI must not use fullscreen-ink as the default renderer because it can enter alternate screen without painting Ink output');
+  assert(files.cli.includes('renderInAlternateScreen') && files.cli.includes('?1049h') && files.cli.includes('?1049l'), 'CLI fullscreen mode must manage alternate screen directly around Ink render');
+  assert(files.crashHandlers.includes('performance.clearMarks') && files.crashHandlers.includes('performance.clearMeasures'), 'TUI runtime guards must clean Node user-timing entries without switching React/Ink to production mode');
 
   verifyVisibleEvents();
   verifyTextViewport();
   verifyMouseScroll();
+  verifyChatFallback();
   verifyChatPromptCompression();
   verifyExecEventUsage();
   verifyCodexDisplayLines();
@@ -140,12 +158,35 @@ function verifyTextViewport(): void {
   assert(wrapped.join('|') === 'ab|cd|ef', `wrapLines should keep text inside pane width: ${wrapped.join('|')}`);
   const view = viewport(['1', '2', '3', '4'], 1, 2);
   assert(view.lines.join(',') === '2,3', `viewport should scroll independently, got ${view.lines.join(',')}`);
+  const lazy = wrappedViewport(['abcdef', 'gh'], 2, 1, 2);
+  assert(lazy.lines.join('|') === 'cd|ef' && lazy.total === 4 && lazy.maxScroll === 2, `wrappedViewport should only materialize visible wrapped lines, got ${JSON.stringify(lazy)}`);
 }
 
 function verifyMouseScroll(): void {
   assert(mouseScrollDelta('\x1b[<64;20;10M') === 1, 'mouse wheel up should scroll into pane history');
   assert(mouseScrollDelta('\x1b[<65;20;10M') === -1, 'mouse wheel down should scroll toward pane tail');
+  assert(mouseScrollDelta('[<65;20;10M') === -1, 'mouse wheel without ESC prefix should still scroll');
+  assert(isMouseInput('[<65;31;33M'), 'raw SGR mouse text without ESC should be swallowed');
+  const click = parseMouseInput('\x1b[<0;12;4M');
+  assert(click?.code === 0 && click.x === 12 && click.y === 4 && click.released === false, 'mouse click parser should expose coordinates for pane focus');
   assert(mouseScrollDelta('k') === 0, 'ordinary keyboard input must not parse as mouse scroll');
+  assert(typeof disableMouseReporting === 'function', 'disableMouseReporting must be importable for terminal cleanup');
+}
+
+function verifyChatFallback(): void {
+  const result = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: '现在进展怎么样？',
+      goalDoc: '# GOAL\n\nship it',
+      plan: '# PLAN\n\n- [>] S6 Tune speed\n- [ ] S7 Verify',
+      recentEvents: [fakeEvent(1), { ...fakeEvent(2), type: 'EXECUTE_PROGRESS', message: 'Codex is still running S6' }]
+    },
+    'test fallback'
+  );
+  assert(result.reply.trim().length > 0, 'Chat fallback must never produce an empty assistant reply');
+  assert(!result.update, `Question fallback must not queue an add_requirement update: ${JSON.stringify(result)}`);
+  assert(result.reply.includes('S6 Tune speed'), `Question fallback should summarize current plan step:\n${result.reply}`);
 }
 
 function verifyChatPromptCompression(): void {
@@ -340,13 +381,16 @@ function verifyCodexDisplayLines(): void {
     JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'hello\nworld' } }),
     JSON.stringify({ type: 'item.started', item: { type: 'command_execution', command: 'npm test' } }),
     JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', aggregated_output: 'ok\n', exit_code: 0 } }),
-    JSON.stringify({ type: 'item.completed', item: { type: 'file_change', changes: [{ path: 'src/a.ts', kind: 'update' }] } })
+    JSON.stringify({ type: 'item.completed', item: { type: 'file_change', changes: [{ path: 'src/a.ts', kind: 'update' }] } }),
+    JSON.stringify({ method: 'item/completed', params: { item: { type: 'agentMessage', text: JSON.stringify({ notes: 'bench passed', next: 'write receipt', changed_files: ['PLAN.md'] }) } } })
   ]);
   const text = lines.join('\n');
-  assert(text.includes('hello') && text.includes('world'), `Codex agent text should render directly:\n${text}`);
-  assert(text.includes('[command] npm test'), `Codex command should render directly:\n${text}`);
-  assert(text.includes('ok'), `Codex command output should render directly:\n${text}`);
-  assert(text.includes('[file update] src/a.ts'), `Codex file changes should render directly:\n${text}`);
+  assert(text.includes('codex: hello') && text.includes('       world'), `Codex agent text should render like a transcript:\n${text}`);
+  assert(text.includes('$ npm test'), `Codex command should render as a shell command:\n${text}`);
+  assert(text.includes('ok') && text.includes('exit 0'), `Codex command output and exit code should render directly:\n${text}`);
+  assert(text.includes('file update: src/a.ts'), `Codex file changes should render as readable file lines:\n${text}`);
+  assert(text.includes('codex: bench passed') && text.includes('next: write receipt') && text.includes('files: PLAN.md'), `Structured Codex messages should render readable fields:\n${text}`);
+  assert(!text.includes('"command"') && !text.includes('"method"'), `ExecPane must not dump raw JSON into the visible transcript:\n${text}`);
 }
 
 function verifyChatHistory(): void {
@@ -390,14 +434,34 @@ function verifyChatHistory(): void {
       metric: { name: 'planner-selected validation', direction: 'maximize', target: null, unit: 'score' },
       budget: { max_iters: 1, max_cost_usd: 0, deadline: null },
       stop: { tau: 0.01, K: 1, N: 1, mode: 'auto' }
-    }
+    },
+    [
+      { ts: '2026-06-14T00:00:00.000Z', role: 'user', text: 'Please keep the public API stable.' },
+      {
+        ts: '2026-06-14T00:00:01.000Z',
+        role: 'assistant',
+        text: 'I will record that requirement.',
+        update: { kind: 'add_requirement', text: 'Keep the public API stable.' }
+      }
+    ]
   );
   const text = history.map((line) => line.text).join('\n');
-  assert(text.includes('initial goal: Initial user request from Chat.'), `Chat history missing initial Chat goal:\n${text}`);
-  assert(text.includes('requirement applied: Keep the public API stable.'), `Chat history missing applied requirement:\n${text}`);
-  assert(text.includes('planner: Planner needs clarification'), `Chat history missing planner question:\n${text}`);
-  assert(text.includes('answer: Use the host from the original chat.'), `Chat history missing answered text:\n${text}`);
-  assert(text.includes('steer pending: Prefer the smallest safe change.'), `Chat history missing pending steer:\n${text}`);
+  assert(!text.includes('initial goal:'), `Chat history should not repeat initial goal:\n${text}`);
+  assert(text.includes('YOU\n  Please keep the public API stable.'), `Chat history missing separated user turn:\n${text}`);
+  assert(text.includes('ASSISTANT\n  I will record that requirement.'), `Chat history missing separated assistant turn:\n${text}`);
+  assert(text.includes('UPDATE APPLIED\n  Keep the public API stable.'), `Chat history missing attached update status:\n${text}`);
+  assert(text.includes('QUESTION\n  Planner needs clarification'), `Chat history missing planner question:\n${text}`);
+  assert(text.includes('ANSWER\n  Use the host from the original chat.'), `Chat history missing answered text:\n${text}`);
+  assert(currentGoalSummary({
+    run_id: 'run-chat-history',
+    version: 1,
+    requirements: [{ id: 'R1', text: 'Initial user request from Chat.', source: 'initial', status: 'active' }],
+    acceptance_criteria: [],
+    constraints: [],
+    metric: { name: 'planner-selected validation', direction: 'maximize', target: null, unit: 'score' },
+    budget: { max_iters: 1, max_cost_usd: 0, deadline: null },
+    stop: { tau: 0.01, K: 1, N: 1, mode: 'auto' }
+  }).startsWith('Current goal v1:'), 'ChatPane should expose compact current goal summary');
 }
 
 function fakeEvent(seq: number): RunEvent {

@@ -102,7 +102,11 @@ async function main(): Promise<void> {
   );
   assert(config.budget?.max_iters === 0 && config.budget?.max_cost_usd === 0, 'default config should not impose cost or iteration hard caps');
   assert(readme.includes('default `max_iters` is `0`') && readme.includes('disable WiCi\'s own cost and iteration hard stops'), 'README should document unbounded default real-run budgets');
-  assert(readme.includes('pending updates are not a WiCi supervisor start gate'), 'README should document doctor/update visibility without a pending-update start gate');
+  assert(
+    readme.includes('automatically checks for Codex/Claude updates at run boundaries') &&
+      readme.includes('pending updates are not a WiCi supervisor start gate'),
+    'README should document automatic Codex/Claude update checks without a pending-update start gate'
+  );
   assert(
     readme.includes('Do not pass the canary as `--goal`; the release proof is the Chat-first path.'),
     'README should document Chat-first canary execution'
@@ -244,9 +248,10 @@ async function main(): Promise<void> {
       completionAudit.includes('asserts `.opt/checks.sh` and `.opt/measure.sh` are executable'),
     'completion audit should include executable runnable planner script evidence'
   );
-  assert(completionAudit.includes('Chat pane restores initial goal, user steering, and planner answers'), 'completion audit should include durable Chat history evidence');
+  assert(completionAudit.includes('Chat pane restores current goal, user steering, and planner answers'), 'completion audit should include durable Chat history evidence');
   assert(completionAudit.includes('goal_doc_contains_steering'), 'completion audit should include GOAL.md steering persistence evidence');
-  assert(completionAudit.includes('codex_resume_after_hot_reload') && readme.includes('npm run verify:hotreload-resume'), 'docs should cover Codex resume continuity after hot reload');
+  assert(completionAudit.includes('EXECUTE_STEERED') && readme.includes('npm run verify:app-server-hotreload'), 'docs should cover Codex app-server steering after hot reload');
+  assert(completionAudit.includes('legacy resume fallback') && readme.includes('npm run verify:hotreload-resume'), 'docs should cover Codex exec resume fallback after hot reload');
   assert(completionAudit.includes('goal_source_not_retroactive'), 'completion audit should include non-retroactive initial goal provenance evidence');
   assert(completionAudit.includes('only ChatPane writes inbox injections') && completionAudit.includes('chat_writes_only_inbox'), 'completion audit should include single-writer TUI boundary evidence');
   assert(completionAudit.includes('historical_baseline_does_not_block_chat'), 'completion audit should include historical baseline isolation for Chat-first intake');
@@ -310,7 +315,8 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:legacy-optimizer']?.includes('verify:benchmark-manifest'), 'package should expose a legacy optimizer aggregate verifier');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:existing-goal'), 'fresh V1 core gate must include existing-goal continuation');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:tui-real-fake-chat'), 'fresh V1 core gate must include real-mode fake CLI Chat-first TUI coverage');
-  assert(pkg.scripts['verify:v1-core']?.includes('verify:hotreload-resume'), 'fresh V1 core gate must include Codex resume continuity after hot reload');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:app-server-hotreload'), 'fresh V1 core gate must include Codex app-server steering after hot reload');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:hotreload-resume'), 'fresh V1 core gate must include Codex exec resume fallback after hot reload');
   assert(pkg.scripts['release:preflight'] === 'npm run verify:v1-core && npm run verify:tag-gate', 'package should expose a release preflight that runs core V1 checks before tag gate');
   assert(pkg.scripts['release:tag']?.includes('src/release/tag.ts'), 'package should expose the guarded release tag command');
   assert(releaseTagSource.includes("['run', 'release:preflight']") && releaseTagSource.includes("['tag', '-a', tag") && !releaseTagSource.includes("['push'") && !releaseTagSource.includes('git push'), 'guarded release tag command should run preflight before local tag and never push');

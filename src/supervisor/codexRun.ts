@@ -42,11 +42,13 @@ export function parseCodexRunEvents(raw: string): ToolUsageSummary {
     summary.events += 1;
 
     const type = eventType(event);
-    if (type === 'turn.completed') {
+    if (type === 'turn.completed' || type === 'turn/completed') {
       summary.completed_turns += 1;
       addUsage(summary, usageFrom(event));
-    } else if (type === 'item.completed') {
+    } else if (type === 'item.completed' || type === 'item/completed') {
       summary.completed_items += 1;
+    } else if (type === 'thread/tokenUsage/updated') {
+      addUsage(summary, tokenUsageFromAppServer(event));
     } else if (type === 'turn.failed' || type === 'error' || hasTopLevelError(event)) {
       summary.failed = true;
       summary.errors.push(errorMessage(event));
@@ -110,8 +112,19 @@ function eventType(event: Record<string, unknown>): string {
     const value = event[key];
     if (typeof value === 'string') return value;
   }
+  if (typeof event.method === 'string') return event.method;
   if (isRecord(event.item) && typeof event.item.type === 'string') return event.item.type;
   return '';
+}
+
+function tokenUsageFromAppServer(event: Record<string, unknown>): Record<string, unknown> | null {
+  if (!isRecord(event.params) || !isRecord(event.params.tokenUsage) || !isRecord(event.params.tokenUsage.total)) return null;
+  const total = event.params.tokenUsage.total;
+  return {
+    input_tokens: total.inputTokens,
+    output_tokens: total.outputTokens,
+    total_tokens: total.totalTokens
+  };
 }
 
 function hasTopLevelError(event: Record<string, unknown>): boolean {

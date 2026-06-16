@@ -21,6 +21,10 @@ export interface ToolHealthOptions {
   probeClaude?: boolean;
 }
 
+export interface ToolVersionDriftReport {
+  accepted: string[];
+}
+
 export async function checkToolHealth(config: WiCiConfig, options: ToolHealthOptions = {}): Promise<ToolHealthReport> {
   const [codex, claude] = await Promise.all([
     inspectTool(config.tools.executor.command, ['--version'], ['doctor']),
@@ -49,30 +53,42 @@ export async function toolVersionsFromHealth(config: WiCiConfig, report: ToolHea
   };
 }
 
-export function assertNoActiveToolVersionDrift(checkpoint: Checkpoint, current: NonNullable<Checkpoint['tool_versions']>): void {
-  if (!checkpoint.tool_versions) return;
-  if (checkpoint.supervisor_state === 'STOP' || checkpoint.supervisor_state === 'FAILED') return;
+export function shouldAutoUpdateToolsAtBoundary(config: WiCiConfig, checkpoint: Checkpoint): boolean {
+  if (config.tools.mode === 'stub') return false;
+  if (config.tools.auto_update === false) return false;
+  return !checkpoint.tool_versions || checkpoint.supervisor_state === 'STOP' || checkpoint.supervisor_state === 'FAILED';
+}
+
+export function reconcileToolVersionDrift(checkpoint: Checkpoint, current: NonNullable<Checkpoint['tool_versions']>): ToolVersionDriftReport {
+  if (!checkpoint.tool_versions) return { accepted: [] };
+  if (checkpoint.supervisor_state === 'STOP' || checkpoint.supervisor_state === 'FAILED') return { accepted: [] };
 
   const pinned = checkpoint.tool_versions;
-  const diffs: string[] = [];
-  if (pinned.mode !== current.mode) diffs.push(`mode ${pinned.mode} -> ${current.mode}`);
-  if (pinned.codex !== current.codex) diffs.push(`codex ${pinned.codex ?? 'unknown'} -> ${current.codex ?? 'unknown'}`);
-  if (pinned.claude !== current.claude) diffs.push(`claude ${pinned.claude ?? 'unknown'} -> ${current.claude ?? 'unknown'}`);
+  const accepted: string[] = [];
+  const rejected: string[] = [];
+  if (pinned.mode !== current.mode) rejected.push(`mode ${pinned.mode} -> ${current.mode}`);
+  if (pinned.codex !== current.codex) accepted.push(`codex ${pinned.codex ?? 'unknown'} -> ${current.codex ?? 'unknown'}`);
+  if (pinned.claude !== current.claude) accepted.push(`claude ${pinned.claude ?? 'unknown'} -> ${current.claude ?? 'unknown'}`);
   if (pinned.wici) {
     if (pinned.wici.package_version !== current.wici?.package_version) {
-      diffs.push(`wici package ${pinned.wici.package_version ?? 'unknown'} -> ${current.wici?.package_version ?? 'unknown'}`);
+      rejected.push(`wici package ${pinned.wici.package_version ?? 'unknown'} -> ${current.wici?.package_version ?? 'unknown'}`);
     }
     if (pinned.wici.git_commit !== current.wici?.git_commit) {
-      diffs.push(`wici git ${pinned.wici.git_commit ?? 'unknown'} -> ${current.wici?.git_commit ?? 'unknown'}`);
+      rejected.push(`wici git ${pinned.wici.git_commit ?? 'unknown'} -> ${current.wici?.git_commit ?? 'unknown'}`);
     }
     if (pinned.wici.git_dirty !== current.wici?.git_dirty) {
-      diffs.push(`wici dirty ${String(pinned.wici.git_dirty)} -> ${String(current.wici?.git_dirty)}`);
+      rejected.push(`wici dirty ${String(pinned.wici.git_dirty)} -> ${String(current.wici?.git_dirty)}`);
     }
   }
 
-  if (diffs.length > 0) {
-    throw new Error(`Tool version drift detected during active run; update tools only between runs or roll WiCi back to the checkpointed git commit: ${diffs.join('; ')}`);
+  if (rejected.length > 0) {
+    throw new Error(`Non-recoverable tool version drift detected during active run; roll WiCi back to the checkpointed git commit or start a new run boundary: ${rejected.join('; ')}`);
   }
+  return { accepted };
+}
+
+export function assertNoActiveToolVersionDrift(checkpoint: Checkpoint, current: NonNullable<Checkpoint['tool_versions']>): void {
+  void reconcileToolVersionDrift(checkpoint, current);
 }
 
 export async function updateToolsBetweenRuns(config: WiCiConfig): Promise<ToolHealthReport> {

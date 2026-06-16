@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import React from 'react';
 import { render } from 'ink';
-import { withFullScreen } from 'fullscreen-ink';
 import { Command } from 'commander';
+import { writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { App } from './tui/App.js';
@@ -11,6 +11,7 @@ import { createSampleTarget } from './sample.js';
 import type { ToolMode } from './shared/types.js';
 import { loadConfig } from './shared/config.js';
 import { runPaths, TOOL_ROOT } from './shared/paths.js';
+import { installCrashHandlers } from './shared/crashHandlers.js';
 import { previewRollback, rollbackTarget } from './supervisor/rollback.js';
 import { checkToolHealth, updateToolsBetweenRuns } from './supervisor/selfupdate.js';
 
@@ -167,6 +168,7 @@ function renderTui(options: {
   fullscreen: boolean;
 }): void {
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  installCrashHandlers(options.target);
   const tree = (
     <App
       target={options.target}
@@ -182,10 +184,43 @@ function renderTui(options: {
     />
   );
   if (options.fullscreen && interactive) {
-    void withFullScreen(tree, { interactive: true }).start();
+    renderInAlternateScreen(tree);
   } else {
     render(tree, { interactive });
   }
+}
+
+function renderInAlternateScreen(tree: React.ReactElement): void {
+  writeTerminalControl('\x1b[?1049h\x1b[2J\x1b[3J\x1b[H\x1b[?25l');
+  const instance = render(tree, { interactive: true });
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    writeTerminalControl('\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[2J\x1b[3J\x1b[H\x1b[?1049l');
+  };
+  process.once('exit', cleanup);
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.once(signal, () => {
+      cleanup();
+      process.exit(exitCodeForSignal(signal));
+    });
+  }
+  void instance.waitUntilExit().finally(cleanup);
+}
+
+function writeTerminalControl(sequence: string): void {
+  try {
+    writeSync(process.stdout.fd, sequence);
+  } catch {
+    // Best-effort terminal state management.
+  }
+}
+
+function exitCodeForSignal(signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): number {
+  if (signal === 'SIGINT') return 130;
+  if (signal === 'SIGTERM') return 143;
+  return 129;
 }
 
 function readPackageVersionSync(): string {

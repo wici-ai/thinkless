@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   const plan = await readFile(paths.plan, 'utf8');
   assert(plan.includes(followupText), 'PLAN.md should include hot reload follow-up requirement');
   const secondPrompt = await readFile(join(paths.artifacts, 'iter-2.prompt.txt'), 'utf8');
-  assert(secondPrompt.includes('Continue executing the current GOAL.md and PLAN.md as one Codex goal.'), 'second Codex prompt should continue the current goal');
+  assert(secondPrompt.includes('Continue the existing Codex session for this WiCi run.'), 'second Codex prompt should continue the existing Codex session');
   assert(secondPrompt.includes(followupText), 'second Codex prompt should include hot reload steering text');
 
   const status = await git(['status', '--short']);
@@ -100,6 +100,10 @@ async function writeFakeClaude(): Promise<void> {
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
   console.log('2.1.999 (Fake Claude Code)');
+  process.exit(0);
+}
+if (args[0] === 'update') {
+  console.log('updated');
   process.exit(0);
 }
 if (args.includes('--json-schema')) {
@@ -155,6 +159,10 @@ import { dirname, join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
   console.log('codex-cli 0.999.0');
+  process.exit(0);
+}
+if (args[0] === 'update') {
+  console.log('updated');
   process.exit(0);
 }
 if (args[0] === 'doctor') {

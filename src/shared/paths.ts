@@ -22,6 +22,7 @@ export interface RunPaths {
   skills: string;
   curriculum: string;
   events: string;
+  supervisorLog: string;
   codexRun: string;
   chat: string;
   chatSession: string;
@@ -65,6 +66,7 @@ export function runPaths(target: string): RunPaths {
     skills: join(wici, 'skills'),
     curriculum: join(wici, 'curriculum.jsonl'),
     events: join(wici, 'events.jsonl'),
+    supervisorLog: join(wici, 'supervisor.log'),
     codexRun: join(wici, 'codex-run.jsonl'),
     chat: join(wici, 'chat.jsonl'),
     chatSession: join(wici, 'chat-session.json'),

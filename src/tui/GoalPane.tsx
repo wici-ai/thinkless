@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useFocus, useInput } from 'ink';
 import type { RunState } from './useRunState.js';
-import { mouseScrollDelta } from './input.js';
-import { PAGE_SIZE, scrollBy, viewport, wrapLines } from './viewport.js';
+import { isMouseInput, mouseScrollDelta } from './input.js';
+import { PAGE_SIZE, scrollBy, wrappedViewport } from './viewport.js';
 
 interface PlanLineView {
   text: string;
@@ -30,27 +30,29 @@ export const GoalPane = React.memo(function GoalPane({
   const previousPlan = useRef(state.plan);
   const diff = useMemo(() => buildPlanDiffView(previousPlan.current, state.plan), [state.plan]);
   const [scrollOffset, setScrollOffset] = useState(0);
-  const displayLines = useMemo(
+  const sourceLines = useMemo(
     () =>
-      wrapLines(
-        [
-          ...(state.goalDoc ? state.goalDoc.replace(/^```markdown\n?|\n?```\n?$/g, '').split('\n') : []),
-          ...(state.goalDoc || state.plan ? ['', '--- PLAN.md ---'] : []),
-          ...(state.plan ? state.plan.replace(/^```markdown\n?|\n?```\n?$/g, '').split('\n') : [])
-        ],
-        contentWidth
-      ),
-    [contentWidth, state.goalDoc, state.plan]
+      [
+        ...(state.goalDoc ? state.goalDoc.replace(/^```markdown\n?|\n?```\n?$/g, '').split('\n') : []),
+        ...(state.goalDoc || state.plan ? ['', '--- PLAN.md ---'] : []),
+        ...(state.plan ? state.plan.replace(/^```markdown\n?|\n?```\n?$/g, '').split('\n') : [])
+      ],
+    [state.goalDoc, state.plan]
   );
-  const view = viewport(displayLines, scrollOffset, viewportHeight);
+  const view = useMemo(() => wrappedViewport(sourceLines, contentWidth, scrollOffset, viewportHeight), [contentWidth, scrollOffset, sourceLines, viewportHeight]);
 
   useEffect(() => {
     previousPlan.current = state.plan;
   }, [state.plan]);
 
+  useEffect(() => {
+    setScrollOffset((current) => Math.min(current, view.maxScroll));
+  }, [view.maxScroll]);
+
   useInput((input, key) => {
     const wheel = mouseScrollDelta(input);
     if (wheel !== 0) setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
+    else if (isMouseInput(input)) return;
     else if (key.upArrow || input === 'k') setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
     else if (key.downArrow || input === 'j') setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
     else if (key.pageUp || input === 'u') setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
@@ -71,7 +73,7 @@ export const GoalPane = React.memo(function GoalPane({
           </Text>
         ))}
       </Box>
-      <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>{view.end}/{displayLines.length || 0}</Text>
+      <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>{view.end}/{view.total || 0}</Text>
     </Box>
   );
 });

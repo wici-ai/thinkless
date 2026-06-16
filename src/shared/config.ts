@@ -10,6 +10,7 @@ export async function loadConfig(modeOverride?: ToolMode): Promise<WiCiConfig> {
     throw new Error(`Missing WiCi config: ${path}`);
   }
   const config = await readJsonFile<WiCiConfig>(path);
+  config.tools.auto_update ??= true;
   config.retry ??= {
     max_attempts_per_step: 2,
     reverts_before_reset: 5,
@@ -21,11 +22,24 @@ export async function loadConfig(modeOverride?: ToolMode): Promise<WiCiConfig> {
   if (process.env.WICI_TOOL_MODE === 'real' || process.env.WICI_TOOL_MODE === 'auto' || process.env.WICI_TOOL_MODE === 'stub') {
     config.tools.mode = process.env.WICI_TOOL_MODE;
   }
+  if (process.env.WICI_AUTO_UPDATE_TOOLS === '0') {
+    config.tools.auto_update = false;
+  }
+  if (process.env.WICI_AUTO_UPDATE_TOOLS === '1') {
+    config.tools.auto_update = true;
+  }
   if (process.env.WICI_LEGACY_OPTIMIZER === '1') {
     config.evaluation.legacy_optimizer = true;
   }
   if (process.env.WICI_CODEX_MODEL?.trim()) {
     config.tools.executor.model = process.env.WICI_CODEX_MODEL.trim();
+  }
+  if (
+    process.env.WICI_CODEX_EXECUTOR_BACKEND === 'auto' ||
+    process.env.WICI_CODEX_EXECUTOR_BACKEND === 'app-server' ||
+    process.env.WICI_CODEX_EXECUTOR_BACKEND === 'exec'
+  ) {
+    config.tools.executor.backend = process.env.WICI_CODEX_EXECUTOR_BACKEND;
   }
   return config;
 }

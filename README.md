@@ -44,6 +44,7 @@ npm run verify:tui-live
 npm run verify:planner-clarification
 npm run verify:hotreload
 npm run verify:hotreload-resume
+npm run verify:app-server-hotreload
 npm run verify:durability
 npm run verify:goal-doc
 npm run verify:tool-commands
@@ -130,10 +131,11 @@ Check tool availability:
 
 ```bash
 npx tsx src/cli.tsx doctor
+npx tsx src/cli.tsx doctor --update
 npx tsx src/cli.tsx doctor --deep
 ```
 
-`doctor --deep` performs a Claude print-mode auth probe. Doctor reports tool versions, health, and pending updates for operator visibility; pending updates are not a WiCi supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run, then records the versions in the checkpoint.
+`doctor --update` runs the Codex and Claude updaters, then reports health. `doctor --deep` performs a Claude print-mode auth probe. On supervisor start, WiCi automatically checks for Codex/Claude updates at run boundaries when `tools.auto_update` is true, then records the versions in the checkpoint, and pending updates are not a WiCi supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run.
 
 Use `--mode stub`, `--mode auto`, or `--mode real` on `run` / `tui`.
 
@@ -157,11 +159,11 @@ Users should not need to add meta-instructions such as "search tutorials", "debu
 
 When `PLAN.md` exists, the fresh V1 path starts Codex directly. It does not require `baseline.json`, `.opt/benchmark.json`, `acceptance.spec.json`, or pre-run measurements before execution. A stray or historical `baseline.json` does not switch V1 into an eval-gated loop; the legacy optimizer must be explicitly enabled with `WICI_LEGACY_OPTIMIZER=1`.
 
-During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.wici/artifacts/planner-*.stdout.jsonl`. Real Codex execution tails `EXECUTE_PROGRESS` events from `codex exec --json` and writes the raw stream to `.wici/codex-run.jsonl`. The executor watchdog is intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work, but an empty `codex exec resume` that only emits session startup and no actionable item is restarted quickly as a recoverable timeout.
+During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.wici/artifacts/planner-*.stdout.jsonl`. Real Codex execution defaults to `codex app-server` in `auto` mode when the CLI supports it, streams raw app-server JSON-RPC notifications into `.wici/codex-run.jsonl`, and shows those raw lines directly in the Execution pane. If app-server is unavailable or a fake legacy CLI is on `PATH`, WiCi falls back to `codex exec --json`; the legacy executor watchdog is intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work, but an empty `codex exec resume` that only emits session startup and no actionable item is restarted quickly as a recoverable timeout.
 
 WiCi does not treat a single executor failure as the whole goal failing. Direct V1 execution is intentionally long-horizon: command failures, failed validation, and executor timeouts are recorded as recoverable crash ledger rows, the active `PLAN.md` step is reset to pending, and the next Codex `exec resume --last` prompt receives the failure reason. Codex is allowed to inspect logs and remote state, update `PLAN.md`, repair planner-provided `.opt` scripts, choose a different deployment or validation strategy, and continue the same `GOAL.md` until the goal is actually satisfied or there is concrete repeated evidence that it cannot proceed.
 
-Later Chat messages are drained through `.wici/inbox/` at safe points. WiCi updates `GOAL.md`, asks Claude plan mode for the smallest `PLAN.md` update, and passes the new requirement or steering text into the next Codex execution.
+Later Chat messages are drained through `.wici/inbox/`. With the app-server backend, WiCi updates `GOAL.md`, asks Claude plan mode for the smallest `PLAN.md` update, then sends `turn/steer` to the active Codex turn so execution continues without restarting. With the legacy `codex exec` fallback, WiCi preempts at the next executor output or heartbeat, applies the same planner diff, and resumes through `codex exec resume --last`.
 
 If the supervisor crashes during direct V1 execution, restart the same command. WiCi uses `checkpoint.json` and `wici/best` to revert unconfirmed direct-path work, resets the active `PLAN.md` step for replay, and preserves `.wici/` event and ledger history.
 
@@ -193,7 +195,7 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 
 `npm run verify:direct-recovery` covers long-goal recovery: a fake real-mode Codex fails the first invocation, WiCi records `EXECUTE_RECOVERABLE_FAILURE` without entering `FAILED`, then the second invocation uses `codex exec resume --last` and completes.
 
-`npm run verify:direct-preempt` covers finer hot reload: a fake real-mode Codex is interrupted after pending Chat input appears, WiCi records `EXECUTE_PREEMPTED`, drains the inbox, applies a planner diff, then resumes Codex.
+`npm run verify:direct-preempt` covers the legacy fallback path: a fake real-mode `codex exec` run is interrupted after pending Chat input appears, WiCi records `EXECUTE_PREEMPTED`, drains the inbox, applies a planner diff, then resumes Codex.
 
 `npm run verify:existing-goal` covers continuing a target that already has `GOAL.md` and `PLAN.md` without passing a new `--goal`.
 
@@ -207,7 +209,9 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 
 `npm run verify:tui-hotreload-pty` keeps the same TUI open through an execution safe point, types a follow-up Chat requirement, and verifies that WiCi drains the inbox, updates `GOAL.md` / `PLAN.md`, and starts the next Codex iteration after `PLAN_DIFF_APPLIED`.
 
-`npm run verify:hotreload-resume` covers the real-mode command shape after hot reload with fake CLIs: the first Codex call starts normally, and the next execution after `PLAN_DIFF_APPLIED` uses `codex exec resume --last` without the unsupported `-C` flag.
+`npm run verify:hotreload-resume` covers the legacy real-mode command shape after hot reload with fake CLIs: the first Codex call starts normally, and the next execution after `PLAN_DIFF_APPLIED` uses `codex exec resume --last` without the unsupported `-C` flag.
+
+`npm run verify:app-server-hotreload` covers the preferred medium-term path: a fake `codex app-server` keeps an active turn open, WiCi drains Chat input, updates `GOAL.md` / `PLAN.md`, sends `turn/steer`, and completes without `EXECUTE_PREEMPTED`.
 
 ## Deployment
 
@@ -239,7 +243,7 @@ git -C /path/to/WiCi-code status --short
 git -C /path/to/WiCi-code rev-parse HEAD
 ```
 
-The supervisor records the WiCi package version, git commit, and dirty flag in `<target>/.wici/checkpoint.json` under `tool_versions.wici`. Active runs reject WiCi/Codex/Claude version drift; update tools or change WiCi commits only between runs.
+The supervisor records the WiCi package version, git commit, and dirty flag in `<target>/.wici/checkpoint.json` under `tool_versions.wici`. Codex/Claude CLI changes are treated as recoverable external tool drift: WiCi auto-updates them at run boundaries when `tools.auto_update` is true, and accepts/logs their version changes if a resumed active checkpoint observes a new CLI version. Active runs still reject WiCi package/git/mode drift; change WiCi commits only between runs or roll back to the checkpointed commit.
 
 Require real CLIs:
 
