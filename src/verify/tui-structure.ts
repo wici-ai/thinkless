@@ -33,9 +33,11 @@ async function main(): Promise<void> {
   assert(files.app.includes('useInput') && files.app.includes('useFocusManager'), 'App must keep keyboard focus management at the top level');
   assert(files.app.includes('enableMouseReporting'), 'App must enable terminal mouse reporting for pane-local wheel scroll');
   assert(files.input.includes('disableMouseReporting') && files.input.includes("'SIGINT'") && !files.input.includes('?1002h'), 'TUI mouse mode must avoid motion tracking and install cleanup handlers');
-  assert(files.app.includes('parseMouseInput') && files.app.includes("focus('exec')"), 'App must focus panes from mouse clicks');
-  assert(files.app.includes("focus('chat')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat pane');
-  assert(files.app.includes('<ChatPane') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render the three V1 panes');
+  assert(files.app.includes('parseMouseInput') && files.app.includes('workspaceFocusId(workspaceTab)'), 'App must focus the active workspace pane from mouse clicks');
+  assert(files.app.includes("focus('chat-input')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat input');
+  assert(files.app.includes('<ChatHistoryPane') && files.app.includes('<ChatInputBox') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render top Chat/Plan/Execution tabs plus the bottom Chat input');
+  assert(files.app.includes('workspaceTab') && files.app.includes('key.leftArrow') && files.app.includes('key.rightArrow'), 'App must switch the Plan/Execution workspace with left/right arrows');
+  assert(files.app.includes('CHAT') && files.app.includes('PLAN') && files.app.includes('EXECUTION') && files.app.includes('showTitle={false}'), 'App must expose Chat/Plan/Execution as one top tabbed workspace');
   assert(files.app.includes('shouldAcceptInitialGoalFromChat'), 'App must route blank-run chat input to the initial supervisor goal');
   assert(files.app.includes('shouldAutoStartExistingRun'), 'App must avoid auto-restarting stopped runs while still supporting resume on attach');
   assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'App must wake the supervisor after Chat writes an inbox injection');
@@ -46,9 +48,10 @@ async function main(): Promise<void> {
   assert(files.app.includes('supervisorState={state.checkpoint?.supervisor_state}'), 'App must pass terminal supervisor state into Chat so stale errors do not occupy the input pane');
   assertNoControlWrites('App', files.app);
 
-  assert(files.chat.includes("useFocus({ id: 'chat'"), 'ChatPane must have a stable focus id');
-  assert(files.chat.includes('isActive: interactive && isFocused'), 'ChatPane input and scroll must be gated on focus');
-  assert(files.chat.includes('writeInjection'), 'ChatPane must write chat input through writeInjection');
+  assert(files.chat.includes("id: 'chat-history'") && files.chat.includes("id: 'chat-input'"), 'Chat history and Chat input must have stable focus ids');
+  assert(files.chat.includes('isActive: interactive && active'), 'Chat history scroll must be gated on the active top tab');
+  assert(files.chat.includes('isActive: interactive })'), 'Chat input must remain active independently at the bottom');
+  assert(files.chat.includes('writeInjection'), 'Chat input must write chat input through writeInjection');
   assert(files.chat.includes('buildChatHistory'), 'ChatPane must render persisted chat history');
   assert(files.chat.includes('currentGoalSummary'), 'ChatPane must keep current goal in a compact header outside transcript history');
   assert(files.chat.includes('isActiveOutboxMessage') && files.chat.includes("supervisorState !== 'STOP'") && files.chat.includes("supervisorState !== 'FAILED'"), 'ChatPane must hide stale error outbox messages after terminal run states');
@@ -57,6 +60,14 @@ async function main(): Promise<void> {
   assert(files.chat.includes('Number.POSITIVE_INFINITY'), 'ChatPane must not truncate long chat turns before the scroll viewport');
   assert(files.chat.includes('wrappedViewport') && files.chat.includes('wrapLines'), 'ChatPane must render full wrapped content through a scroll viewport');
   assert(files.chat.includes('mouseScrollDelta') && files.chat.includes('isMouseInput'), 'ChatPane must support pane-local mouse wheel scroll and ignore raw mouse escape text');
+  assert(
+    !files.chat.includes("input === 'd'") &&
+      !files.chat.includes("input === 'g'") &&
+      !files.chat.includes("input === 'j'") &&
+      !files.chat.includes("input === 'k'") &&
+      !files.chat.includes("input === 'u'"),
+    'ChatPane must not swallow ordinary letters as scroll shortcuts'
+  );
   assert(files.chat.includes('acceptInitialGoal') && files.chat.includes('onInitialGoal'), 'ChatPane must support initial goal intake before inbox injections');
   assert(files.chat.includes('onInjection?.()'), 'ChatPane must notify App after writing inbox injections');
   assert(files.chat.includes('isInitialGoalText'), 'ChatPane must distinguish initial natural-language goals from slash commands');
@@ -70,23 +81,23 @@ async function main(): Promise<void> {
   assert(!files.chat.includes('initial goal:') && !files.chat.includes('`goal: ${text}`'), 'ChatPane transcript must not repeat the initial goal as history');
 
   assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
-  assert(files.goal.includes('useInput') && files.goal.includes('isActive: isFocused'), 'GoalPane scroll input must be gated on focus');
+  assert(files.goal.includes('useInput') && files.goal.includes('active?: boolean') && files.goal.includes('const isActive = active ?? isFocused'), 'GoalPane scroll input must be gated on the active top tab or focus');
   assert(files.goal.includes('state.goalDoc'), 'GoalPane must render the user-facing GOAL.md document');
   assert(!files.goal.includes('goal?.requirements'), 'GoalPane must not use internal goal.json requirements as the primary goal UI');
   assert(files.goal.includes('buildPlanDiffView'), 'GoalPane must compute a visible PLAN diff');
   assert(files.goal.includes('GOAL / PLAN'), 'GoalPane title must be English');
   assert(files.goal.includes('wrappedViewport'), 'GoalPane must render full GOAL.md and PLAN.md through a lazy scroll viewport');
-  assert(files.goal.includes('mouseScrollDelta') && files.goal.includes("input === 'k'"), 'GoalPane must support wheel and vim-style scroll keys');
+  assert(files.goal.includes('mouseScrollDelta') && !files.goal.includes("input === 'k'") && !files.goal.includes("input === 'g'"), 'GoalPane must support wheel scroll without swallowing ordinary letters');
   assertNoControlWrites('GoalPane', files.goal);
   assert(!files.goal.includes("? `${") && !files.goal.includes("...'"), 'GoalPane must not intentionally ellipsize content');
 
   assert(files.exec.includes("useFocus({ id: 'exec'"), 'ExecPane must be focusable for scroll controls');
-  assert(files.exec.includes('useInput') && files.exec.includes('isActive: isFocused'), 'ExecPane input must be gated on focus');
+  assert(files.exec.includes('useInput') && files.exec.includes('active?: boolean') && files.exec.includes('const isActive = active ?? isFocused'), 'ExecPane input must be gated on the active top tab or focus');
   for (const key of ['upArrow', 'downArrow', 'pageUp', 'pageDown', 'home', 'end']) {
     assert(files.exec.includes(`key.${key}`), `ExecPane missing ${key} scroll binding`);
   }
   assert(files.exec.includes('visibleEvents') && files.exec.includes('scrollOffset'), 'ExecPane must render an in-pane scroll viewport');
-  assert(files.exec.includes('mouseScrollDelta') && files.exec.includes("input === 'k'"), 'ExecPane must support wheel and vim-style scroll keys');
+  assert(files.exec.includes('mouseScrollDelta') && !files.exec.includes("input === 'k'") && !files.exec.includes("input === 'g'"), 'ExecPane must support wheel scroll without swallowing ordinary letters');
   assert(files.exec.includes('codexDisplayLines') && files.exec.includes('displayCodexRecord') && files.exec.includes('state.codexTranscript'), 'ExecPane must render readable Codex transcript lines');
   assert(files.exec.includes('EXECUTION'), 'ExecPane title must be English');
   assertNoControlWrites('ExecPane', files.exec);

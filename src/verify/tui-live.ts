@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   assert(ledger[0].status === 'keep', `expected accepted live TUI row, got ${ledger[0].status}`);
 
   const ui = stripAnsi(output);
-  assert(ui.includes('SUPERVISOR_START') && ui.includes('EXECUTE_START') && ui.includes('EXECUTE_DONE'), `live TUI output missing direct execution stream:\n${ui.slice(-5000)}`);
+  assert(ui.includes('CHAT / PLAN / EXECUTION'), `live TUI output missing switchable workspace layout:\n${ui.slice(-5000)}`);
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `live TUI target worktree dirty:\n${status}`);
@@ -85,7 +85,7 @@ async function main(): Promise<void> {
         target,
         events: events.length,
         ledger_rows: ledger.length,
-        rendered_live_stream: true,
+        rendered_live_layout: true,
         direct_execution_stream: true,
         goal_source: checkpoint.goal_source,
         stopped: checkpoint.supervisor_state

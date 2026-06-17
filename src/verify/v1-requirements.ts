@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   assert(files.simplified.includes('不能维护 hardcoded avenue/category'), 'Simplified_PLAN must forbid hardcoded task categories');
   assert(files.simplified.includes('脚本永远不是 fresh V1 启动执行的前置条件'), 'Simplified_PLAN must state planner scripts are not a fresh V1 execution prerequisite');
 
-  assert(files.readme.includes('Goal and Execution panes start empty'), 'README must document blank Goal/Execution initial state');
+  assert(files.readme.includes('top Chat History / Goal/Plan / Execution workspace starts empty'), 'README must document blank Chat History / Goal/Plan / Execution workspace initial state');
   assert(files.readme.includes('The absence of `.opt` scripts is a valid fresh V1 path'), 'README must document no-script PLAN.md execution as valid fresh V1 behavior');
   assert(files.readme.includes('default `max_iters` is `0`') && files.readme.includes('disable WiCi\'s own cost and iteration hard stops'), 'README must document unbounded default real-run budgets');
   assert(

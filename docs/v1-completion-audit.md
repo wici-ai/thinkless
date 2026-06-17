@@ -9,14 +9,14 @@ This audit records what is currently proven, what is covered by automated checks
 
 | Requirement | Evidence | Status |
 | --- | --- | --- |
-| Local three-pane TUI: Chat, Goal/Plan, Execution | `npm run verify:tui-structure`, `npm run verify:demo-tui`, `npm run verify:tui-live` | Covered |
+| Local TUI: bottom Chat input plus a switchable Chat History / Goal/Plan / Execution workspace | `npm run verify:tui-structure`, `npm run verify:demo-tui`, `npm run verify:tui-live` | Covered |
 | Chat is the first intake for a blank run | `npm run verify:tui-chat-intake` | Covered |
 | Real pseudo-terminal Chat input can submit the first blank-run goal and start execution | `npm run verify:tui-chat-pty` report `pty_chat_first` and `goal_source: tui_chat` | Covered |
 | Chat-first TUI can drive the real-mode planner/executor subprocess path without using stub execution | `npm run verify:tui-real-fake-chat` report `pty_chat_first_real_mode_fake_clis`, `PLAN_USAGE`, and `EXECUTE_PROGRESS` evidence | Covered |
 | Real pseudo-terminal Chat input can answer planner clarification questions and resume the planner session | `npm run verify:tui-planner-clarification-pty` report `pty_planner_clarification`, `question_answered`, and `planner_session` | Covered |
 | Chat pane restores current goal, user steering, and planner answers from the blackboard without repeating the initial goal in transcript history | `npm run verify:tui-structure`, `npm run verify:v1-requirements` | Covered |
 | TUI does not directly write supervisor-owned GOAL/PLAN/checkpoint/ledger/event files; only ChatPane writes inbox injections | `npm run verify:tui-structure` report `chat_writes_only_inbox`, `goal_and_exec_read_only`, and static file-write API checks | Covered |
-| Blank Goal/Execution panes do not create run files before Chat | `npm run verify:tui-chat-intake`, `npm run verify:demo-tui` | Covered |
+| Blank Chat History / Goal/Plan / Execution workspace does not create run files before Chat | `npm run verify:tui-chat-intake`, `npm run verify:demo-tui` | Covered |
 | Initial goal provenance is not written retroactively on an existing run | `npm run verify:tui-chat-intake` report `goal_source_not_retroactive` | Covered |
 | A historical `baseline.json` alone does not block fresh Chat-first intake | `npm run verify:tui-chat-intake` report `historical_baseline_does_not_block_chat`; `npm run verify:v1-requirements` | Covered |
 | Supervisor is a blackboard/orchestration layer, not a semantic task engine | `npm run verify:v1-requirements`, `npm run verify:goal-metric`, `npm run verify:curriculum` | Covered |

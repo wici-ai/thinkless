@@ -141,7 +141,7 @@ Use `--mode stub`, `--mode auto`, or `--mode real` on `run` / `tui`.
 
 ## Chat-First Flow
 
-In an interactive TUI with no existing run and no `--goal`, the Goal and Execution panes start empty. The first natural-language Chat message is written into `GOAL.md` and starts Claude Code plan mode if there is enough information. If Claude needs a clarification before materializing `PLAN.md`, or later while updating `PLAN.md` after a hot-reload Chat message, WiCi surfaces that as a Chat question and routes the next ordinary Chat message back as the answer. That answer wakes the stopped supervisor and resumes the same Claude planner session.
+In an interactive TUI with no existing run and no `--goal`, the top Chat History / Goal/Plan / Execution workspace starts empty and can be switched with the left/right arrows, while the Chat input stays fixed at the bottom. The first natural-language Chat message is written into `GOAL.md` and starts Claude Code plan mode if there is enough information. If Claude needs a clarification before materializing `PLAN.md`, or later while updating `PLAN.md` after a hot-reload Chat message, WiCi surfaces that as a Chat question and routes the next ordinary Chat message back as the answer. That answer wakes the stopped supervisor and resumes the same Claude planner session.
 
 Planner output is markdown artifacts, not a second goal schema:
 
@@ -189,7 +189,7 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 - a git checkpoint and `wici/best` rollback tag are created;
 - the TUI header displays the current rollback checkpoint, or `rollback pending` before one exists;
 - direct executor failure is recoverable: the first failed attempt is recorded as `crash`, the next Codex invocation resumes with the failure context, and the same goal can continue;
-- the non-fullscreen TUI can render the Chat, Goal, and Execution panes over the run state.
+- the non-fullscreen TUI can render the bottom Chat input plus the switchable Chat History / Goal/Plan / Execution workspace over the run state.
 
 `npm run verify:direct-no-scripts` covers the complementary path: an existing markdown `PLAN.md` can execute directly without `.opt/checks.sh`, `.opt/measure.sh`, or `.opt/benchmark.json`.
 
@@ -263,7 +263,7 @@ npx tsx src/cli.tsx tui \
   --mode real
 ```
 
-For the release canary, start that TUI with empty Goal/Execution panes, then paste the canary request as the first Chat message. Do not pass the canary as `--goal`; the release proof is the Chat-first path.
+For the release canary, start that TUI with an empty Chat History / Goal/Plan / Execution workspace, then paste the canary request into the bottom Chat input as the first message. Do not pass the canary as `--goal`; the release proof is the Chat-first path.
 
 For a canary or cost-sensitive real validation, override the Codex model from the environment. This is an operator choice, not a hardcoded WiCi default:
 
@@ -305,7 +305,7 @@ Hot-reload Chat input is idempotent through `checkpoint.json` `drained_inbox[]`;
 
 ## Tag Gate
 
-Every release tag must pass a real TUI canary, not a hand-run shell substitute. A representative V1 canary starts from an empty Goal/Execution pane and uses this first Chat message:
+Every release tag must pass a real TUI canary, not a hand-run shell substitute. A representative V1 canary starts from an empty Chat History / Goal/Plan / Execution workspace and uses this first Chat message:
 
 ```text
 听说diffusionGemma很快，在ssh -p 23276 root@116.127.115.18 -L 8080:localhost:8080试试，要求达到700 token/s以上

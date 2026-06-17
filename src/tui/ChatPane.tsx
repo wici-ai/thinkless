@@ -9,27 +9,7 @@ import { PAGE_SIZE, scrollBy, wrapLines, wrappedViewport } from './viewport.js';
 
 type ChatColor = 'white' | 'gray' | 'cyan' | 'cyanBright' | 'green' | 'yellow' | 'red' | 'magenta';
 
-export function ChatPane({
-  target,
-  interactive = true,
-  outbox = [],
-  injections = [],
-  goal = null,
-  supervisorState,
-  goalDoc = '',
-  plan = '',
-  events = [],
-  chat = [],
-  mode,
-  contentWidth = 32,
-  viewportHeight = 12,
-  acceptInitialGoal = false,
-  onInitialGoal,
-  onInjection,
-  systemLine
-}: {
-  target: string;
-  interactive?: boolean;
+interface ChatContextProps {
   outbox?: OutboxMessage[];
   injections?: Injection[];
   goal?: GoalFile | null;
@@ -39,18 +19,39 @@ export function ChatPane({
   events?: RunEvent[];
   chat?: ChatLogEntry[];
   mode?: ToolMode;
+}
+
+export function ChatHistoryPane({
+  interactive = true,
+  outbox = [],
+  injections = [],
+  goal = null,
+  supervisorState,
+  chat = [],
+  contentWidth = 32,
+  viewportHeight = 12,
+  active = true,
+  systemLine,
+  localStatus,
+  busy = false,
+  showTitle = true
+}: {
+  interactive?: boolean;
+  outbox?: OutboxMessage[];
+  injections?: Injection[];
+  goal?: GoalFile | null;
+  supervisorState?: string;
+  chat?: ChatLogEntry[];
   contentWidth?: number;
   viewportHeight?: number;
-  acceptInitialGoal?: boolean;
-  onInitialGoal?: (text: string) => void;
-  onInjection?: () => void;
   systemLine?: string | null;
+  localStatus?: string | null;
+  busy?: boolean;
+  active?: boolean;
+  showTitle?: boolean;
 }) {
-  const { isFocused } = useFocus({ id: 'chat', autoFocus: true, isActive: interactive });
-  const [value, setValue] = useState('');
-  const valueRef = useRef('');
-  const [localLines, setLocalLines] = useState<ChatHistoryLine[]>([]);
-  const [busy, setBusy] = useState(false);
+  const { isFocused } = useFocus({ id: 'chat-history', isActive: interactive && active });
+  const isActive = active || isFocused;
   const history = buildChatHistory(outbox, injections, goal, chat);
   const goalSummary = currentGoalSummary(goal);
   const activeOutbox = outbox.filter((message) => isActiveOutboxMessage(message, supervisorState));
@@ -58,7 +59,7 @@ export function ChatPane({
     ...history,
     ...buildActiveOutboxLines(activeOutbox),
     ...(systemLine ? blockLines('system', systemLine, 'red', `system-${systemLine}`) : []),
-    ...localLines,
+    ...(localStatus ? blockLines('queued command', localStatus, 'yellow', `local-${localStatus}`) : []),
     ...(busy ? [{ id: 'busy', ts: timestampSortKey(), text: 'Assistant is thinking...', color: 'yellow' as ChatColor, bold: true }] : [])
   ];
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -70,6 +71,100 @@ export function ChatPane({
     (line) => line.text,
     (line, text, wrapIndex) => ({ ...line, id: `${line.id}-wrap-${wrapIndex}`, text })
   );
+
+  useInput((input, key) => {
+    if (!interactive || !active) return;
+    const wheel = mouseScrollDelta(input);
+    if (wheel !== 0) {
+      setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
+      return;
+    }
+    if (isMouseInput(input)) return;
+    if (key.upArrow) {
+      setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
+      return;
+    }
+    if (key.downArrow) {
+      setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
+      return;
+    }
+    if (key.pageUp) {
+      setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
+      return;
+    }
+    if (key.pageDown) {
+      setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
+      return;
+    }
+    if (key.home) {
+      setScrollOffset(view.maxScroll);
+      return;
+    }
+    if (key.end) {
+      setScrollOffset(0);
+    }
+  }, { isActive: interactive && active });
+
+  return (
+    <Box flexDirection="column" height="100%">
+      {showTitle ? (
+        <Text bold color={isActive ? 'cyan' : 'white'}>
+          CHAT
+        </Text>
+      ) : null}
+      <Text color="cyan">{goalSummary}</Text>
+      <Box flexDirection="column" flexGrow={1}>
+        {view.lines.map((line, index) => (
+          <Text key={`${view.start + index}-${line.id}`} color={line.color} bold={line.bold}>
+            {line.text || ' '}
+          </Text>
+        ))}
+      </Box>
+      <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>
+        {view.end}/{view.total || 0}
+      </Text>
+    </Box>
+  );
+}
+
+export function ChatInputBox({
+  target,
+  interactive = true,
+  outbox = [],
+  goalDoc = '',
+  plan = '',
+  events = [],
+  mode,
+  contentWidth = 80,
+  acceptInitialGoal = false,
+  onInitialGoal,
+  onInjection,
+  onBusyChange,
+  onLocalStatus
+}: {
+  target: string;
+  interactive?: boolean;
+  outbox?: OutboxMessage[];
+  goalDoc?: string;
+  plan?: string;
+  events?: RunEvent[];
+  mode?: ToolMode;
+  contentWidth?: number;
+  acceptInitialGoal?: boolean;
+  onInitialGoal?: (text: string) => void;
+  onInjection?: () => void;
+  onBusyChange?: (busy: boolean) => void;
+  onLocalStatus?: (text: string | null) => void;
+}) {
+  const { isFocused } = useFocus({ id: 'chat-input', autoFocus: true, isActive: interactive });
+  const [value, setValue] = useState('');
+  const valueRef = useRef('');
+  const [busy, setBusyState] = useState(false);
+
+  const setBusy = (next: boolean) => {
+    setBusyState(next);
+    onBusyChange?.(next);
+  };
 
   const setInputValue = (next: string) => {
     valueRef.current = next;
@@ -102,10 +197,7 @@ export function ChatPane({
             : text.startsWith('/steer ')
               ? await writeInjection(paths, { kind: 'steer', text: text.slice('/steer '.length), priority: 'normal' })
             : await writeAnswer(paths, text, latestQuestion!.reply_key);
-      setLocalLines((prev) => [
-        ...prev.slice(-12),
-        ...blockLines('queued command', `${injection.kind}: ${text}`, 'yellow', `local-${Date.now()}`)
-      ]);
+      onLocalStatus?.(`${injection.kind}: ${text}`);
       onInjection?.();
       return;
     }
@@ -119,6 +211,7 @@ export function ChatPane({
     } catch {
       // Defensive fallback: never drop the user's message if the agent errors.
       await writeInjection(paths, { kind: 'add_requirement', text, priority: 'normal' });
+      onLocalStatus?.(`add_requirement: ${text}`);
       onInjection?.();
     } finally {
       setBusy(false);
@@ -127,46 +220,18 @@ export function ChatPane({
 
   useInput((input, key) => {
     if (!interactive) return;
-    const wheel = mouseScrollDelta(input);
-    if (wheel !== 0) {
-      setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
-      return;
-    }
     if (isMouseInput(input)) return;
-    if (key.upArrow || input === 'k') {
-      setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
-      return;
-    }
-    if (key.downArrow || input === 'j') {
-      setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
-      return;
-    }
-    if (key.pageUp || input === 'u') {
-      setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
-      return;
-    }
-    if (key.pageDown || input === 'd') {
-      setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
-      return;
-    }
-    if (key.home || input === 'g') {
-      setScrollOffset(view.maxScroll);
-      return;
-    }
-    if (key.end || input === 'G') {
-      setScrollOffset(0);
-      return;
-    }
-    if (key.return || input === '\r' || input === '\n') {
-      void submit(valueRef.current);
-      return;
-    }
+    if (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow || key.pageUp || key.pageDown || key.home || key.end) return;
     if (input.includes('\r') || input.includes('\n')) {
       const [before, ...rest] = input.split(/\r?\n/);
       const next = valueRef.current + before;
       const remainder = rest.join('\n');
       setInputValue(remainder);
       void submit(next);
+      return;
+    }
+    if (key.return || input === '\r' || input === '\n') {
+      void submit(valueRef.current);
       return;
     }
     if (key.backspace || key.delete) {
@@ -177,34 +242,83 @@ export function ChatPane({
     if (input) {
       setInputValue(valueRef.current + input);
     }
-  }, { isActive: interactive && isFocused });
+  }, { isActive: interactive });
 
   return (
-    <Box flexDirection="column" height="100%" paddingX={1}>
-      <Text bold color={isFocused ? 'cyan' : 'white'}>
-        CHAT
+    <Box flexDirection="column" borderStyle="round" borderColor={isFocused || interactive ? 'cyan' : 'gray'} paddingX={1}>
+      <Text color={isFocused || interactive ? 'cyan' : 'gray'} bold>
+        YOU
       </Text>
-      <Text color="cyan">{goalSummary}</Text>
-      <Box flexDirection="column" flexGrow={1}>
-        {view.lines.map((line, index) => (
-          <Text key={`${view.start + index}-${line.id}`} color={line.color} bold={line.bold}>
-            {line.text || ' '}
-          </Text>
-        ))}
-      </Box>
-      <Text color={scrollOffset > 0 ? 'yellow' : 'gray'}>
-        {view.end}/{view.total || 0}
-      </Text>
-      <Box flexDirection="column" borderStyle="single" borderColor={isFocused ? 'cyan' : 'gray'} paddingX={1}>
-        <Text color={isFocused ? 'cyan' : 'gray'} bold>
-          YOU
+      {wrapLines([value || ' '], Math.max(1, contentWidth - 2)).slice(-3).map((line, index) => (
+        <Text key={`input-${index}-${line}`} color={interactive ? 'white' : 'gray'}>
+          {line || ' '}
         </Text>
-        {wrapLines([value || ' '], Math.max(1, contentWidth - 2)).slice(-3).map((line, index) => (
-          <Text key={`input-${index}-${line}`} color={isFocused && interactive ? 'white' : 'gray'}>
-            {line || ' '}
-          </Text>
-        ))}
-      </Box>
+      ))}
+    </Box>
+  );
+}
+
+export function ChatPane({
+  target,
+  interactive = true,
+  outbox = [],
+  injections = [],
+  goal = null,
+  supervisorState,
+  goalDoc = '',
+  plan = '',
+  events = [],
+  chat = [],
+  mode,
+  contentWidth = 32,
+  viewportHeight = 12,
+  acceptInitialGoal = false,
+  onInitialGoal,
+  onInjection,
+  systemLine
+}: ChatContextProps & {
+  target: string;
+  interactive?: boolean;
+  contentWidth?: number;
+  viewportHeight?: number;
+  acceptInitialGoal?: boolean;
+  onInitialGoal?: (text: string) => void;
+  onInjection?: () => void;
+  systemLine?: string | null;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [localStatus, setLocalStatus] = useState<string | null>(null);
+  return (
+    <Box flexDirection="column" height="100%" paddingX={1}>
+      <ChatHistoryPane
+        interactive={interactive}
+        outbox={outbox}
+        injections={injections}
+        goal={goal}
+        supervisorState={supervisorState}
+        chat={chat}
+        contentWidth={contentWidth}
+        viewportHeight={viewportHeight}
+        active
+        systemLine={systemLine}
+        localStatus={localStatus}
+        busy={busy}
+      />
+      <ChatInputBox
+        target={target}
+        interactive={interactive}
+        outbox={outbox}
+        goalDoc={goalDoc}
+        plan={plan}
+        events={events}
+        mode={mode}
+        contentWidth={contentWidth}
+        acceptInitialGoal={acceptInitialGoal}
+        onInitialGoal={onInitialGoal}
+        onInjection={onInjection}
+        onBusyChange={setBusy}
+        onLocalStatus={setLocalStatus}
+      />
     </Box>
   );
 }

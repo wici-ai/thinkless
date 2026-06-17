@@ -13,13 +13,18 @@ const MAX_OUTPUT_LINES_PER_EVENT = 12;
 export const ExecPane = React.memo(function ExecPane({
   state,
   contentWidth = 48,
-  viewportHeight = VISIBLE_EVENTS
+  viewportHeight = VISIBLE_EVENTS,
+  showTitle = true,
+  active
 }: {
   state: RunState;
   contentWidth?: number;
   viewportHeight?: number;
+  showTitle?: boolean;
+  active?: boolean;
 }) {
   const { isFocused } = useFocus({ id: 'exec' });
+  const isActive = active ?? isFocused;
   const [scrollOffset, setScrollOffset] = useState(0);
   const rawLines = useMemo(() => codexDisplayLines(state.codexTranscript), [state.codexTranscript]);
   const fallbackLines = useMemo(() => state.events.map(formatEvent), [state.events]);
@@ -36,19 +41,21 @@ export const ExecPane = React.memo(function ExecPane({
     const wheel = mouseScrollDelta(input);
     if (wheel !== 0) setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
     else if (isMouseInput(input)) return;
-    else if (key.upArrow || input === 'k') setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
-    else if (key.downArrow || input === 'j') setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
-    else if (key.pageUp || input === 'u') setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
-    else if (key.pageDown || input === 'd') setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
-    else if (key.home || input === 'g') setScrollOffset(view.maxScroll);
-    else if (key.end || input === 'G') setScrollOffset(0);
-  }, { isActive: isFocused });
+    else if (key.upArrow) setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
+    else if (key.downArrow) setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
+    else if (key.pageUp) setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
+    else if (key.pageDown) setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
+    else if (key.home) setScrollOffset(view.maxScroll);
+    else if (key.end) setScrollOffset(0);
+  }, { isActive });
 
   return (
-    <Box flexDirection="column" height="100%" paddingX={1}>
-      <Text bold color={isFocused ? 'greenBright' : 'green'}>
-        EXECUTION
-      </Text>
+    <Box flexDirection="column" height="100%">
+      {showTitle ? (
+        <Text bold color={isActive ? 'greenBright' : 'green'}>
+          EXECUTION
+        </Text>
+      ) : null}
       <Box flexDirection="column" flexGrow={1}>
         {view.lines.map((line, index) => (
           <Text key={`${view.start + index}-${line}`} color={execLineColor(line)}>

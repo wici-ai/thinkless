@@ -80,8 +80,11 @@ spawn env FORCE_COLOR=0 TERM=xterm-256color node --import tsx src/cli.tsx tui --
 expect "CHAT"
 sleep 1
 send -- "$env(WICI_PTY_CHAT)\\r"
+send -- "\\033\\[C"
+expect -- "--- PLAN.md ---"
+send -- "\\033\\[C"
 expect {
-  "EXECUTE_DONE" {
+  "turn completed" {
     send -- "\\003"
     expect eof
     exit 0

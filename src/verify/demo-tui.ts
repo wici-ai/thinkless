@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   assert(!(await exists(paths.events)), 'fresh demo TUI must not write events.jsonl before Chat intake');
 
   const ui = stripAnsi(output);
-  assert(ui.includes('WiCi') && ui.includes('CHAT') && ui.includes('GOAL / PLAN') && ui.includes('EXECUTION'), `demo TUI did not render the three panes:\n${ui}`);
+  assert(ui.includes('WiCi') && ui.includes('CHAT') && ui.includes('PLAN') && ui.includes('EXECUTION'), `demo TUI did not render the Chat plus switchable workspace layout:\n${ui}`);
   assert(!ui.includes('Reduce p99 latency while preserving correctness'), 'demo TUI must not seed the old default goal');
   assert(!ui.includes('SUPERVISOR_START'), 'demo TUI must not start the supervisor before Chat intake');
 
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
         target,
         demo_created_target: true,
         chat_first_no_blackboard_writes: true,
-        rendered_three_panes: true
+        rendered_switchable_workspace: true
       },
       null,
       2

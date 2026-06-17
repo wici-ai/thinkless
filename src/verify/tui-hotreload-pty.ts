@@ -98,14 +98,15 @@ spawn "$env(WICI_NODE)" --import tsx src/cli.tsx tui --target "$env(WICI_PTY_TAR
 expect "CHAT"
 sleep 1
 send -- "$env(WICI_PTY_CHAT)\\r"
-expect "EXECUTE_DONE"
+send -- "\\033\\[C"
+expect -- "--- PLAN.md ---"
+send -- "\\033\\[C"
+expect "turn completed"
 sleep 1
 send -- "$env(WICI_PTY_FOLLOWUP)\\r"
 expect {
-  "PLAN_DIFF_APPLIED" {
-    exp_continue
-  }
-  "Reached max_iters=2" {
+  "total=154" {
+    expect "STOP"
     exit 0
   }
   timeout {

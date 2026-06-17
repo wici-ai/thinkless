@@ -19,13 +19,18 @@ export interface PlanDiffView {
 export const GoalPane = React.memo(function GoalPane({
   state,
   contentWidth = 42,
-  viewportHeight = 18
+  viewportHeight = 18,
+  showTitle = true,
+  active
 }: {
   state: RunState;
   contentWidth?: number;
   viewportHeight?: number;
+  showTitle?: boolean;
+  active?: boolean;
 }) {
   const { isFocused } = useFocus({ id: 'goal' });
+  const isActive = active ?? isFocused;
   const goal = state.goal;
   const previousPlan = useRef(state.plan);
   const diff = useMemo(() => buildPlanDiffView(previousPlan.current, state.plan), [state.plan]);
@@ -53,19 +58,21 @@ export const GoalPane = React.memo(function GoalPane({
     const wheel = mouseScrollDelta(input);
     if (wheel !== 0) setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
     else if (isMouseInput(input)) return;
-    else if (key.upArrow || input === 'k') setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
-    else if (key.downArrow || input === 'j') setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
-    else if (key.pageUp || input === 'u') setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
-    else if (key.pageDown || input === 'd') setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
-    else if (key.home || input === 'g') setScrollOffset(view.maxScroll);
-    else if (key.end || input === 'G') setScrollOffset(0);
-  }, { isActive: isFocused });
+    else if (key.upArrow) setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
+    else if (key.downArrow) setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
+    else if (key.pageUp) setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
+    else if (key.pageDown) setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
+    else if (key.home) setScrollOffset(view.maxScroll);
+    else if (key.end) setScrollOffset(0);
+  }, { isActive });
 
   return (
-    <Box flexDirection="column" height="100%" paddingX={1}>
-      <Text bold color={isFocused ? 'magentaBright' : 'magenta'}>
-        GOAL / PLAN {goal ? `v${goal.version}` : ''}{diff.changed ? ` d +${diff.added} -${diff.removed}` : ''}
-      </Text>
+    <Box flexDirection="column" height="100%">
+      {showTitle ? (
+        <Text bold color={isActive ? 'magentaBright' : 'magenta'}>
+          GOAL / PLAN {goal ? `v${goal.version}` : ''}{diff.changed ? ` d +${diff.added} -${diff.removed}` : ''}
+        </Text>
+      ) : null}
       <Box flexDirection="column" flexGrow={1}>
         {view.lines.map((line, index) => (
           <Text key={`${view.start + index}-${line}`} color={goalLineColor(line)}>
