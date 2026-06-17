@@ -24,6 +24,7 @@ async function main(): Promise<void> {
     runtime: await source('runtimeSettings.ts'),
     state: await source('useRunState.ts'),
     chatAgent: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'chatAgent.ts'), 'utf8'),
+    chatSession: await readFile(join(TOOL_ROOT, 'src', 'shared', 'chatSession.ts'), 'utf8'),
     chatPrompt: await readFile(join(TOOL_ROOT, 'prompts', 'chat.md'), 'utf8'),
     supervisor: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'index.ts'), 'utf8'),
     goalDoc: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'goalDoc.ts'), 'utf8'),
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
   assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'App must wake the supervisor after Chat writes an inbox injection');
   assert(files.app.includes('pendingSupervisorLaunchRef') && files.app.includes('setTimeout(() => launchSupervisor'), 'App must not drop Chat wakeups that arrive while the supervisor is still exiting');
   assert(files.app.includes('runtimeSelection') && files.app.includes('formatRuntimeSelectorLine') && files.app.includes('runtimeSelectorOpen'), 'App must expose a visible per-workspace runtime selector in the TUI');
+  assert(files.app.includes('readPersistedRuntimeSelection') && files.app.includes('writePersistedRuntimeSelection') && files.app.includes('runtimeHydrated'), 'App must restore persisted runtime before resuming Chat/supervisor sessions');
   assert(files.app.includes('<WorkspaceTabs active={workspaceTab} />') && files.app.includes('wrap="truncate-end"') && files.app.includes('height={1} justifyContent="space-between"'), 'App must render aligned one-line workspace tabs and a truncating runtime selector');
   assert(files.app.includes('const workspaceViewportHeight = Math.max(4, height - 9)') && files.app.includes('const chatViewportHeight = Math.max(4, height - 10)'), 'App must reserve rows for the tab line, pane footer, and bottom Chat input');
   assert(files.app.includes('isRuntimeSelectorToggle') && files.app.includes('cycleRuntimeValue') && files.app.includes('inputPaused={runtimeSelectorOpen}'), 'App must let users choose runtime fields from the TUI without typing into Chat');
@@ -106,11 +108,13 @@ async function main(): Promise<void> {
 
   assert(!files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && !files.chatAgent.includes('Recent Chat transcript'), 'Chat agent must not replay persisted Chat transcript into every prompt');
   assert(files.chatAgent.includes('resumeSessionId') && /'exec',\r?\n\s+'resume'/.test(files.chatAgent) && !files.chatAgent.includes("'--ephemeral'"), 'Codex Chat must persist and resume its own session instead of running ephemerally');
+  assert(files.chatAgent.includes("'--dangerously-bypass-approvals-and-sandbox'"), 'Codex Chat resume must use flags supported by codex exec resume');
   assert(files.chatAgent.includes("'danger-full-access'") && !files.chatAgent.includes("'read-only'"), 'Codex Chat must support bounded SSH/network inspection instead of read-only-only sandboxing');
   assert(!files.chatAgent.includes("'--permission-mode',\n    'plan'"), 'Claude Chat must not be forced into planner-only mode');
   assert(!files.chatAgent.includes('normalizeChatTurn') && !files.chatAgent.includes('shouldKeepInChat'), 'Chat agent must not post-filter real UPDATE decisions');
   assert(files.chatPrompt.includes('UPDATE is a handoff, not a status note') && files.chatPrompt.includes('If a lightweight direct task fails'), 'Chat prompt must raise the source UPDATE threshold instead of filtering after the fact');
-  assert(files.chatAgent.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatAgent.includes("writeChatSession(ctx.paths, 'codex'"), 'Chat sessions must be stored by agent so runtime changes do not overwrite another agent session');
+  assert(files.chatSession.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatSession.includes('runtime_selection') && files.chatSession.includes('readPersistedRuntimeSelection'), 'Chat sessions must store per-agent sessions and persisted runtime for TUI resume');
+  assert(files.chatAgent.includes("writeChatSession(ctx.paths, 'codex'") && files.chatAgent.includes("agent: 'codex'"), 'Codex Chat must persist its session together with runtime metadata');
   assert(!files.chatAgent.includes('normalizeChatTurnResult'), 'Chat agent must trust real agent UPDATE decisions instead of normalizing them with local prompt hacks');
   assert(files.chatAgent.includes('shouldStartPlannerFromBlankChat') && files.chatAgent.includes('hasConcreteActionIntent'), 'Chat fallback must use a generalized action-intent guard only when the agent is degraded');
   assert(files.types.includes('planningContext?: string'), 'RunOptions must carry planningContext from TUI to supervisor');

@@ -25,10 +25,22 @@ async function main(): Promise<void> {
   assert(!ui.includes('SUPERVISOR_START'), 'demo TUI must not start the supervisor before Chat intake');
 
   await mkdir(paths.wici, { recursive: true });
-  await writeFile(paths.chatSession, `${JSON.stringify({ sessions: { claude: { session_id: 'preserve-demo-session' } } }, null, 2)}\n`);
-  await runDemo([]);
+  await writeFile(
+    paths.chatSession,
+    `${JSON.stringify(
+      {
+        runtime_selection: { chat: { agent: 'codex', model: 'gpt-5.5', effort: 'high' } },
+        sessions: { codex: { session_id: 'preserve-demo-session', updated_at: '2026-06-18T00:00:00.000Z' } }
+      },
+      null,
+      2
+    )}\n`
+  );
+  const reopenedOutput = await runDemo([]);
   const session = await readFile(paths.chatSession, 'utf8');
   assert(session.includes('preserve-demo-session'), 'demo without --fresh must preserve existing .wici chat session context');
+  const reopenedUi = stripAnsi(reopenedOutput);
+  assert(reopenedUi.includes('CHAT agent=codex') && reopenedUi.includes('effort=high') && reopenedUi.includes('model=gpt-5.5'), `demo without --fresh must restore persisted Chat runtime:\n${reopenedUi}`);
 
   console.log(
     JSON.stringify(
@@ -38,7 +50,8 @@ async function main(): Promise<void> {
         demo_created_target: true,
         chat_first_no_blackboard_writes: true,
         rendered_switchable_workspace: true,
-        non_fresh_preserves_chat_session: true
+        non_fresh_preserves_chat_session: true,
+        non_fresh_restores_chat_runtime: true
       },
       null,
       2
@@ -52,7 +65,7 @@ async function runDemo(extraArgs: string[]): Promise<string> {
     ['--import', 'tsx', 'src/cli.tsx', 'demo', '--target', target, ...extraArgs, '--max-iters', '1', '--mode', 'stub', '--no-fullscreen'],
     {
       cwd: resolve('.'),
-      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1' },
+      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1', WICI_TUI_RENDER_ONCE_DELAY_MS: '700' },
       stdio: ['ignore', 'pipe', 'pipe']
     }
   );

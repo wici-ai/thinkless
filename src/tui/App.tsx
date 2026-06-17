@@ -8,6 +8,8 @@ import { useRunState } from './useRunState.js';
 import { runSupervisor } from '../supervisor/index.js';
 import type { RunOptions, ToolMode } from '../shared/types.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
+import { readPersistedRuntimeSelection, writePersistedRuntimeSelection } from '../shared/chatSession.js';
+import { runPaths } from '../shared/paths.js';
 import { enableMouseReporting, parseMouseInput } from './input.js';
 import { appendSupervisorError } from './supervisorLog.js';
 import {
@@ -59,9 +61,42 @@ export function App({
   const [chatBusy, setChatBusy] = useState(false);
   const [chatLocalStatus, setChatLocalStatus] = useState<string | null>(null);
   const [runtimeSelection, setRuntimeSelection] = useState(defaultRuntimeSelection);
+  const [runtimeHydrated, setRuntimeHydrated] = useState(false);
   const [runtimeSelectorOpen, setRuntimeSelectorOpen] = useState(false);
   const [runtimeField, setRuntimeField] = useState<RuntimeField>('agent');
   const runtimePane = runtimePaneFromWorkspace(workspaceTab);
+  const runtimeSignatureRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const paths = runPaths(target);
+    setRuntimeHydrated(false);
+    void readPersistedRuntimeSelection(paths).then((persisted) => {
+      if (!alive) return;
+      const next = persisted ?? defaultRuntimeSelection();
+      runtimeSignatureRef.current = JSON.stringify(next);
+      setRuntimeSelection(next);
+      setRuntimeHydrated(true);
+    }).catch((error: unknown) => {
+      if (!alive) return;
+      runtimeSignatureRef.current = JSON.stringify(defaultRuntimeSelection());
+      setRuntimeHydrated(true);
+      setChatLocalStatus(`runtime restore failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [target]);
+
+  useEffect(() => {
+    if (!runtimeHydrated) return;
+    const signature = JSON.stringify(runtimeSelection);
+    if (signature === runtimeSignatureRef.current) return;
+    runtimeSignatureRef.current = signature;
+    void writePersistedRuntimeSelection(runPaths(target), runtimeSelection).catch((error: unknown) => {
+      setChatLocalStatus(`runtime save failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, [runtimeHydrated, runtimeSelection, target]);
 
   const launchSupervisor = useCallback(
     (goal?: string, goalSource?: RunOptions['goalSource'], planningContext?: string) => {
@@ -100,14 +135,14 @@ export function App({
   );
 
   useEffect(() => {
-    if (!supervisor.enabled || !supervisor.initialGoal) return;
+    if (!runtimeHydrated || !supervisor.enabled || !supervisor.initialGoal) return;
     launchSupervisor(supervisor.initialGoal, 'tui_goal_option');
-  }, [launchSupervisor, supervisor.enabled, supervisor.initialGoal]);
+  }, [launchSupervisor, runtimeHydrated, supervisor.enabled, supervisor.initialGoal]);
 
   useEffect(() => {
-    if (!supervisor.enabled || supervisor.initialGoal || !shouldAutoStartExistingRun(state)) return;
+    if (!runtimeHydrated || !supervisor.enabled || supervisor.initialGoal || !shouldAutoStartExistingRun(state)) return;
     launchSupervisor(undefined);
-  }, [launchSupervisor, state.goal, state.checkpoint?.supervisor_state, supervisor.enabled, supervisor.initialGoal]);
+  }, [launchSupervisor, runtimeHydrated, state.goal, state.checkpoint?.supervisor_state, supervisor.enabled, supervisor.initialGoal]);
 
   useEffect(() => {
     if (!interactive) return;

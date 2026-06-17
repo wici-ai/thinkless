@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { appendJsonLine, atomicWriteJson, ensureDir, readJsonFileMaybe } from '../shared/atomic.js';
+import { appendJsonLine, ensureDir } from '../shared/atomic.js';
 import { commandExists } from '../shared/commands.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
+import { readChatSession, writeChatSession } from '../shared/chatSession.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
 import { runtimeAgentFromCommand } from '../shared/runtime.js';
@@ -99,7 +100,7 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
 
     const parsed = parseChatResponse(result.stdout);
     if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, `${label} returned no usable reply.`);
-    if (parsed.sessionId) await writeChatSession(ctx.paths, agent, parsed.sessionId);
+    if (parsed.sessionId) await writeChatSession(ctx.paths, agent, parsed.sessionId, { agent, model: chatTool.model, effort: chatTool.effort });
     // Respect the agent's judgment: a reply with no UPDATE is pure conversation.
     return { reply: parsed.reply, update: parsed.update, degraded: false };
   } catch (error) {
@@ -121,19 +122,17 @@ async function runCodexChatTurn(
 ): Promise<ChatTurnResult> {
   await ensureDir(ctx.paths.artifacts);
   const outputLastMessage = join(ctx.paths.artifacts, `chat-codex-${Date.now()}.txt`);
-  let result = await runCodexChatProcess(ctx, command, input, outputLastMessage, input.sessionId);
-  if (input.sessionId && (result.timeoutReason || result.exitCode !== 0)) {
-    result = await runCodexChatProcess(ctx, command, input, outputLastMessage, undefined);
-  }
+  const result = await runCodexChatProcess(ctx, command, input, outputLastMessage, input.sessionId);
   if (result.timeoutReason || result.exitCode !== 0) {
-    return buildFallbackChatTurn(ctx, result.timeoutReason ? `Codex Chat timed out: ${result.timeoutReason}.` : `Codex Chat exited with code ${result.exitCode}.`);
+    const action = input.sessionId ? 'resume failed' : 'exited';
+    return buildFallbackChatTurn(ctx, result.timeoutReason ? `Codex Chat ${action}: timed out (${result.timeoutReason}).` : `Codex Chat ${action} with code ${result.exitCode}.`);
   }
 
   const finalMessage = await readTextMaybe(outputLastMessage);
   const parsed = parseChatFinalMessage(finalMessage) ?? parseCodexChatResponse(result.stdout);
   if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, 'Codex Chat returned no usable reply.');
   const sessionId = parsed.sessionId ?? extractCodexSessionId(result.stdout) ?? input.sessionId;
-  if (sessionId) await writeChatSession(ctx.paths, 'codex', sessionId);
+  if (sessionId) await writeChatSession(ctx.paths, 'codex', sessionId, { agent: 'codex', model: input.model, effort: input.effort });
   return { reply: parsed.reply, update: parsed.update, degraded: false };
 }
 
@@ -297,8 +296,7 @@ export function buildCodexChatArgs(input: {
       'resume',
       ...codexModelArgs(input.model),
       ...codexEffortArgs(input.effort),
-      '--sandbox',
-      'danger-full-access',
+      '--dangerously-bypass-approvals-and-sandbox',
       '--json',
       '--output-last-message',
       input.outputLastMessage,
@@ -546,33 +544,6 @@ function recordValue(value: unknown): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
-}
-
-type ChatSessionAgent = 'claude' | 'codex';
-
-interface ChatSessionFile {
-  session_id?: string;
-  updated_at?: string;
-  sessions?: Partial<Record<ChatSessionAgent, { session_id?: string; updated_at?: string }>>;
-}
-
-async function readChatSession(paths: RunPaths, agent: ChatSessionAgent): Promise<string | undefined> {
-  const data = await readJsonFileMaybe<ChatSessionFile>(paths.chatSession);
-  return data?.sessions?.[agent]?.session_id ?? (agent === 'claude' ? data?.session_id : undefined);
-}
-
-async function writeChatSession(paths: RunPaths, agent: ChatSessionAgent, sessionId: string): Promise<void> {
-  const current = (await readJsonFileMaybe<ChatSessionFile>(paths.chatSession)) ?? {};
-  const updatedAt = timestamp();
-  await atomicWriteJson(paths.chatSession, {
-    ...current,
-    ...(agent === 'claude' ? { session_id: sessionId } : {}),
-    updated_at: updatedAt,
-    sessions: {
-      ...(current.sessions ?? {}),
-      [agent]: { session_id: sessionId, updated_at: updatedAt }
-    }
-  });
 }
 
 async function appendChat(paths: RunPaths, entry: ChatLogEntry): Promise<void> {

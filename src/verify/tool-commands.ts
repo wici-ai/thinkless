@@ -17,6 +17,7 @@ import { ensureRunDirs, promptPath, runPaths, schemaPath } from '../shared/paths
 import { parsePlanSteps } from '../supervisor/plan.js';
 import { atomicWriteJson, exists } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
+import { readPersistedRuntimeSelection } from '../shared/chatSession.js';
 import type { GoalFile, WiCiConfig } from '../shared/types.js';
 import { resolveMaxIters } from '../supervisor/index.js';
 
@@ -127,6 +128,7 @@ async function main(): Promise<void> {
   assert(!codexChatArgs.includes('--ephemeral'), 'Codex Chat must persist its own session instead of running ephemerally');
   assert(resumeCodexChatArgs[0] === 'exec' && resumeCodexChatArgs[1] === 'resume', `Codex Chat follow-up must resume its session: ${resumeCodexChatArgs.join(' ')}`);
   assert(resumeCodexChatArgs.includes('chat-session-123') && !resumeCodexChatArgs.includes('-C'), `Codex Chat resume must use the session id and spawn cwd, not -C: ${resumeCodexChatArgs.join(' ')}`);
+  assert(resumeCodexChatArgs.includes('--dangerously-bypass-approvals-and-sandbox') && !resumeCodexChatArgs.includes('--sandbox'), `Codex Chat resume must use flags supported by codex exec resume: ${resumeCodexChatArgs.join(' ')}`);
   assert(resumeCodexChatArgs.includes('model_reasoning_effort="xhigh"'), 'Codex Chat resume must apply changed effort without changing session');
   assert(extractCodexSessionId(JSON.stringify({ type: 'thread.started', thread_id: 'chat-session-123' })) === 'chat-session-123', 'Codex Chat must extract thread_id session ids');
   assert(!plannerArgs[plannerArgs.indexOf('-p') + 1].includes('ULTRAPLAN'), 'planner prompt must not force ultra/high-effort wording');
@@ -451,9 +453,18 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     assert(!argsLog[0].args.includes('--ephemeral'), `first Codex Chat call must not be ephemeral: ${JSON.stringify(argsLog[0].args)}`);
     assert(argsLog[1].args[0] === 'exec' && argsLog[1].args[1] === 'resume', `second Codex Chat call must resume: ${JSON.stringify(argsLog[1].args)}`);
     assert(argsLog[1].args.includes('fake-codex-chat-session'), `second Codex Chat call must resume the recorded chat session: ${JSON.stringify(argsLog[1].args)}`);
+    assert(argsLog[1].args.includes('--dangerously-bypass-approvals-and-sandbox') && !argsLog[1].args.includes('--sandbox'), `Codex Chat resume used unsupported sandbox args: ${JSON.stringify(argsLog[1].args)}`);
     assert(argsLog[1].args.includes('model_reasoning_effort="xhigh"'), `second Codex Chat call must apply the changed effort: ${JSON.stringify(argsLog[1].args)}`);
-    const session = JSON.parse(await readFile(paths.chatSession, 'utf8')) as { sessions?: { codex?: { session_id?: string } } };
+    const session = JSON.parse(await readFile(paths.chatSession, 'utf8')) as { runtime_selection?: { chat?: { agent?: string; effort?: string } }; sessions?: { codex?: { session_id?: string; runtime?: { agent?: string; effort?: string } } } };
     assert(session.sessions?.codex?.session_id === 'fake-codex-chat-session', `Codex Chat session was not stored by agent: ${JSON.stringify(session)}`);
+    assert(session.sessions.codex.runtime?.agent === 'codex' && session.sessions.codex.runtime.effort === 'xhigh', `Codex Chat session did not persist runtime: ${JSON.stringify(session)}`);
+    assert(session.runtime_selection?.chat?.agent === 'codex' && session.runtime_selection.chat.effort === 'xhigh', `Codex Chat did not persist TUI runtime selection: ${JSON.stringify(session)}`);
+    const restored = await readPersistedRuntimeSelection(paths);
+    assert(restored?.chat?.agent === 'codex' && restored.chat.effort === 'xhigh', `persisted runtime did not restore Codex Chat settings: ${JSON.stringify(restored)}`);
+
+    await writeFile(paths.chatSession, `${JSON.stringify({ sessions: { codex: { session_id: 'legacy-codex-session', updated_at: '2026-06-18T00:00:00.000Z' } } }, null, 2)}\n`);
+    const legacyRestored = await readPersistedRuntimeSelection(paths);
+    assert(legacyRestored?.chat?.agent === 'codex' && legacyRestored.chat.effort === 'medium', `legacy Codex session should restore Codex with default effort: ${JSON.stringify(legacyRestored)}`);
   } finally {
     process.env.PATH = originalPath;
     if (originalTarget === undefined) delete process.env.WICI_CODEX_CHAT_TARGET;
