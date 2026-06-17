@@ -51,7 +51,7 @@ export async function startCodexAppServerTurn(input: {
   artifactId: string;
   onRawNotification?: (line: string, usage: ToolUsageSummary, method?: string) => Promise<void>;
 }): Promise<CodexAppTurn> {
-  const client = new CodexAppServerClient(input.config.tools.executor.command, input.paths);
+  const client = new CodexAppServerClient(input.config.tools.executor.command, input.paths, input.config.tools.executor.effort);
   await client.start();
   let usage = emptyUsageSummary();
   let stdout = '';
@@ -191,10 +191,10 @@ class CodexAppServerClient {
   private stderr = '';
   onNotification?: (message: JsonRpcMessage, raw: string) => Promise<void>;
 
-  constructor(private readonly command: string, private readonly paths: RunPaths) {}
+  constructor(private readonly command: string, private readonly paths: RunPaths, private readonly effort?: string) {}
 
   async start(): Promise<void> {
-    this.child = spawn(this.command, ['app-server', '--listen', 'stdio://'], {
+    this.child = spawn(this.command, ['app-server', ...codexEffortArgs(this.effort), '--listen', 'stdio://'], {
       cwd: this.paths.target,
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -297,6 +297,12 @@ class CodexAppServerClient {
     const result = responseForServerRequest(message.method ?? '');
     this.child.stdin.write(`${JSON.stringify({ id: message.id, result })}\n`);
   }
+}
+
+function codexEffortArgs(effort: string | undefined): string[] {
+  const normalized = effort?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['-c', `model_reasoning_effort=${JSON.stringify(normalized)}`];
 }
 
 function responseForServerRequest(method: string): unknown {

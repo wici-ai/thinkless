@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { execa } from 'execa';
 import { appendJsonLine, atomicWriteJson, readJsonFileMaybe } from '../shared/atomic.js';
-import { loadConfig } from '../shared/config.js';
+import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
-import type { ChatLogEntry, RunEvent, ToolMode } from '../shared/types.js';
+import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput } from './claudeOutput.js';
 import { runClaudeStreamProcess } from './claudeProcess.js';
@@ -28,6 +28,8 @@ export interface ChatTurnContext {
   plan: string;
   recentEvents: RunEvent[];
   mode?: ToolMode;
+  runtime?: RuntimeSelection;
+  writeUpdate?: boolean;
 }
 
 export interface ChatTurnResult {
@@ -49,7 +51,7 @@ export interface ChatTurnResult {
 export async function runChatTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
   await appendChat(ctx.paths, { ts: timestamp(), role: 'user', text: ctx.userText });
   const result = await conversationTurn(ctx);
-  if (result.update) {
+  if (result.update && ctx.writeUpdate !== false) {
     await writeInjection(ctx.paths, { kind: result.update.kind, text: result.update.text, priority: 'normal' });
   }
   await appendChat(ctx.paths, {
@@ -63,9 +65,10 @@ export async function runChatTurn(ctx: ChatTurnContext): Promise<ChatTurnResult>
 
 async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
   try {
-    const config = await loadConfig(ctx.mode);
+    const config = applyRuntimeSelection(await loadConfig(ctx.mode), ctx.runtime);
     if (config.tools.mode === 'stub') return buildFallbackChatTurn(ctx, 'Claude Chat is unavailable in stub mode.');
-    const command = config.tools.planner.command;
+    const chatTool = config.tools.chat ?? { command: config.tools.planner.command, model: undefined, effort: 'default' };
+    const command = chatTool.command ?? config.tools.planner.command;
     if (!(await commandExists(command))) return buildFallbackChatTurn(ctx, `Claude Chat command not found: ${command}.`);
 
     const systemPrompt = await readFile(promptPath('chat'), 'utf8');
@@ -73,14 +76,14 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
     const userPrompt = buildChatPrompt(ctx);
     const sessionId = await readChatSession(ctx.paths);
 
-    let result = await runClaudeStreamProcess(command, buildChatArgs({ userPrompt, systemPrompt, safetyText, sessionId }), {
+    let result = await runClaudeStreamProcess(command, buildChatArgs({ userPrompt, systemPrompt, safetyText, sessionId, model: chatTool.model, effort: chatTool.effort }), {
       cwd: ctx.paths.target,
       idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS,
       hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
     });
     // A stale/rejected resume session is common; retry once as a fresh session.
     if (sessionId && (result.exitCode !== 0 || result.timeoutReason)) {
-      result = await runClaudeStreamProcess(command, buildChatArgs({ userPrompt, systemPrompt, safetyText }), {
+      result = await runClaudeStreamProcess(command, buildChatArgs({ userPrompt, systemPrompt, safetyText, model: chatTool.model, effort: chatTool.effort }), {
         cwd: ctx.paths.target,
         idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS,
         hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
@@ -102,6 +105,18 @@ export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Claude Cha
   if (isLikelyQuestion(ctx.userText)) {
     return {
       reply: buildFallbackStatusReply(ctx, reason),
+      degraded: true
+    };
+  }
+  if (isBlankRunContext(ctx) && isLikelyContextGatheringOnly(ctx.userText)) {
+    return {
+      reply: `Chat agent is currently unavailable (${reason}). I did not start the planner because this looks like a request to inspect or discuss the codebase first, not a concrete execution goal yet.`,
+      degraded: true
+    };
+  }
+  if (isBlankRunContext(ctx) && !isLikelyPlanningRequest(ctx.userText)) {
+    return {
+      reply: `Chat agent is currently unavailable (${reason}). I kept this as conversation and did not start the planner. Ask for a plan or give a concrete build/fix/execute request when ready.`,
       degraded: true
     };
   }
@@ -137,6 +152,10 @@ function currentPlanStep(plan: string): string | undefined {
   return pending?.trim();
 }
 
+function isBlankRunContext(ctx: ChatTurnContext): boolean {
+  return !ctx.goalDoc.trim() && !ctx.plan.trim() && ctx.recentEvents.length === 0;
+}
+
 function isLikelyQuestion(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (!normalized) return false;
@@ -144,7 +163,29 @@ function isLikelyQuestion(text: string): boolean {
   return /(进展|状态|怎么样|咋回事|怎么回事|为什么|为何|吗|么|是否|是不是|有没有|哪里|多少|何时|什么时候|how|what|why|status|progress|running|stuck|error)/i.test(normalized);
 }
 
-export function buildChatArgs(input: { userPrompt: string; systemPrompt: string; safetyText?: string; sessionId?: string }): string[] {
+function isLikelyContextGatheringOnly(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  const wantsInspection = /(阅读|读一下|看一下|看看|了解|熟悉|分析一下|先看|inspect|read|explore|understand|look over|take a look)/i.test(normalized);
+  if (!wantsInspection) return false;
+  const asksForPlanOrExecution = /(plan|规划|计划|制定计划|执行|开始|start|run|implement|build|fix|optimi[sz]e|修复|实现|开发|优化)/i.test(normalized);
+  return !asksForPlanOrExecution || /(先|first|before|暂时|先别|不要开始)/i.test(normalized);
+}
+
+function isLikelyPlanningRequest(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  return /(plan|规划|计划|制定|执行|开始|start|run|implement|build|create|add|fix|repair|optimi[sz]e|ship|改|修|修复|实现|开发|优化|新增|创建|完成|做到|要求|目标)/i.test(normalized);
+}
+
+export function buildChatArgs(input: {
+  userPrompt: string;
+  systemPrompt: string;
+  safetyText?: string;
+  sessionId?: string;
+  model?: string;
+  effort?: string;
+}): string[] {
   return [
     '-p',
     input.userPrompt,
@@ -152,12 +193,26 @@ export function buildChatArgs(input: { userPrompt: string; systemPrompt: string;
     '--output-format',
     'stream-json',
     '--verbose',
+    ...claudeModelArgs(input.model),
+    ...claudeEffortArgs(input.effort),
     '--permission-mode',
     'plan',
     '--dangerously-skip-permissions',
     '--append-system-prompt',
     appendSafety(input.systemPrompt, input.safetyText ?? '')
   ];
+}
+
+function claudeModelArgs(model: string | undefined): string[] {
+  const normalized = model?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['--model', normalized];
+}
+
+function claudeEffortArgs(effort: string | undefined): string[] {
+  const normalized = effort?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['--effort', normalized];
 }
 
 function buildChatPrompt(ctx: ChatTurnContext): string {

@@ -57,7 +57,7 @@ program
 
 program
   .command('tui')
-  .description('Open the three-pane TUI')
+  .description('Open the Chat-first TUI')
   .requiredOption('--target <path>', 'target repository')
   .option('--goal <text>', 'initial goal')
   .option('--max-iters <n>', 'max iterations', (value) => Number(value))

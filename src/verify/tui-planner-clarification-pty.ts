@@ -100,8 +100,14 @@ send -- "$env(WICI_PTY_CHAT)\\r"
 expect "Which remote target"
 sleep 1
 send -- "$env(WICI_PTY_ANSWER)\\r"
+send -- "\\033\\[C"
+expect -- "--- PLAN.md ---"
+send -- "\\033\\[C"
 expect {
   "Reached max_iters=0" {
+    exit 0
+  }
+  "STOP" {
     exit 0
   }
   timeout {
@@ -128,6 +134,7 @@ if (args[0] === 'update') {
   process.exit(0);
 }
 const prompt = args[args.indexOf('-p') + 1] || '';
+const systemPrompt = args[args.indexOf('--append-system-prompt') + 1] || '';
 const isResume = args.includes('--resume');
 function emit(payload) {
   console.log(JSON.stringify({
@@ -136,6 +143,19 @@ function emit(payload) {
     session_id: 'fake-planner-session',
     result: payload
   }));
+}
+if (systemPrompt.includes("WiCi's Chat agent") || prompt.includes('User message:')) {
+  emit([
+    '## REPLY',
+    '',
+    'I will start the planner with this benchmark request.',
+    '',
+    '## UPDATE',
+    '',
+    'kind: requirement',
+    '${firstChat}'
+  ].join('\\n'));
+  process.exit(0);
 }
 if (!isResume && prompt.includes('${firstChat}')) {
   emit('## QUESTION\\n\\nWhich remote target should the planner use for this benchmark?');

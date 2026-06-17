@@ -1,7 +1,7 @@
 import { chmod } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
-import { loadConfig } from '../shared/config.js';
+import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.js';
 import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, IterResult, LedgerEntry, RunOptions, ToolInvocationResult, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
 import { hashFile, iterationSnapshotPath, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
@@ -72,6 +72,7 @@ export interface SupervisorResult {
 
 export async function runSupervisor(options: RunOptions): Promise<SupervisorResult> {
   const config = await loadConfig(options.mode);
+  applyRuntimeSelection(config, options.runtime);
   if (options.lockMode) config.evaluation.lock_mode = options.lockMode;
   const paths = runPaths(options.target);
   await ensureRunDirs(paths);

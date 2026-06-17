@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
+import { buildChatArgs } from '../supervisor/chatAgent.js';
 import {
   buildInitialPlannerArgs,
   buildInitialPlannerResumeArgs,
@@ -15,7 +16,7 @@ import {
 import { ensureRunDirs, promptPath, runPaths, schemaPath } from '../shared/paths.js';
 import { parsePlanSteps } from '../supervisor/plan.js';
 import { atomicWriteJson, exists } from '../shared/atomic.js';
-import { loadConfig } from '../shared/config.js';
+import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import type { GoalFile, WiCiConfig } from '../shared/types.js';
 import { resolveMaxIters } from '../supervisor/index.js';
 
@@ -26,11 +27,26 @@ async function main(): Promise<void> {
     effort: 'default',
     systemPrompt: 'planner prompt'
   });
+  const customPlannerArgs = buildInitialPlannerArgs({
+    goalText: 'test',
+    effort: 'high',
+    model: 'claude-sonnet-test',
+    systemPrompt: 'planner prompt'
+  });
   const diffArgs = buildPlanDiffArgs({
     newText: 'new requirement',
     currentPlan: '# plan',
     goalText: '# GOAL\n\n## Requirements\n- [active] R1: test\n',
     sessionId: 'session-123',
+    systemPrompt: 'diff prompt'
+  });
+  const customDiffArgs = buildPlanDiffArgs({
+    newText: 'new requirement',
+    currentPlan: '# plan',
+    goalText: '# GOAL\n\n## Requirements\n- [active] R1: test\n',
+    sessionId: 'session-123',
+    model: 'claude-opus-test',
+    effort: 'xhigh',
     systemPrompt: 'diff prompt'
   });
   const resumeArgs = buildInitialPlannerResumeArgs({
@@ -40,6 +56,12 @@ async function main(): Promise<void> {
     answer: 'Use the host in the chat request.',
     effort: 'default',
     systemPrompt: 'planner prompt'
+  });
+  const chatArgs = buildChatArgs({
+    userPrompt: 'hello',
+    systemPrompt: 'chat prompt',
+    model: 'claude-chat-test',
+    effort: 'low'
   });
   const firstCodex = buildExecutorArgs({
     iter: 1,
@@ -63,10 +85,24 @@ async function main(): Promise<void> {
     prompt: 'execute cheaply',
     model: 'gpt-5.3-codex-spark'
   });
+  const highEffortCodex = buildExecutorArgs({
+    iter: 1,
+    target: resolve('fixture/slow-target'),
+    artifactPath: '.wici/artifacts/iter-high.txt',
+    schemaPath: schemaPath('iter-result'),
+    prompt: 'execute carefully',
+    effort: 'high'
+  });
 
   assert(plannerArgs[plannerArgs.indexOf('--output-format') + 1] === 'stream-json', 'initial planner must stream JSON for progress visibility');
   assert(plannerArgs.includes('--verbose'), 'stream-json planner output must use Claude verbose mode');
   assert(!plannerArgs.includes('--effort'), 'initial planner must omit --effort for Claude default effort fast validation runs');
+  assert(customPlannerArgs[customPlannerArgs.indexOf('--model') + 1] === 'claude-sonnet-test', 'planner must support explicit model selection');
+  assert(customPlannerArgs[customPlannerArgs.indexOf('--effort') + 1] === 'high', 'planner must support explicit effort selection');
+  assert(customDiffArgs[customDiffArgs.indexOf('--model') + 1] === 'claude-opus-test', 'planner diff must support explicit model selection');
+  assert(customDiffArgs[customDiffArgs.indexOf('--effort') + 1] === 'xhigh', 'planner diff must support explicit effort selection');
+  assert(chatArgs[chatArgs.indexOf('--model') + 1] === 'claude-chat-test', 'Chat agent must support explicit model selection');
+  assert(chatArgs[chatArgs.indexOf('--effort') + 1] === 'low', 'Chat agent must support explicit effort selection');
   assert(!plannerArgs[plannerArgs.indexOf('-p') + 1].includes('ULTRAPLAN'), 'planner prompt must not force ultra/high-effort wording');
   assert(!plannerArgs.includes('--json-schema'), 'initial planner must not use a JSON schema as a second PLAN');
   assert(!diffArgs.includes('--json-schema'), 'diff planner must not use a JSON schema as a second PLAN');
@@ -247,7 +283,18 @@ async function main(): Promise<void> {
   assert(!resumeCodex.includes('-C'), `codex resume must rely on process cwd instead of unsupported -C: ${resumeCodex.join(' ')}`);
   assert(!firstCodex.includes('gpt-5.3-codex-spark'), 'spark model must not be hardcoded into default executor args');
   assert(sparkCodex[sparkCodex.indexOf('--model') + 1] === 'gpt-5.3-codex-spark', 'executor must support explicit model override for real canaries');
+  assert(highEffortCodex.includes('-c') && highEffortCodex.includes('model_reasoning_effort="high"'), 'executor must map effort selection to Codex config override');
   const loadedConfig = await loadConfig('stub');
+  assert(loadedConfig.tools.chat?.command === 'claude', 'default config should expose Chat agent command');
+  assert(loadedConfig.tools.chat?.model === 'opus4.8' && loadedConfig.tools.planner.model === 'opus4.8', 'Claude-backed panes must force opus4.8 by default');
+  assert(loadedConfig.tools.chat?.effort === 'high' && loadedConfig.tools.planner.effort === 'high', 'Claude-backed panes must default to high effort');
+  assert(loadedConfig.tools.executor.model === 'gpt5.5' && loadedConfig.tools.executor.effort === 'medium', 'Codex-backed executor must force gpt5.5 medium by default');
+  const switchedConfig = await loadConfig('stub');
+  applyRuntimeSelection(switchedConfig, { planner: { agent: 'codex', effort: 'fast' }, executor: { agent: 'claude', effort: 'ultracode' } });
+  assert(switchedConfig.tools.planner.command === 'codex', 'runtime agent switch must allow planner pane to select codex');
+  assert(switchedConfig.tools.planner.model === 'gpt5.5' && switchedConfig.tools.planner.effort === 'fast', 'codex agent selection must force gpt5.5 and codex effort options');
+  assert(switchedConfig.tools.executor.command === 'claude', 'runtime agent switch must allow execution pane to select claude');
+  assert(switchedConfig.tools.executor.model === 'opus4.8' && switchedConfig.tools.executor.effort === 'ultracode', 'claude agent selection must force opus4.8 and claude effort options');
   assert(loadedConfig.budget.max_iters === 0, 'default config max_iters=0 should disable WiCi iteration hard caps for real runs');
   assert(resolveMaxIters(undefined, loadedConfig.budget.max_iters) === Number.POSITIVE_INFINITY, 'configured max_iters=0 should resolve to unbounded');
   assert(resolveMaxIters(0, loadedConfig.budget.max_iters) === 0, 'explicit --max-iters 0 should remain a setup-only run limit');
@@ -275,7 +322,7 @@ async function main(): Promise<void> {
         plan_diff_usage_streamed: true,
         no_markdown_benchmark_inference: true,
         codex_output_schema_strict: true,
-        codex_model_override: true,
+        forced_agent_models: true,
         default_iteration_budget_unbounded: true,
         codex_resume_structured_output_flags: true
       },

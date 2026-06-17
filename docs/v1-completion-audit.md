@@ -10,9 +10,10 @@ This audit records what is currently proven, what is covered by automated checks
 | Requirement | Evidence | Status |
 | --- | --- | --- |
 | Local TUI: bottom Chat input plus a switchable Chat History / Goal/Plan / Execution workspace | `npm run verify:tui-structure`, `npm run verify:demo-tui`, `npm run verify:tui-live` | Covered |
-| Chat is the first intake for a blank run | `npm run verify:tui-chat-intake` | Covered |
+| Chat is the first intake for a blank run, but first input is not automatically an initial goal | `npm run verify:tui-chat-intake` reports `blank_chat_routes_through_agent`, `degraded_inspection_does_not_start_planner`, and `degraded_plan_request_starts_planner` | Covered |
 | Real pseudo-terminal Chat input can submit the first blank-run goal and start execution | `npm run verify:tui-chat-pty` report `pty_chat_first` and `goal_source: tui_chat` | Covered |
 | Chat-first TUI can drive the real-mode planner/executor subprocess path without using stub execution | `npm run verify:tui-real-fake-chat` report `pty_chat_first_real_mode_fake_clis`, `PLAN_USAGE`, and `EXECUTE_PROGRESS` evidence | Covered |
+| TUI exposes per-workspace Chat / PLAN / EXECUTION agent and effort selection, with model fixed by agent | `npm run verify:tui-structure`; `npm run verify:tool-commands` | Covered |
 | Real pseudo-terminal Chat input can answer planner clarification questions and resume the planner session | `npm run verify:tui-planner-clarification-pty` report `pty_planner_clarification`, `question_answered`, and `planner_session` | Covered |
 | Chat pane restores current goal, user steering, and planner answers from the blackboard without repeating the initial goal in transcript history | `npm run verify:tui-structure`, `npm run verify:v1-requirements` | Covered |
 | TUI does not directly write supervisor-owned GOAL/PLAN/checkpoint/ledger/event files; only ChatPane writes inbox injections | `npm run verify:tui-structure` report `chat_writes_only_inbox`, `goal_and_exec_read_only`, and static file-write API checks | Covered |
@@ -55,7 +56,7 @@ This audit records what is currently proven, what is covered by automated checks
 | Legacy optimizer behavior remains isolated from fresh V1 and is checked through an explicit aggregate | `npm run verify:legacy-optimizer`; README legacy optimizer section | Covered |
 | Codex transcript is saved for real canaries | `npm run verify:tag-gate`, evidence bundle `.wici/codex-run.jsonl` | Covered |
 | Codex token usage is captured | `npm run verify:codex-run-usage`, `npm run verify:executor-contract`, `npm run verify:app-server-hotreload` | Covered |
-| Codex model can be overridden for real validation without hardcoding | `npm run verify:tool-commands` | Covered |
+| Chat, planner, and executor agent/effort can be selected while models stay fixed to opus4.8 or gpt5.5 | `npm run verify:tool-commands` | Covered |
 | `codex exec resume` avoids unsupported `-C` | `npm run verify:executor-contract`, `npm run verify:tool-commands` | Covered |
 | Existing `GOAL.md` / `PLAN.md` can continue without passing a new `--goal` | `npm run verify:existing-goal` report `continued_without_new_goal` and `reused_goal_run_id` | Covered |
 | Executor failures and timeouts are recoverable long-goal events, not immediate whole-goal blockers | `npm run verify:direct-recovery` report `recoverable_failure`, `ledger_rows: 2`, and `resumed_executor`; code emits `EXECUTE_RECOVERABLE_FAILURE` and continues with `codex exec resume --last` | Covered |

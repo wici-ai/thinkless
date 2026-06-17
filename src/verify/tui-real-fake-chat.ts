@@ -109,6 +109,26 @@ if (args.includes('--json-schema')) {
   console.log(JSON.stringify({ ok: true }));
   process.exit(0);
 }
+const prompt = args[args.indexOf('-p') + 1] || '';
+const systemPrompt = args[args.indexOf('--append-system-prompt') + 1] || '';
+if (systemPrompt.includes("WiCi's Chat agent") || prompt.includes('User message:')) {
+  console.log(JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    session_id: 'fake-real-tui-chat',
+    result: [
+      '## REPLY',
+      '',
+      'I have enough to start planning.',
+      '',
+      '## UPDATE',
+      '',
+      'kind: requirement',
+      '${firstChat}'
+    ].join('\\n')
+  }));
+  process.exit(0);
+}
 console.log(JSON.stringify({
   type: 'assistant',
   session_id: 'fake-real-tui-planner',
@@ -202,11 +222,11 @@ spawn "$env(WICI_NODE)" --import tsx src/cli.tsx tui --target "$env(WICI_PTY_TAR
 expect "CHAT"
 sleep 1
 send -- "$env(WICI_PTY_CHAT)\\r"
+send -- "\\033\\[C"
+expect -- "--- PLAN.md ---"
+send -- "\\033\\[C"
 expect {
-  "SUPERVISOR_START" {
-    exp_continue
-  }
-  "EXECUTE_DONE" {
+  "turn completed" {
     send -- "\\003"
     expect eof
     exit 0

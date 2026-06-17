@@ -2,12 +2,20 @@
   "tools": {
     "mode": "auto",
     "auto_update": true,
+    "chat": {
+      "command": "claude",
+      "model": "opus4.8",
+      "effort": "high"
+    },
     "planner": {
       "command": "claude",
-      "effort": "default"
+      "model": "opus4.8",
+      "effort": "high"
     },
     "executor": {
       "command": "codex",
+      "model": "gpt5.5",
+      "effort": "medium",
       "dangerouslyBypassApprovalsAndSandbox": true
     }
   },

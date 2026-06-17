@@ -103,6 +103,7 @@ export async function runInitialPlanner(
           ? buildInitialPlannerResumeArgs({
               goalText,
               effort: config.tools.planner.effort,
+              model: config.tools.planner.model,
               systemPrompt,
               safetyText,
               sessionId: resume.sessionId,
@@ -112,6 +113,7 @@ export async function runInitialPlanner(
           : buildInitialPlannerArgs({
               goalText: resume ? appendClarificationAnswer(goalText, resume) : goalText,
               effort: config.tools.planner.effort,
+              model: config.tools.planner.model,
               systemPrompt,
               safetyText
             });
@@ -174,6 +176,8 @@ export async function runPlanDiff(
           currentPlan: plan,
           goalText,
           sessionId: plannerSessionId,
+          effort: config.tools.planner.effort,
+          model: config.tools.planner.model,
           systemPrompt,
           safetyText
         }),
@@ -205,13 +209,14 @@ export async function runPlanDiff(
   return { ok: true, sessionId: plannerSessionId ?? 'stub-planner', stdout: 'stub planner applied requirement diff' };
 }
 
-export function buildInitialPlannerArgs(input: { goalText: string; effort: string; systemPrompt: string; safetyText?: string }): string[] {
+export function buildInitialPlannerArgs(input: { goalText: string; effort: string; model?: string; systemPrompt: string; safetyText?: string }): string[] {
   return [
     '-p',
     `Plan for goal:\n${input.goalText}`,
     '--output-format',
     'stream-json',
     '--verbose',
+    ...plannerModelArgs(input.model),
     ...plannerEffortArgs(input.effort),
     '--permission-mode',
     'plan',
@@ -224,6 +229,7 @@ export function buildInitialPlannerArgs(input: { goalText: string; effort: strin
 export function buildInitialPlannerResumeArgs(input: {
   goalText: string;
   effort: string;
+  model?: string;
   systemPrompt: string;
   safetyText?: string;
   sessionId: string;
@@ -238,6 +244,7 @@ export function buildInitialPlannerResumeArgs(input: {
     '--output-format',
     'stream-json',
     '--verbose',
+    ...plannerModelArgs(input.model),
     ...plannerEffortArgs(input.effort),
     '--permission-mode',
     'plan',
@@ -253,11 +260,19 @@ function plannerEffortArgs(effort: string | undefined): string[] {
   return ['--effort', normalized];
 }
 
+function plannerModelArgs(model: string | undefined): string[] {
+  const normalized = model?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['--model', normalized];
+}
+
 export function buildPlanDiffArgs(input: {
   newText: string;
   currentPlan: string;
   goalText: string;
   sessionId: string;
+  effort?: string;
+  model?: string;
   systemPrompt: string;
   safetyText?: string;
 }): string[] {
@@ -269,6 +284,8 @@ export function buildPlanDiffArgs(input: {
     '--output-format',
     'stream-json',
     '--verbose',
+    ...plannerModelArgs(input.model),
+    ...plannerEffortArgs(input.effort),
     '--permission-mode',
     'plan',
     '--dangerously-skip-permissions',

@@ -7,6 +7,7 @@ import { codexDisplayLines, formatEvent, visibleEvents } from '../tui/ExecPane.j
 import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
 import { disableMouseReporting, isMouseInput, mouseScrollDelta, parseMouseInput } from '../tui/input.js';
+import { cycleRuntimeValue, defaultRuntimeSelection, formatRuntimeSelectorLine, parseRuntimeCommand } from '../tui/runtimeSettings.js';
 import { viewport, wrapLines, wrappedViewport } from '../tui/viewport.js';
 import { buildFallbackChatTurn, summarizePlanForChat } from '../supervisor/chatAgent.js';
 
@@ -20,6 +21,7 @@ async function main(): Promise<void> {
     goal: await source('GoalPane.tsx'),
     header: await source('Header.tsx'),
     input: await source('input.ts'),
+    runtime: await source('runtimeSettings.ts'),
     state: await source('useRunState.ts'),
     crashHandlers: await readFile(join(TOOL_ROOT, 'src', 'shared', 'crashHandlers.ts'), 'utf8'),
     cli: await readFile(join(TOOL_ROOT, 'src', 'cli.tsx'), 'utf8')
@@ -38,12 +40,16 @@ async function main(): Promise<void> {
   assert(files.app.includes('<ChatHistoryPane') && files.app.includes('<ChatInputBox') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render top Chat/Plan/Execution tabs plus the bottom Chat input');
   assert(files.app.includes('workspaceTab') && files.app.includes('key.leftArrow') && files.app.includes('key.rightArrow'), 'App must switch the Plan/Execution workspace with left/right arrows');
   assert(files.app.includes('CHAT') && files.app.includes('PLAN') && files.app.includes('EXECUTION') && files.app.includes('showTitle={false}'), 'App must expose Chat/Plan/Execution as one top tabbed workspace');
-  assert(files.app.includes('shouldAcceptInitialGoalFromChat'), 'App must route blank-run chat input to the initial supervisor goal');
+  assert(files.app.includes('shouldUseChatAgentForBlankRun'), 'App must route blank-run input through the Chat agent before planning starts');
   assert(files.app.includes('shouldAutoStartExistingRun'), 'App must avoid auto-restarting stopped runs while still supporting resume on attach');
   assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'App must wake the supervisor after Chat writes an inbox injection');
+  assert(files.app.includes('runtimeSelection') && files.app.includes('formatRuntimeSelectorLine') && files.app.includes('runtimeSelectorOpen'), 'App must expose a visible per-workspace runtime selector in the TUI');
+  assert(files.app.includes('isRuntimeSelectorToggle') && files.app.includes('cycleRuntimeValue') && files.app.includes('inputPaused={runtimeSelectorOpen}'), 'App must let users choose runtime fields from the TUI without typing into Chat');
+  assert(files.app.includes('onRuntimeChange={setRuntimeSelection}'), 'App must still support typed runtime commands for custom values');
+  assert(files.app.includes('runtime: runtimeSelection'), 'App must pass TUI runtime settings into supervisor launches');
   assert(files.app.includes('appendSupervisorError') && files.app.includes('Supervisor error:'), 'App must persist supervisor crashes without flooding the Chat transcript');
   assert(files.app.includes("launchSupervisor(supervisor.initialGoal, 'tui_goal_option')"), 'App must keep --goal as an explicit automation shortcut');
-  assert(files.app.includes("launchSupervisor(goal, 'tui_chat')"), 'App must mark blank-run Chat intake as TUI Chat source');
+  assert(files.app.includes("launchSupervisor(goal, 'tui_chat')"), 'App must mark blank-run Chat-agent planning as TUI Chat source');
   assert(files.app.includes('goal={state.goal}'), 'App must pass durable goal state into Chat history');
   assert(files.app.includes('supervisorState={state.checkpoint?.supervisor_state}'), 'App must pass terminal supervisor state into Chat so stale errors do not occupy the input pane');
   assertNoControlWrites('App', files.app);
@@ -68,9 +74,12 @@ async function main(): Promise<void> {
       !files.chat.includes("input === 'u'"),
     'ChatPane must not swallow ordinary letters as scroll shortcuts'
   );
-  assert(files.chat.includes('acceptInitialGoal') && files.chat.includes('onInitialGoal'), 'ChatPane must support initial goal intake before inbox injections');
+  assert(files.chat.includes('runChatTurn') && files.chat.includes('writeUpdate: !blankRun'), 'ChatPane must always let the Chat agent decide whether blank-run input should start planning');
+  assert(files.chat.includes('onPlanningRequested') && files.chat.includes('blankRun'), 'ChatPane must launch planning only from a Chat-agent update on blank runs');
+  assert(!files.chat.includes('acceptInitialGoal') && !files.chat.includes('onInitialGoal'), 'ChatPane must not bypass the Chat agent for first-message goal intake');
   assert(files.chat.includes('onInjection?.()'), 'ChatPane must notify App after writing inbox injections');
-  assert(files.chat.includes('isInitialGoalText'), 'ChatPane must distinguish initial natural-language goals from slash commands');
+  assert(files.chat.includes('parseRuntimeCommand') && files.chat.includes('onRuntimeChange'), 'ChatPane must support runtime selection slash commands');
+  assert(files.chat.includes('inputPaused') && files.chat.includes('isActive: interactive && !inputPaused'), 'ChatPane must pause bottom input while the runtime selector is active');
   assert(files.chat.includes("input.includes('\\r')") && files.chat.includes("input.includes('\\n')"), 'ChatPane must submit PTY input chunks that include a trailing newline');
   assert(files.chat.includes("kind: 'add_requirement'"), 'ChatPane must default text input to add_requirement injections');
   assert(files.chat.includes("kind: 'answer'"), 'ChatPane must support outbox answers');
@@ -79,6 +88,11 @@ async function main(): Promise<void> {
   assert(files.chat.includes("kind: 'abort'"), 'ChatPane must support urgent abort injections');
   assertNoControlWrites('ChatPane', files.chat);
   assert(!files.chat.includes('initial goal:') && !files.chat.includes('`goal: ${text}`'), 'ChatPane transcript must not repeat the initial goal as history');
+
+  assert(files.runtime.includes('parseRuntimeCommand') && files.runtime.includes('/(agent|model|effort)'), 'runtime settings must parse agent/effort commands and reject model changes with a fixed-model status');
+  assert(files.runtime.includes('formatRuntimeSelectorLine') && files.runtime.includes('cycleRuntimeValue') && files.runtime.includes('RUNTIME_FIELDS'), 'runtime settings must expose selector formatting and value cycling');
+  assert(files.runtime.includes("RUNTIME_FIELDS: RuntimeField[] = ['agent', 'effort']"), 'runtime selector must expose agent and effort only');
+  assert(files.runtime.includes('RUNTIME_AGENTS') && files.runtime.includes('runtimeModelForAgent'), 'runtime settings must offer claude/codex agents with fixed models');
 
   assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
   assert(files.goal.includes('useInput') && files.goal.includes('active?: boolean') && files.goal.includes('const isActive = active ?? isFocused'), 'GoalPane scroll input must be gated on the active top tab or focus');
@@ -134,6 +148,7 @@ async function main(): Promise<void> {
   verifyVisibleEvents();
   verifyTextViewport();
   verifyMouseScroll();
+  verifyRuntimeSettings();
   verifyChatFallback();
   verifyChatPromptCompression();
   verifyExecEventUsage();
@@ -182,6 +197,44 @@ function verifyMouseScroll(): void {
   assert(click?.code === 0 && click.x === 12 && click.y === 4 && click.released === false, 'mouse click parser should expose coordinates for pane focus');
   assert(mouseScrollDelta('k') === 0, 'ordinary keyboard input must not parse as mouse scroll');
   assert(typeof disableMouseReporting === 'function', 'disableMouseReporting must be importable for terminal cleanup');
+}
+
+function verifyRuntimeSettings(): void {
+  const defaults = defaultRuntimeSelection();
+  assert(defaults.chat?.agent === 'claude' && defaults.chat.model === 'opus4.8' && defaults.chat.effort === 'high', 'Chat runtime should default to Claude opus4.8 high');
+  assert(defaults.planner?.agent === 'claude' && defaults.planner.model === 'opus4.8' && defaults.planner.effort === 'high', 'PLAN runtime should default to Claude opus4.8 high');
+  assert(defaults.executor?.agent === 'codex' && defaults.executor.model === 'gpt5.5' && defaults.executor.effort === 'medium', 'EXECUTION runtime should default to Codex gpt5.5 medium');
+
+  const line = formatRuntimeSelectorLine(defaults, 'executor', 'agent');
+  assert(line.includes('[agent=codex]') && line.includes('effort=medium') && line.includes('model=gpt5.5'), `runtime selector line should expose fixed model outside selectable fields: ${line}`);
+
+  const codexHigh = parseRuntimeCommand('/effort execution high', defaults);
+  assert(codexHigh?.next.executor?.effort === 'high' && codexHigh.next.executor.model === 'gpt5.5', `Codex effort command should keep fixed model: ${JSON.stringify(codexHigh)}`);
+
+  const codexDefault = parseRuntimeCommand('/effort execution default', codexHigh.next);
+  assert(codexDefault?.next.executor?.effort === 'medium' && codexDefault.next.executor.model === 'gpt5.5', `Codex default effort should reset to medium: ${JSON.stringify(codexDefault)}`);
+
+  const badCodexEffort = parseRuntimeCommand('/effort execution ultracode', defaults);
+  assert(badCodexEffort?.status.includes('unknown effort for codex') && badCodexEffort.next.executor?.effort === 'medium', `Codex should reject Claude-only effort: ${JSON.stringify(badCodexEffort)}`);
+
+  const plannerCodex = parseRuntimeCommand('/agent plan codex', defaults);
+  assert(plannerCodex?.next.planner, `PLAN agent switch should produce a planner runtime: ${JSON.stringify(plannerCodex)}`);
+  const plannerCodexRuntime = plannerCodex.next.planner;
+  assert(plannerCodexRuntime.agent === 'codex' && plannerCodexRuntime.model === 'gpt5.5' && plannerCodexRuntime.effort === 'medium', `PLAN agent switch should force Codex defaults: ${JSON.stringify(plannerCodex)}`);
+
+  const plannerFast = parseRuntimeCommand('/effort plan fast', plannerCodex.next);
+  assert(plannerFast?.next.planner, `PLAN effort switch should produce a planner runtime: ${JSON.stringify(plannerFast)}`);
+  const plannerFastRuntime = plannerFast.next.planner;
+  assert(plannerFastRuntime.effort === 'fast' && plannerFastRuntime.model === 'gpt5.5', `PLAN Codex effort should accept fast: ${JSON.stringify(plannerFast)}`);
+
+  const modelNoop = parseRuntimeCommand('/model plan anything', plannerFast.next);
+  assert(modelNoop?.next === plannerFast.next && modelNoop.status.includes('model is fixed by agent'), `model command should be a no-op status response: ${JSON.stringify(modelNoop)}`);
+
+  const chatAgentCycle = cycleRuntimeValue(defaults, 'chat', 'agent', 1);
+  assert(chatAgentCycle.chat?.agent === 'codex' && chatAgentCycle.chat.model === 'gpt5.5' && chatAgentCycle.chat.effort === 'medium', `TUI agent cycle should switch Chat to Codex defaults: ${JSON.stringify(chatAgentCycle.chat)}`);
+
+  const chatEffortCycle = cycleRuntimeValue(defaults, 'chat', 'effort', 1);
+  assert(chatEffortCycle.chat?.agent === 'claude' && chatEffortCycle.chat.effort === 'xhigh', `TUI effort cycle should follow Claude effort options: ${JSON.stringify(chatEffortCycle.chat)}`);
 }
 
 function verifyChatFallback(): void {

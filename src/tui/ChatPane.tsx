@@ -3,9 +3,10 @@ import { Box, Text, useFocus, useInput } from 'ink';
 import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
 import { runChatTurn } from '../supervisor/chatAgent.js';
-import type { ChatLogEntry, GoalFile, Injection, OutboxMessage, RunEvent, ToolMode } from '../shared/types.js';
+import type { ChatLogEntry, GoalFile, Injection, OutboxMessage, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
 import { isMouseInput, mouseScrollDelta } from './input.js';
 import { PAGE_SIZE, scrollBy, wrapLines, wrappedViewport } from './viewport.js';
+import { defaultRuntimeSelection, parseRuntimeCommand } from './runtimeSettings.js';
 
 type ChatColor = 'white' | 'gray' | 'cyan' | 'cyanBright' | 'green' | 'yellow' | 'red' | 'magenta';
 
@@ -19,6 +20,7 @@ interface ChatContextProps {
   events?: RunEvent[];
   chat?: ChatLogEntry[];
   mode?: ToolMode;
+  runtime?: RuntimeSelection;
 }
 
 export function ChatHistoryPane({
@@ -135,10 +137,13 @@ export function ChatInputBox({
   plan = '',
   events = [],
   mode,
+  runtime = defaultRuntimeSelection(),
   contentWidth = 80,
-  acceptInitialGoal = false,
-  onInitialGoal,
+  inputPaused = false,
+  blankRun = false,
+  onPlanningRequested,
   onInjection,
+  onRuntimeChange,
   onBusyChange,
   onLocalStatus
 }: {
@@ -149,10 +154,13 @@ export function ChatInputBox({
   plan?: string;
   events?: RunEvent[];
   mode?: ToolMode;
+  runtime?: RuntimeSelection;
   contentWidth?: number;
-  acceptInitialGoal?: boolean;
-  onInitialGoal?: (text: string) => void;
+  inputPaused?: boolean;
+  blankRun?: boolean;
+  onPlanningRequested?: (text: string) => void;
   onInjection?: () => void;
+  onRuntimeChange?: (runtime: RuntimeSelection) => void;
   onBusyChange?: (busy: boolean) => void;
   onLocalStatus?: (text: string | null) => void;
 }) {
@@ -176,10 +184,14 @@ export function ChatInputBox({
     const text = raw.trim();
     if (!text) return;
     setInputValue('');
-    if (acceptInitialGoal && onInitialGoal && isInitialGoalText(text)) {
-      onInitialGoal(text);
+
+    const runtimeCommand = parseRuntimeCommand(text, runtime);
+    if (runtimeCommand) {
+      onRuntimeChange?.(runtimeCommand.next);
+      onLocalStatus?.(runtimeCommand.status);
       return;
     }
+
     const paths = runPaths(target);
     const latestQuestion = [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered);
 
@@ -206,20 +218,32 @@ export function ChatInputBox({
     // judgment whether this turn warrants a goal/plan update (hot reload).
     setBusy(true);
     try {
-      const result = await runChatTurn({ paths, userText: text, goalDoc, plan, recentEvents: events, mode });
-      if (result.update) onInjection?.();
+      const result = await runChatTurn({ paths, userText: text, goalDoc, plan, recentEvents: events, mode, runtime, writeUpdate: !blankRun });
+      if (result.update) {
+        if (blankRun && onPlanningRequested) {
+          onLocalStatus?.(`planning: ${result.update.text}`);
+          onPlanningRequested(result.update.text);
+        } else {
+          onInjection?.();
+        }
+      }
     } catch {
       // Defensive fallback: never drop the user's message if the agent errors.
-      await writeInjection(paths, { kind: 'add_requirement', text, priority: 'normal' });
-      onLocalStatus?.(`add_requirement: ${text}`);
-      onInjection?.();
+      if (blankRun && onPlanningRequested) {
+        onLocalStatus?.(`planning: ${text}`);
+        onPlanningRequested(text);
+      } else {
+        await writeInjection(paths, { kind: 'add_requirement', text, priority: 'normal' });
+        onLocalStatus?.(`add_requirement: ${text}`);
+        onInjection?.();
+      }
     } finally {
       setBusy(false);
     }
   };
 
   useInput((input, key) => {
-    if (!interactive) return;
+    if (!interactive || inputPaused) return;
     if (isMouseInput(input)) return;
     if (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow || key.pageUp || key.pageDown || key.home || key.end) return;
     if (input.includes('\r') || input.includes('\n')) {
@@ -242,7 +266,7 @@ export function ChatInputBox({
     if (input) {
       setInputValue(valueRef.current + input);
     }
-  }, { isActive: interactive });
+  }, { isActive: interactive && !inputPaused });
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={isFocused || interactive ? 'cyan' : 'gray'} paddingX={1}>
@@ -270,10 +294,12 @@ export function ChatPane({
   events = [],
   chat = [],
   mode,
+  runtime,
   contentWidth = 32,
   viewportHeight = 12,
-  acceptInitialGoal = false,
-  onInitialGoal,
+  inputPaused = false,
+  blankRun = false,
+  onPlanningRequested,
   onInjection,
   systemLine
 }: ChatContextProps & {
@@ -281,8 +307,9 @@ export function ChatPane({
   interactive?: boolean;
   contentWidth?: number;
   viewportHeight?: number;
-  acceptInitialGoal?: boolean;
-  onInitialGoal?: (text: string) => void;
+  inputPaused?: boolean;
+  blankRun?: boolean;
+  onPlanningRequested?: (text: string) => void;
   onInjection?: () => void;
   systemLine?: string | null;
 }) {
@@ -312,19 +339,17 @@ export function ChatPane({
         plan={plan}
         events={events}
         mode={mode}
+        runtime={runtime}
         contentWidth={contentWidth}
-        acceptInitialGoal={acceptInitialGoal}
-        onInitialGoal={onInitialGoal}
+        inputPaused={inputPaused}
+        blankRun={blankRun}
+        onPlanningRequested={onPlanningRequested}
         onInjection={onInjection}
         onBusyChange={setBusy}
         onLocalStatus={setLocalStatus}
       />
     </Box>
   );
-}
-
-export function isInitialGoalText(text: string): boolean {
-  return text.trim().length > 0 && !text.trim().startsWith('/');
 }
 
 async function writeAnswer(paths: ReturnType<typeof runPaths>, raw: string, fallbackReplyKey: string | undefined) {

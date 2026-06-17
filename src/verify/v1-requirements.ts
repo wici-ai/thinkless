@@ -8,8 +8,10 @@ async function main(): Promise<void> {
     packageJson: await readFile('package.json', 'utf8'),
     app: await readFile('src/tui/App.tsx', 'utf8'),
     chat: await readFile('src/tui/ChatPane.tsx', 'utf8'),
+    chatAgent: await readFile('src/supervisor/chatAgent.ts', 'utf8'),
     header: await readFile('src/tui/Header.tsx', 'utf8'),
     execPane: await readFile('src/tui/ExecPane.tsx', 'utf8'),
+    runtimeSettings: await readFile('src/tui/runtimeSettings.ts', 'utf8'),
     runState: await readFile('src/tui/useRunState.ts', 'utf8'),
     tuiChat: await readFile('src/verify/tui-chat-intake.ts', 'utf8'),
     tuiChatPty: await readFile('src/verify/tui-chat-pty.ts', 'utf8'),
@@ -73,7 +75,16 @@ async function main(): Promise<void> {
     'README must document long-goal executor recovery behavior'
   );
   assert(files.readme.includes('## Resume Or Re-Run') && files.readme.includes('without a new `--goal`') && files.readme.includes('--resume-iteration 1'), 'README must document how to continue or rewind an existing goal');
-  assert(files.app.includes('shouldAcceptInitialGoalFromChat'), 'TUI must route first blank-run chat input into the initial goal');
+  assert(files.app.includes('shouldUseChatAgentForBlankRun'), 'TUI must route blank-run chat input through the Chat agent before planning starts');
+  assert(files.chat.includes('writeUpdate: !blankRun') && files.chat.includes('onPlanningRequested'), 'ChatPane must let the Chat agent decide when blank-run input starts planning');
+  assert(files.chatAgent.includes('isLikelyContextGatheringOnly') && files.chatAgent.includes('isLikelyPlanningRequest'), 'degraded Chat must distinguish code-reading requests from concrete planning requests');
+  assert(
+    files.runtimeSettings.includes('formatRuntimeSelectorLine') &&
+      files.runtimeSettings.includes('cycleRuntimeValue') &&
+      files.runtimeSettings.includes("RuntimeField = 'agent' | 'effort'") &&
+      files.runtimeSettings.includes('runtimeModelForAgent'),
+    'TUI must support visible agent/effort selection while deriving fixed models from claude/codex'
+  );
   assert(!files.app.includes('state.baseline ||'), 'TUI must not let a historical baseline.json alone block fresh Chat-first intake');
   assert(files.tuiChat.includes('goal_source_not_retroactive'), 'TUI intake verifier must prove goal_source is not written retroactively');
   assert(files.tuiChatPty.includes('pty_chat_first') && files.tuiChatPty.includes("goal_source === 'tui_chat'"), 'TUI PTY verifier must prove first Chat input records tui_chat provenance');
@@ -88,7 +99,7 @@ async function main(): Promise<void> {
   assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'TUI must wake the supervisor after chat writes an inbox injection');
   assert(files.tuiHotreloadPty.includes('pty_hot_reload') && files.tuiHotreloadPty.includes('PLAN_DIFF_APPLIED'), 'TUI PTY verifier must prove follow-up Chat hot reload reaches plan diff');
   assert(files.app.includes('goal={state.goal}'), 'TUI must pass durable goal state into Chat');
-  assert(files.chat.includes('isInitialGoalText'), 'ChatPane must distinguish initial natural-language goals from slash commands');
+  assert(files.chat.includes('parseRuntimeCommand'), 'ChatPane must parse runtime selection slash commands before ordinary Chat routing');
   assert(files.chat.includes('onInjection?.()'), 'ChatPane must notify App after non-initial chat input');
   assert(files.chat.includes('buildChatHistory'), 'ChatPane must render persisted Chat history');
   assert(files.chat.includes('currentGoalSummary') && !files.chat.includes('initial goal:'), 'ChatPane must restore the current goal outside transcript history');

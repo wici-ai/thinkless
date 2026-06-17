@@ -99,7 +99,8 @@ export async function runExecutorStep(
         schemaPath: schemaPath('iter-result'),
         prompt,
         resume: options.resume,
-        model: config.tools.executor.model
+        model: config.tools.executor.model,
+        effort: config.tools.executor.effort
       });
 
       const result = await runCodexProcess(config.tools.executor.command, args, paths, {
@@ -625,11 +626,13 @@ export function buildExecutorArgs(input: {
   prompt: string;
   resume?: boolean;
   model?: string;
+  effort?: string;
 }): string[] {
   if (!(input.resume ?? input.iter > 1)) {
     return [
       'exec',
       ...modelArgs(input.model),
+      ...codexEffortArgs(input.effort),
       '--dangerously-bypass-approvals-and-sandbox',
       '--json',
       '--output-last-message',
@@ -648,6 +651,7 @@ export function buildExecutorArgs(input: {
     'resume',
     '--last',
     ...modelArgs(input.model),
+    ...codexEffortArgs(input.effort),
     '--dangerously-bypass-approvals-and-sandbox',
     '--json',
     '--output-last-message',
@@ -660,5 +664,13 @@ export function buildExecutorArgs(input: {
 }
 
 function modelArgs(model: string | undefined): string[] {
-  return model?.trim() ? ['--model', model.trim()] : [];
+  const normalized = model?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['--model', normalized];
+}
+
+export function codexEffortArgs(effort: string | undefined): string[] {
+  const normalized = effort?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['-c', `model_reasoning_effort=${JSON.stringify(normalized)}`];
 }

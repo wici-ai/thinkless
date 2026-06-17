@@ -1,5 +1,18 @@
 export type ToolMode = 'real' | 'auto' | 'stub';
 export type ExecutorBackend = 'auto' | 'app-server' | 'exec';
+export type RuntimePane = 'chat' | 'planner' | 'executor';
+
+export interface AgentRuntimeSelection {
+  agent?: string;
+  model?: string;
+  effort?: string;
+}
+
+export interface RuntimeSelection {
+  chat?: AgentRuntimeSelection;
+  planner?: AgentRuntimeSelection;
+  executor?: AgentRuntimeSelection;
+}
 
 export type RequirementStatus = 'active' | 'dropped' | 'done';
 
@@ -378,14 +391,21 @@ export interface WiCiConfig {
   tools: {
     mode: ToolMode;
     auto_update?: boolean;
+    chat?: {
+      command?: string;
+      model?: string;
+      effort?: string;
+    };
     planner: {
       command: string;
+      model?: string;
       effort: string;
     };
     executor: {
       command: string;
       backend?: ExecutorBackend;
       model?: string;
+      effort?: string;
       dangerouslyBypassApprovalsAndSandbox: boolean;
     };
   };
@@ -413,6 +433,7 @@ export interface RunOptions {
   mode?: ToolMode;
   lockMode?: 'auto' | 'manual';
   resumeIteration?: number;
+  runtime?: RuntimeSelection;
 }
 
 export interface ToolInvocationResult {

@@ -7,8 +7,8 @@ import { exists } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { GoalFile, Checkpoint } from '../shared/types.js';
 import type { RunState } from '../tui/useRunState.js';
-import { shouldAcceptInitialGoalFromChat, shouldAutoStartExistingRun } from '../tui/App.js';
-import { isInitialGoalText } from '../tui/ChatPane.js';
+import { shouldAutoStartExistingRun, shouldUseChatAgentForBlankRun } from '../tui/App.js';
+import { buildFallbackChatTurn } from '../supervisor/chatAgent.js';
 import { runSupervisor } from '../supervisor/index.js';
 
 const target = resolve('fixture/tui-chat-intake-target');
@@ -51,23 +51,23 @@ async function main(): Promise<void> {
 
   const blank = blankState(target);
   assert(
-    shouldAcceptInitialGoalFromChat({ supervisorEnabled: true, supervisorStarted: false, state: blank }),
-    'fresh supervisor-enabled TUI should route chat to initial goal'
+    shouldUseChatAgentForBlankRun({ supervisorEnabled: true, supervisorStarted: false, state: blank }),
+    'fresh supervisor-enabled TUI should route blank-run input through the Chat agent'
   );
   assert(
-    !shouldAcceptInitialGoalFromChat({ supervisorEnabled: true, supervisorStarted: true, state: blank }),
-    'started supervisor must route chat to inbox, not initial goal'
+    !shouldUseChatAgentForBlankRun({ supervisorEnabled: true, supervisorStarted: true, state: blank }),
+    'started supervisor must route chat through existing-run hot reload, not blank-run planning'
   );
   assert(
-    !shouldAcceptInitialGoalFromChat({ supervisorEnabled: false, supervisorStarted: false, state: blank }),
-    'read-only TUI must not launch from chat'
+    !shouldUseChatAgentForBlankRun({ supervisorEnabled: false, supervisorStarted: false, state: blank }),
+    'read-only TUI must not launch planning from chat'
   );
   assert(
-    !shouldAcceptInitialGoalFromChat({ supervisorEnabled: true, supervisorStarted: false, state: { ...blank, goalDoc: '# GOAL\n' } }),
-    'existing run blackboard must not treat chat as initial goal'
+    !shouldUseChatAgentForBlankRun({ supervisorEnabled: true, supervisorStarted: false, state: { ...blank, goalDoc: '# GOAL\n' } }),
+    'existing run blackboard must not use blank-run chat planning'
   );
   assert(
-    shouldAcceptInitialGoalFromChat({
+    shouldUseChatAgentForBlankRun({
       supervisorEnabled: true,
       supervisorStarted: false,
       state: {
@@ -82,14 +82,13 @@ async function main(): Promise<void> {
         }
       }
     }),
-    'a historical baseline.json alone must not block fresh Chat-first intake'
+    'a historical baseline.json alone must not block fresh Chat-agent intake'
   );
   assert(shouldAutoStartExistingRun({ ...blank, goal: goal() }), 'existing goal without a STOP checkpoint should auto-start');
   assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('STOP') }), 'stopped run should not auto-restart without new chat');
   assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('FAILED') }), 'failed run should not auto-restart without new chat');
   assert(shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('PLAN') }), 'active plan state should auto-start on TUI attach');
-  assert(isInitialGoalText('听说diffussionGemma很快，要求达到700token/s以上'), 'natural-language chat should be accepted as initial goal');
-  assert(!isInitialGoalText('/steer keep going'), 'slash commands must not be treated as initial goals');
+  verifyDegradedBlankRunChatDecision();
   await verifyGoalSourceNotRetroactive();
 
   console.log(
@@ -98,15 +97,42 @@ async function main(): Promise<void> {
         ok: true,
         target,
         fresh_tui_writes_no_goal_files: true,
-        chat_routes_to_initial_goal_when_blank: true,
+        blank_chat_routes_through_agent: true,
+        degraded_inspection_does_not_start_planner: true,
+        degraded_plan_request_starts_planner: true,
         historical_baseline_does_not_block_chat: true,
-        goal_source_not_retroactive: true,
-        slash_commands_not_initial_goal: true
+        goal_source_not_retroactive: true
       },
       null,
       2
     )
   );
+}
+
+function verifyDegradedBlankRunChatDecision(): void {
+  const inspection = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: '请先阅读当前代码库和文档，暂时不要开始计划。',
+      goalDoc: '',
+      plan: '',
+      recentEvents: []
+    },
+    'stub'
+  );
+  assert(!inspection.update, `degraded blank-run code reading should stay conversational: ${JSON.stringify(inspection)}`);
+
+  const planning = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: '请制定计划并修复 uniqueSorted 的性能问题。',
+      goalDoc: '',
+      plan: '',
+      recentEvents: []
+    },
+    'stub'
+  );
+  assert(planning.update?.kind === 'add_requirement', `degraded concrete planning request should start planner: ${JSON.stringify(planning)}`);
 }
 
 async function verifyGoalSourceNotRetroactive(): Promise<void> {

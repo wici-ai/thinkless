@@ -88,6 +88,23 @@ async function main(): Promise<void> {
   assert(readme.includes('npm run verify:tui-real-fake-chat') && readme.includes('fake Claude/Codex CLIs'), 'README should document the real-mode fake CLI Chat-first verifier');
   assert(readme.includes('npm run verify:tui-planner-clarification-pty') && readme.includes('resumes the planner session'), 'README should document the real PTY planner clarification verifier');
   assert(readme.includes('npm run verify:tui-hotreload-pty') && readme.includes('PLAN_DIFF_APPLIED'), 'README should document the real PTY hot reload verifier');
+  assert(
+    readme.includes('The first natural-language Chat message is ordinary conversation first') &&
+      readme.includes('the Chat agent decides the requirement is concrete enough'),
+    'README should document Chat-agent-gated blank-run planning'
+  );
+  assert(
+    readme.includes('Press `Ctrl+R` to open the selector') &&
+      readme.includes('bottom Chat input is paused while the selector is open') &&
+      readme.includes('model is fixed by that agent') &&
+      readme.includes('/agent chat claude') &&
+      readme.includes('/effort execution high') &&
+      readme.includes('Claude effort options are `high`, `xhigh`, `max`, and `ultracode`') &&
+      readme.includes('Codex effort options are `fast`, `medium`, `high`, and `xhigh`') &&
+      readme.includes('model_reasoning_effort'),
+    'README should document per-workspace runtime selection commands'
+  );
+  assert(readme.includes('WICI_PLANNER_EFFORT') && readme.includes('WICI_EXECUTOR_AGENT') && readme.includes('WICI_EXECUTOR_EFFORT'), 'README should document runtime environment overrides');
   assert(readme.includes('npm run verify:release-tag'), 'README should document the guarded release tag verifier');
   assert(readme.includes('planner-*.stdout.jsonl') && readme.includes('.wici/codex-run.jsonl'), 'README should document planner and Codex transcript paths');
   assert(readme.includes('git clone https://github.com/wici-ai/WiCi-code.git'), 'README should document a clean checkout deployment path');
@@ -206,6 +223,12 @@ async function main(): Promise<void> {
   );
   assert(completionAudit.includes('npm run verify:v1-core') && completionAudit.includes('npm run verify:tag-gate'), 'completion audit should list core and tag-gate verification commands');
   assert(completionAudit.includes('npm run verify:tui-chat-intake'), 'completion audit should list the Chat-first intake verification command');
+  assert(
+    completionAudit.includes('degraded_inspection_does_not_start_planner') &&
+      completionAudit.includes('degraded_plan_request_starts_planner'),
+    'completion audit should include blank-run Chat-agent gating evidence'
+  );
+  assert(completionAudit.includes('agent and effort selection') && completionAudit.includes('model fixed by agent'), 'completion audit should include runtime selection evidence');
   assert(completionAudit.includes('npm run verify:tui-chat-pty') && completionAudit.includes('pty_chat_first'), 'completion audit should include real PTY Chat-first verification evidence');
   assert(completionAudit.includes('npm run verify:tui-real-fake-chat') && completionAudit.includes('pty_chat_first_real_mode_fake_clis'), 'completion audit should include real-mode fake CLI Chat-first evidence');
   assert(
