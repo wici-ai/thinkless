@@ -3,7 +3,7 @@ export type RuntimeAgent = 'claude' | 'codex';
 export const RUNTIME_AGENTS: RuntimeAgent[] = ['claude', 'codex'];
 
 export const RUNTIME_AGENT_MODELS: Record<RuntimeAgent, string> = {
-  claude: 'opus4.8',
+  claude: 'claude-opus-4-8',
   codex: 'gpt-5.5'
 };
 

@@ -56,7 +56,7 @@ This audit records what is currently proven, what is covered by automated checks
 | Legacy optimizer behavior remains isolated from fresh V1 and is checked through an explicit aggregate | `npm run verify:legacy-optimizer`; README legacy optimizer section | Covered |
 | Codex transcript is saved for real canaries | `npm run verify:tag-gate`, evidence bundle `.wici/codex-run.jsonl` | Covered |
 | Codex token usage is captured | `npm run verify:codex-run-usage`, `npm run verify:executor-contract`, `npm run verify:app-server-hotreload` | Covered |
-| Chat, planner, and executor agent/effort can be selected while models stay fixed to opus4.8 or gpt-5.5 | `npm run verify:tool-commands` | Covered |
+| Chat, planner, and executor agent/effort can be selected while models stay fixed to claude-opus-4-8 or gpt-5.5 | `npm run verify:tool-commands` | Covered |
 | `codex exec resume` avoids unsupported `-C` | `npm run verify:executor-contract`, `npm run verify:tool-commands` | Covered |
 | Existing `GOAL.md` / `PLAN.md` can continue without passing a new `--goal` | `npm run verify:existing-goal` report `continued_without_new_goal` and `reused_goal_run_id` | Covered |
 | Executor failures and timeouts are recoverable long-goal events, not immediate whole-goal blockers | `npm run verify:direct-recovery` report `recoverable_failure`, `ledger_rows: 2`, and `resumed_executor`; code emits `EXECUTE_RECOVERABLE_FAILURE` and continues with `codex exec resume --last` | Covered |

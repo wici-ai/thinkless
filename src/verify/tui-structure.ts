@@ -237,8 +237,8 @@ function verifyMouseScroll(): void {
 
 function verifyRuntimeSettings(): void {
   const defaults = defaultRuntimeSelection();
-  assert(defaults.chat?.agent === 'claude' && defaults.chat.model === 'opus4.8' && defaults.chat.effort === 'high', 'Chat runtime should default to Claude opus4.8 high');
-  assert(defaults.planner?.agent === 'claude' && defaults.planner.model === 'opus4.8' && defaults.planner.effort === 'high', 'PLAN runtime should default to Claude opus4.8 high');
+  assert(defaults.chat?.agent === 'claude' && defaults.chat.model === 'claude-opus-4-8' && defaults.chat.effort === 'high', 'Chat runtime should default to Claude claude-opus-4-8 high');
+  assert(defaults.planner?.agent === 'claude' && defaults.planner.model === 'claude-opus-4-8' && defaults.planner.effort === 'high', 'PLAN runtime should default to Claude claude-opus-4-8 high');
   assert(defaults.executor?.agent === 'codex' && defaults.executor.model === 'gpt-5.5' && defaults.executor.effort === 'medium', 'EXECUTION runtime should default to Codex gpt-5.5 medium');
 
   const line = formatRuntimeSelectorLine(defaults, 'executor', 'agent');

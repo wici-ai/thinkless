@@ -322,7 +322,7 @@ async function main(): Promise<void> {
   assert(highEffortCodex.includes('-c') && highEffortCodex.includes('model_reasoning_effort="high"'), 'executor must map effort selection to Codex config override');
   const loadedConfig = await loadConfig('stub');
   assert(loadedConfig.tools.chat?.command === 'claude', 'default config should expose Chat agent command');
-  assert(loadedConfig.tools.chat?.model === 'opus4.8' && loadedConfig.tools.planner.model === 'opus4.8', 'Claude-backed panes must force opus4.8 by default');
+  assert(loadedConfig.tools.chat?.model === 'claude-opus-4-8' && loadedConfig.tools.planner.model === 'claude-opus-4-8', 'Claude-backed panes must force claude-opus-4-8 by default');
   assert(loadedConfig.tools.chat?.effort === 'high' && loadedConfig.tools.planner.effort === 'high', 'Claude-backed panes must default to high effort');
   assert(loadedConfig.tools.executor.model === 'gpt-5.5' && loadedConfig.tools.executor.effort === 'medium', 'Codex-backed executor must force gpt-5.5 medium by default');
   const switchedConfig = await loadConfig('stub');
@@ -330,7 +330,7 @@ async function main(): Promise<void> {
   assert(switchedConfig.tools.planner.command === 'codex', 'runtime agent switch must allow planner pane to select codex');
   assert(switchedConfig.tools.planner.model === 'gpt-5.5' && switchedConfig.tools.planner.effort === 'fast', 'codex agent selection must force gpt-5.5 and codex effort options');
   assert(switchedConfig.tools.executor.command === 'claude', 'runtime agent switch must allow execution pane to select claude');
-  assert(switchedConfig.tools.executor.model === 'opus4.8' && switchedConfig.tools.executor.effort === 'ultracode', 'claude agent selection must force opus4.8 and claude effort options');
+  assert(switchedConfig.tools.executor.model === 'claude-opus-4-8' && switchedConfig.tools.executor.effort === 'ultracode', 'claude agent selection must force claude-opus-4-8 and claude effort options');
   assert(loadedConfig.budget.max_iters === 0, 'default config max_iters=0 should disable WiCi iteration hard caps for real runs');
   assert(resolveMaxIters(undefined, loadedConfig.budget.max_iters) === Number.POSITIVE_INFINITY, 'configured max_iters=0 should resolve to unbounded');
   assert(resolveMaxIters(0, loadedConfig.budget.max_iters) === 0, 'explicit --max-iters 0 should remain a setup-only run limit');
