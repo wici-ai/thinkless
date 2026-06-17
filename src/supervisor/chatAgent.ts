@@ -272,8 +272,6 @@ export function buildChatArgs(input: {
     '--verbose',
     ...claudeModelArgs(input.model),
     ...claudeEffortArgs(input.effort),
-    '--permission-mode',
-    'plan',
     '--dangerously-skip-permissions',
     '--append-system-prompt',
     appendSafety(input.systemPrompt, input.safetyText ?? '')
@@ -295,7 +293,7 @@ export function buildCodexChatArgs(input: {
       ...codexModelArgs(input.model),
       ...codexEffortArgs(input.effort),
       '--sandbox',
-      'read-only',
+      'workspace-write',
       '--json',
       '--output-last-message',
       input.outputLastMessage,
@@ -309,7 +307,7 @@ export function buildCodexChatArgs(input: {
     ...codexModelArgs(input.model),
     ...codexEffortArgs(input.effort),
     '--sandbox',
-    'read-only',
+    'workspace-write',
     '--json',
     '--output-last-message',
     input.outputLastMessage,
@@ -324,7 +322,7 @@ function buildCodexChatPrompt(input: { systemPrompt: string; safetyText?: string
   return [
     appendSafety(input.systemPrompt, input.safetyText ?? ''),
     '',
-    'You are running as the Chat agent through Codex exec. This is a read-only conversation turn: do not edit files, do not commit, do not push, and do not perform executor work. Use tools only for read-only inspection when needed.',
+    'You are running as the Chat agent through Codex exec. Handle lightweight direct work: short inspection, bounded read-only SSH or remote code review, and small self-contained local edits are allowed. Do not commit, push, deploy, run destructive commands, or start long benchmark/debug loops; emit UPDATE instead when planner/executor should take over.',
     '',
     input.userPrompt
   ].join('\n');

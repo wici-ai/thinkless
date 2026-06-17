@@ -90,8 +90,13 @@ async function main(): Promise<void> {
   assert(readme.includes('npm run verify:tui-hotreload-pty') && readme.includes('PLAN_DIFF_APPLIED'), 'README should document the real PTY hot reload verifier');
   assert(
     readme.includes('The first natural-language Chat message is ordinary conversation first') &&
-      readme.includes('the Chat agent decides the requirement is concrete enough'),
+      readme.includes('the Chat agent decides the work is large'),
     'README should document Chat-agent-gated blank-run planning'
+  );
+  assert(
+    readme.includes('bounded SSH/code-reading request can stay in Chat') &&
+      readme.includes('small self-contained edits without starting a run'),
+    'README should document lightweight Chat work before planner/executor escalation'
   );
   assert(
     readme.includes('Press `Ctrl+R` to open the selector') &&

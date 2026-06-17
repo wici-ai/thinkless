@@ -10,7 +10,7 @@ The V1 path is intentionally thin:
 - Once `PLAN.md` exists, WiCi feeds `GOAL.md + PLAN.md` directly to Codex.
 - The supervisor handles TUI state, events, token usage, checkpoints, git rollback points, and hot reload.
 
-WiCi does not parse natural-language requirements into task-specific schemas. If the user says "700 token/s", asks to build an app, or gives an SSH command, that raw requirement goes into `GOAL.md`; Claude and Codex decide how to plan and execute it.
+WiCi does not parse natural-language requirements into task-specific schemas. If the user says "700 token/s" or asks to build an app, that raw requirement goes into `GOAL.md` once Chat decides it needs planner/executor. A bounded SSH/code-reading request can stay in Chat; a longer remote deployment, debug, benchmark, or optimization loop becomes planner/executor work.
 
 ## Safety
 
@@ -141,7 +141,7 @@ Use `--mode stub`, `--mode auto`, or `--mode real` on `run` / `tui`.
 
 ## Chat-First Flow
 
-In an interactive TUI with no existing run and no `--goal`, the top Chat History / Goal/Plan / Execution workspace starts empty and can be switched with the left/right arrows, while the Chat input stays fixed at the bottom. The first natural-language Chat message is ordinary conversation first: the Chat agent may answer questions or inspect the repo without starting a run. When the user asks for a plan, or the Chat agent decides the requirement is concrete enough, it emits an update; WiCi creates `GOAL.md`, records `goal_source: "tui_chat"`, and starts Claude Code plan mode. If Claude needs a clarification before materializing `PLAN.md`, or later while updating `PLAN.md` after a hot-reload Chat message, WiCi surfaces that as a Chat question and routes the next ordinary Chat message back as the answer. That answer wakes the stopped supervisor and resumes the same Claude planner session.
+In an interactive TUI with no existing run and no `--goal`, the top Chat History / Goal/Plan / Execution workspace starts empty and can be switched with the left/right arrows, while the Chat input stays fixed at the bottom. The first natural-language Chat message is ordinary conversation first: the Chat agent may answer questions, inspect local or remote code, run bounded non-destructive discovery commands, or make small self-contained edits without starting a run. When the user asks for a plan, or the Chat agent decides the work is large, long-running, risky, or concrete enough for planner/executor, it emits an update; WiCi creates `GOAL.md`, records `goal_source: "tui_chat"`, and starts Claude Code plan mode. If Claude needs a clarification before materializing `PLAN.md`, or later while updating `PLAN.md` after a hot-reload Chat message, WiCi surfaces that as a Chat question and routes the next ordinary Chat message back as the answer. That answer wakes the stopped supervisor and resumes the same Claude planner session.
 
 The active workspace shows its current runtime selection. Press `Ctrl+R` to open the selector, use left/right to choose `agent` or `effort`, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. `agent` is always one of `claude` or `codex`; model is fixed by that agent: `claude` uses `opus4.8`, and `codex` uses `gpt-5.5`.
 

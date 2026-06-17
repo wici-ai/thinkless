@@ -103,6 +103,8 @@ async function main(): Promise<void> {
 
   assert(!files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && !files.chatAgent.includes('Recent Chat transcript'), 'Chat agent must not replay persisted Chat transcript into every prompt');
   assert(files.chatAgent.includes('resumeSessionId') && files.chatAgent.includes("'exec',\n      'resume'") && !files.chatAgent.includes("'--ephemeral'"), 'Codex Chat must persist and resume its own session instead of running ephemerally');
+  assert(files.chatAgent.includes("'workspace-write'") && !files.chatAgent.includes("'read-only'"), 'Codex Chat must support lightweight direct work instead of read-only-only sandboxing');
+  assert(!files.chatAgent.includes("'--permission-mode',\n    'plan'"), 'Claude Chat must not be forced into planner-only mode');
   assert(files.chatAgent.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatAgent.includes("writeChatSession(ctx.paths, 'codex'"), 'Chat sessions must be stored by agent so runtime changes do not overwrite another agent session');
   assert(!files.chatAgent.includes('normalizeChatTurnResult'), 'Chat agent must trust real agent UPDATE decisions instead of normalizing them with local prompt hacks');
   assert(files.chatAgent.includes('shouldStartPlannerFromBlankChat') && files.chatAgent.includes('hasConcreteActionIntent'), 'Chat fallback must use a generalized action-intent guard only when the agent is degraded');

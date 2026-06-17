@@ -9,6 +9,8 @@ This section records the next feature slice being implemented before the older h
    - The Chat agent starts planning only by emitting an explicit update when the user asks for a plan or when the agent judges the requirement is concrete enough.
    - The TUI should then create the initial WiCi goal from that Chat-agent update and launch the planner.
    - Pure conversation such as self-introduction, status questions, or "read the repo first / do not plan yet" must remain Chat-only in degraded fallback paths when the Chat agent is unavailable.
+   - Bounded read-only inspection, including user-provided SSH commands for code reading, should stay in Chat when it can be completed quickly.
+   - Small self-contained local edits can stay in Chat; larger implementation/debug/deploy/benchmark loops should become planner/executor work.
    - When planning does start, the planner must receive the preceding Chat context, not only the final update text.
 
 2. Let the user choose runtime settings for the three TUI workspaces.
@@ -30,6 +32,7 @@ This section records the next feature slice being implemented before the older h
 - Keep the Chat agent responsible for deciding when conversation has become actionable; avoid adding prompt-specific trigger hacks for one-off examples.
 - Keep Chat context in the agent's own persisted session. Switching effort must not rebuild the conversation by replaying `.wici/chat.jsonl`.
 - Store Chat session identifiers by agent so `claude` and `codex` Chat sessions do not overwrite each other.
+- Run Chat agents in lightweight direct-work mode: no forced Claude plan mode, and Codex Chat gets workspace-write rather than read-only-only sandboxing.
 - Before launching the blank-run planner, build a bounded transcript from prior Chat turns plus the triggering turn, and store it in the initial `GOAL.md` constraints as `Chat context before planning`.
 - Keep degraded/stub Chat deterministic:
   - questions and "read/inspect first" messages stay conversational;
@@ -56,6 +59,7 @@ This section records the next feature slice being implemented before the older h
 - Fresh TUI with no Chat input still writes no goal, plan, checkpoint, or events.
 - Fresh TUI Chat "please read the current repo first" does not start the supervisor in degraded/stub mode.
 - Fresh TUI Chat "introduce yourself" stays conversational and does not start the supervisor.
+- Fresh TUI Chat with a bounded code-reading SSH request stays Chat-first instead of automatically becoming a planner goal.
 - Fresh TUI Chat "plan/fix/build..." starts the planner from a Chat-agent update and records `goal_source: tui_chat`.
 - Fresh TUI Chat that starts planner writes the recent Chat transcript into `GOAL.md` as context for the planner while keeping the requirement text equal to the Chat-agent update.
 - Existing-run Chat updates still flow through inbox and planner diff.

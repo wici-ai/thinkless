@@ -121,7 +121,8 @@ async function main(): Promise<void> {
   assert(codexChatArgs[0] === 'exec' && codexChatArgs.includes('--json') && codexChatArgs.includes('--output-last-message'), 'Codex Chat must use codex exec JSON output, not Claude print args');
   assert(codexChatArgs[codexChatArgs.indexOf('--model') + 1] === 'gpt-5.5', 'Codex Chat must receive the fixed Codex model');
   assert(codexChatArgs.includes('-c') && codexChatArgs.includes('model_reasoning_effort="medium"'), 'Codex Chat must map effort to Codex config override');
-  assert(codexChatArgs[codexChatArgs.indexOf('--sandbox') + 1] === 'read-only', 'Codex Chat must run as a read-only conversation turn');
+  assert(!chatArgs.includes('--permission-mode') || chatArgs[chatArgs.indexOf('--permission-mode') + 1] !== 'plan', 'Chat agent must not be forced into Claude plan mode');
+  assert(codexChatArgs[codexChatArgs.indexOf('--sandbox') + 1] === 'workspace-write', 'Codex Chat must support lightweight direct edits instead of read-only-only turns');
   assert(!codexChatArgs.includes('-p') && !codexChatArgs.includes('--permission-mode'), 'Codex Chat must not receive Claude-only arguments');
   assert(!codexChatArgs.includes('--ephemeral'), 'Codex Chat must persist its own session instead of running ephemerally');
   assert(resumeCodexChatArgs[0] === 'exec' && resumeCodexChatArgs[1] === 'resume', `Codex Chat follow-up must resume its session: ${resumeCodexChatArgs.join(' ')}`);
@@ -146,6 +147,11 @@ async function main(): Promise<void> {
   assert(!diffArgs[diffArgs.indexOf('-p') + 1].includes('"requirements"'), 'planner diff must not expose internal goal.json as the goal contract');
 
   const plannerPrompt = await readFile(promptPath('planner'), 'utf8');
+  const chatPrompt = await readFile(promptPath('chat'), 'utf8');
+  assert(chatPrompt.includes('lightweight direct work'), 'Chat prompt must let Chat handle lightweight direct work');
+  assert(chatPrompt.includes('bounded read-only SSH or remote inspection'), 'Chat prompt must allow bounded read-only SSH or remote inspection');
+  assert(chatPrompt.includes('simple local edits'), 'Chat prompt must keep simple edits in Chat instead of forcing planner');
+  assert(!chatPrompt.includes('do not run deployment, SSH, or benchmark work yourself'), 'Chat prompt must not route all SSH work to executor');
   assert(!plannerPrompt.includes('unit=ms n=<integer>'), 'planner prompt must not hardcode metric unit=ms');
   assert(!plannerPrompt.includes('unit=<goal metric unit>'), 'planner prompt must not require a fixed GOAL.md metric unit schema');
   assert(plannerPrompt.includes('Fresh V1 does not require `.opt/measure.sh` to follow a WiCi metric schema'), 'planner prompt must keep measurement schemas optional');
@@ -437,7 +443,7 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
       .split('\n')
       .map((line) => JSON.parse(line) as { args: string[] });
     assert(argsLog.length === 2, `Codex Chat should have two invocations: ${JSON.stringify(argsLog)}`);
-    assert(argsLog[0].args.includes('--sandbox') && argsLog[0].args.includes('read-only'), `Codex Chat did not use read-only sandbox: ${JSON.stringify(argsLog)}`);
+    assert(argsLog[0].args.includes('--sandbox') && argsLog[0].args.includes('workspace-write'), `Codex Chat did not use lightweight direct-work sandbox: ${JSON.stringify(argsLog)}`);
     assert(!argsLog[0].args.includes('--permission-mode') && !argsLog[1].args.includes('--permission-mode'), `Codex Chat received Claude-only args: ${JSON.stringify(argsLog)}`);
     assert(argsLog[0].args[0] === 'exec' && argsLog[0].args[1] !== 'resume', `first Codex Chat call should start a persistent session: ${JSON.stringify(argsLog[0].args)}`);
     assert(!argsLog[0].args.includes('--ephemeral'), `first Codex Chat call must not be ephemeral: ${JSON.stringify(argsLog[0].args)}`);
