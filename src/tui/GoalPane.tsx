@@ -73,7 +73,7 @@ export const GoalPane = React.memo(function GoalPane({
           GOAL / PLAN {goal ? `v${goal.version}` : ''}{diff.changed ? ` d +${diff.added} -${diff.removed}` : ''}
         </Text>
       ) : null}
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" height={viewportHeight} overflow="hidden">
         {view.lines.map((line, index) => (
           <Text key={`${view.start + index}-${line}`} color={goalLineColor(line)}>
             {line || ' '}

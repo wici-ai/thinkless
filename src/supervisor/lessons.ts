@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import { appendJsonLine, readJsonLines } from '../shared/atomic.js';
+import { commandExists } from '../shared/commands.js';
 import type { LedgerEntry, LessonEntry, WiCiConfig } from '../shared/types.js';
 import type { RunPaths } from '../shared/paths.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput, parseJsonObjectFromText } from './claudeOutput.js';
@@ -109,9 +110,4 @@ function compactLesson(value: string | undefined): string | null {
   const text = value?.replace(/\s+/g, ' ').trim();
   if (!text) return null;
   return text.length > 500 ? `${text.slice(0, 497)}...` : text;
-}
-
-async function commandExists(command: string): Promise<boolean> {
-  const result = await execa('command', ['-v', command], { shell: true, reject: false });
-  return result.exitCode === 0;
 }

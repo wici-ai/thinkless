@@ -1,11 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { execa } from 'execa';
 import { appendJsonLine, atomicWriteJson, ensureDir, readJsonFileMaybe } from '../shared/atomic.js';
+import { commandExists } from '../shared/commands.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
 import { runtimeAgentFromCommand } from '../shared/runtime.js';
+import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput } from './claudeOutput.js';
 import { runClaudeStreamProcess } from './claudeProcess.js';
@@ -232,7 +233,11 @@ function currentPlanStep(plan: string): string | undefined {
 }
 
 function isBlankRunContext(ctx: ChatTurnContext): boolean {
-  return !ctx.goalDoc.trim() && !ctx.plan.trim() && ctx.recentEvents.length === 0;
+  return !ctx.goalDoc.trim() && !ctx.plan.trim() && ctx.recentEvents.every((event) => isInitialGoalRequiredText(event.message));
+}
+
+function isInitialGoalRequiredText(text: string | undefined): boolean {
+  return Boolean(text?.includes(INITIAL_GOAL_REQUIRED_MESSAGE));
 }
 
 function isLikelyQuestion(text: string): boolean {
@@ -515,11 +520,6 @@ function stripOuterFence(lines: string[]): string[] {
   if (!/^\s*```[A-Za-z0-9_-]*\s*$/.test(lines[start] ?? '')) return lines.slice(start, end);
   if (!/^\s*```\s*$/.test(lines[end - 1] ?? '')) return lines.slice(start, end);
   return lines.slice(start + 1, end - 1);
-}
-
-async function commandExists(command: string): Promise<boolean> {
-  const result = await execa('command', ['-v', command], { shell: true, reject: false });
-  return result.exitCode === 0;
 }
 
 async function readTextMaybe(path: string): Promise<string> {

@@ -11,19 +11,24 @@ export const Header = React.memo(function Header({ state }: { state: RunState })
   const last = state.events.at(-1);
   const iter = checkpoint?.iter ?? 0;
   const status = checkpoint?.supervisor_state ?? 'INTAKE';
+  const summary = [
+    'Thinkless',
+    status,
+    `iter ${iter}`,
+    metricSummary(goal, baseline?.best_metric ? primaryMetricValue(baseline.best_metric) : undefined, baseline?.best_metric.unit),
+    rollbackSummary(checkpoint),
+    costSummary(state.ledger),
+    elapsedSummary(state.events)
+  ].join('   ');
 
   return (
-    <Box justifyContent="space-between" paddingX={1}>
-      <Box flexShrink={0}>
-        <Text bold>Thinkless</Text>
+    <Box height={1} paddingX={1}>
+      <Box flexGrow={1} marginRight={1}>
+        <Text wrap="truncate-end">{summary}</Text>
       </Box>
-      <Text color={status === 'FAILED' ? 'red' : status === 'STOP' ? 'green' : 'cyan'}>{status}</Text>
-      <Text>iter {iter}</Text>
-      <Text>{metricSummary(goal, baseline?.best_metric ? primaryMetricValue(baseline.best_metric) : undefined, baseline?.best_metric.unit)}</Text>
-      <Text>{rollbackSummary(checkpoint)}</Text>
-      <Text>{costSummary(state.ledger)}</Text>
-      <Text>{elapsedSummary(state.events)}</Text>
-      <Text color={last?.level === 'error' ? 'red' : last?.level === 'warn' ? 'yellow' : 'gray'}>{last?.type ?? 'idle'}</Text>
+      <Text color={last?.level === 'error' ? 'red' : last?.level === 'warn' ? 'yellow' : 'gray'} wrap="truncate-end">
+        {last?.type ?? 'idle'}
+      </Text>
     </Box>
   );
 });

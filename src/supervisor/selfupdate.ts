@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import { readFile } from 'node:fs/promises';
+import { commandExists } from '../shared/commands.js';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, WiCiConfig } from '../shared/types.js';
 
@@ -209,8 +210,7 @@ export function parseClaudeProbeError(output: string, exitCode: number): string 
 }
 
 async function commandAvailable(command: string): Promise<boolean> {
-  const result = await execa('command', ['-v', command], { shell: true, reject: false });
-  return result.exitCode === 0;
+  return commandExists(command);
 }
 
 async function inspectWiCiVersion(): Promise<NonNullable<NonNullable<Checkpoint['tool_versions']>['wici']>> {

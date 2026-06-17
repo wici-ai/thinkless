@@ -49,6 +49,8 @@ async function main(): Promise<void> {
   assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'App must wake the supervisor after Chat writes an inbox injection');
   assert(files.app.includes('pendingSupervisorLaunchRef') && files.app.includes('setTimeout(() => launchSupervisor'), 'App must not drop Chat wakeups that arrive while the supervisor is still exiting');
   assert(files.app.includes('runtimeSelection') && files.app.includes('formatRuntimeSelectorLine') && files.app.includes('runtimeSelectorOpen'), 'App must expose a visible per-workspace runtime selector in the TUI');
+  assert(files.app.includes('<WorkspaceTabs active={workspaceTab} />') && files.app.includes('wrap="truncate-end"') && files.app.includes('height={1} justifyContent="space-between"'), 'App must render aligned one-line workspace tabs and a truncating runtime selector');
+  assert(files.app.includes('const workspaceViewportHeight = Math.max(4, height - 9)') && files.app.includes('const chatViewportHeight = Math.max(4, height - 10)'), 'App must reserve rows for the tab line, pane footer, and bottom Chat input');
   assert(files.app.includes('isRuntimeSelectorToggle') && files.app.includes('cycleRuntimeValue') && files.app.includes('inputPaused={runtimeSelectorOpen}'), 'App must let users choose runtime fields from the TUI without typing into Chat');
   assert(files.app.includes('onRuntimeChange={setRuntimeSelection}'), 'App must still support typed runtime commands for custom values');
   assert(files.app.includes('runtime: runtimeSelection'), 'App must pass TUI runtime settings into supervisor launches');
@@ -102,7 +104,7 @@ async function main(): Promise<void> {
   assert(files.runtime.includes('RUNTIME_AGENTS') && files.runtime.includes('runtimeModelForAgent'), 'runtime settings must offer claude/codex agents with fixed models');
 
   assert(!files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && !files.chatAgent.includes('Recent Chat transcript'), 'Chat agent must not replay persisted Chat transcript into every prompt');
-  assert(files.chatAgent.includes('resumeSessionId') && files.chatAgent.includes("'exec',\n      'resume'") && !files.chatAgent.includes("'--ephemeral'"), 'Codex Chat must persist and resume its own session instead of running ephemerally');
+  assert(files.chatAgent.includes('resumeSessionId') && /'exec',\r?\n\s+'resume'/.test(files.chatAgent) && !files.chatAgent.includes("'--ephemeral'"), 'Codex Chat must persist and resume its own session instead of running ephemerally');
   assert(files.chatAgent.includes("'workspace-write'") && !files.chatAgent.includes("'read-only'"), 'Codex Chat must support lightweight direct work instead of read-only-only sandboxing');
   assert(!files.chatAgent.includes("'--permission-mode',\n    'plan'"), 'Claude Chat must not be forced into planner-only mode');
   assert(files.chatAgent.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatAgent.includes("writeChatSession(ctx.paths, 'codex'"), 'Chat sessions must be stored by agent so runtime changes do not overwrite another agent session');
@@ -140,6 +142,7 @@ async function main(): Promise<void> {
   assert(files.header.includes('rollbackSummary'), 'Header must show git rollback/checkpoint status');
   assert(files.header.includes('costSummary'), 'Header must show cumulative run cost');
   assert(files.header.includes('elapsedSummary'), 'Header must show elapsed run time');
+  assert(files.header.includes('const summary = [') && files.header.includes('height={1} paddingX={1}') && files.header.includes('wrap="truncate-end"'), 'Header must stay one line and truncate overflow instead of wrapping into the workspace');
 
   assert(files.state.includes("import chokidar from 'chokidar'"), 'useRunState must use chokidar for blackboard watching');
   for (const watched of ['paths.events', 'paths.codexRun', 'paths.goal', 'paths.goalDoc', 'paths.checkpoint', 'paths.baseline', 'paths.ledger', 'paths.plan', 'paths.outbox']) {

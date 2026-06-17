@@ -7,6 +7,7 @@ import { ExecPane } from './ExecPane.js';
 import { useRunState } from './useRunState.js';
 import { runSupervisor } from '../supervisor/index.js';
 import type { RunOptions, ToolMode } from '../shared/types.js';
+import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { enableMouseReporting, parseMouseInput } from './input.js';
 import { appendSupervisorError } from './supervisorLog.js';
 import {
@@ -47,7 +48,8 @@ export function App({
   const width = stdout.columns || 120;
   const inputContentWidth = Math.max(24, width - 4);
   const workspaceContentWidth = Math.max(32, width - 4);
-  const workspaceViewportHeight = Math.max(4, height - 8);
+  const workspaceViewportHeight = Math.max(4, height - 9);
+  const chatViewportHeight = Math.max(4, height - 10);
   const startedRef = useRef(false);
   const pendingSupervisorLaunchRef = useRef<{ goal?: string; goalSource?: RunOptions['goalSource']; planningContext?: string } | null>(null);
   const pendingWorkspaceFocusRef = useRef(false);
@@ -172,9 +174,12 @@ export function App({
       <Header state={state} />
       <Box flexGrow={1} borderStyle="round" borderColor={workspaceColor(workspaceTab)}>
         <Box flexDirection="column" height="100%" paddingX={1}>
-          <Text color={runtimeSelectorOpen ? 'yellow' : 'gray'} bold={runtimeSelectorOpen}>
-            {`CHAT / PLAN / EXECUTION  ${formatRuntimeSelectorLine(runtimeSelection, runtimePane, runtimeSelectorOpen ? runtimeField : null)}`}
-          </Text>
+          <Box height={1} justifyContent="space-between">
+            <WorkspaceTabs active={workspaceTab} />
+            <Text color={runtimeSelectorOpen ? 'yellow' : 'gray'} bold={runtimeSelectorOpen} wrap="truncate-end">
+              {formatRuntimeSelectorLine(runtimeSelection, runtimePane, runtimeSelectorOpen ? runtimeField : null)}
+            </Text>
+          </Box>
           {workspaceTab === 'chat' ? (
             <ChatHistoryPane
               interactive={interactive}
@@ -184,7 +189,7 @@ export function App({
               supervisorState={state.checkpoint?.supervisor_state}
               chat={state.chat}
               contentWidth={workspaceContentWidth}
-              viewportHeight={workspaceViewportHeight}
+              viewportHeight={chatViewportHeight}
               active={workspaceTab === 'chat' && !runtimeSelectorOpen}
               showTitle={false}
               systemLine={startError}
@@ -245,6 +250,33 @@ function workspaceColor(tab: WorkspaceTab): 'cyan' | 'magenta' | 'green' {
   return tab === 'plan' ? 'magenta' : 'green';
 }
 
+function WorkspaceTabs({ active }: { active: WorkspaceTab }) {
+  return (
+    <Box flexShrink={0}>
+      {WORKSPACE_TABS.map((tab, index) => (
+        <React.Fragment key={tab}>
+          <Text color={tab === active ? workspaceColor(tab) : 'gray'} bold={tab === active}>
+            {workspaceTabPill(tab, tab === active)}
+          </Text>
+          {index < WORKSPACE_TABS.length - 1 ? <Text color="gray">  </Text> : null}
+        </React.Fragment>
+      ))}
+    </Box>
+  );
+}
+
+function workspaceTabPill(tab: WorkspaceTab, active: boolean): string {
+  const label = workspaceTabLabel(tab);
+  return active ? `[${label}]` : ` ${label} `;
+}
+
+function workspaceTabLabel(tab: WorkspaceTab): string {
+  if (tab === 'chat') return 'CHAT';
+  if (tab === 'plan') return 'PLAN';
+  if (tab === 'execution') return 'EXECUTION';
+  return tab;
+}
+
 export function shouldAutoStartExistingRun(state: ReturnType<typeof useRunState>): boolean {
   if (!state.goal) return false;
   const supervisorState = state.checkpoint?.supervisor_state;
@@ -262,13 +294,11 @@ export function shouldUseChatAgentForBlankRun(input: {
 }
 
 function hasRunBlackboard(state: ReturnType<typeof useRunState>): boolean {
-  return Boolean(
-    state.goal ||
-      state.checkpoint ||
-      state.events.length > 0 ||
-      state.goalDoc.trim() ||
-      state.plan.trim() ||
-      state.ledger.length > 0 ||
-      state.outbox.length > 0
-  );
+  if (state.goal || state.checkpoint || state.goalDoc.trim() || state.plan.trim() || state.ledger.length > 0) return true;
+  if (state.outbox.some((message) => !isInitialGoalRequiredText(message.text))) return true;
+  return state.events.some((event) => !isInitialGoalRequiredText(event.message));
+}
+
+function isInitialGoalRequiredText(text: string | undefined): boolean {
+  return Boolean(text?.includes(INITIAL_GOAL_REQUIRED_MESSAGE));
 }

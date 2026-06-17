@@ -56,7 +56,7 @@ export const ExecPane = React.memo(function ExecPane({
           EXECUTION
         </Text>
       ) : null}
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" height={viewportHeight} overflow="hidden">
         {view.lines.map((line, index) => (
           <Text key={`${view.start + index}-${line}`} color={execLineColor(line)}>
             {line || ' '}

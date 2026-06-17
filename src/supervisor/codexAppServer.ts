@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface, type Interface } from 'node:readline';
 import { readFile } from 'node:fs/promises';
 import { appendFile } from 'node:fs/promises';
+import { resolveCommandForSpawn } from '../shared/commands.js';
 import { schemaPath, type RunPaths } from '../shared/paths.js';
 import type { Checkpoint, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
 import { CodexRunError, parseCodexRunEvents } from './codexRun.js';
@@ -194,9 +195,11 @@ class CodexAppServerClient {
   constructor(private readonly command: string, private readonly paths: RunPaths, private readonly effort?: string) {}
 
   async start(): Promise<void> {
-    this.child = spawn(this.command, ['app-server', ...codexEffortArgs(this.effort), '--listen', 'stdio://'], {
+    const resolved = await resolveCommandForSpawn(this.command, ['app-server', ...codexEffortArgs(this.effort), '--listen', 'stdio://']);
+    this.child = spawn(resolved.command, resolved.args, {
       cwd: this.paths.target,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: resolved.shell
     });
     this.child.stderr.setEncoding('utf8');
     this.child.stderr.on('data', (chunk: string) => {

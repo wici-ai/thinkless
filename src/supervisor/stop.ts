@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { execa } from 'execa';
+import { commandExists } from '../shared/commands.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { GoalFile, LedgerEntry, WiCiConfig } from '../shared/types.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput, parseJsonObjectFromText } from './claudeOutput.js';
@@ -104,8 +105,7 @@ async function worthItVerdict(
   analysis: StopAnalysis
 ): Promise<{ decision: 'continue' | 'stop'; reason: string }> {
   if (config.tools.mode !== 'stub') {
-    const exists = await execa('command', ['-v', config.tools.planner.command], { shell: true, reject: false });
-    if (exists.exitCode === 0) {
+    if (await commandExists(config.tools.planner.command)) {
       try {
         const prompt = await readFile(promptPath('stop-verdict'), 'utf8');
         const result = await execa(

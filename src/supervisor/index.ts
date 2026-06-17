@@ -2,6 +2,7 @@ import { chmod } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
+import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.js';
 import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, IterResult, LedgerEntry, RunOptions, ToolInvocationResult, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
 import { hashFile, iterationSnapshotPath, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
@@ -1298,7 +1299,7 @@ async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | und
     return existing;
   }
   if (!text?.trim()) {
-    throw new Error('Initial goal is required. In the TUI, type the first goal in Chat; for headless run, pass --goal.');
+    throw new Error(INITIAL_GOAL_REQUIRED_MESSAGE);
   }
   const initialText = text.trim();
   const constraints = ['Keep GOAL.md and PLAN.md as the source of truth.', 'Commit confirmed progress and keep rollback available.'];

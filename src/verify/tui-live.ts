@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     ],
     {
       cwd: resolve('.'),
-      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color' },
+      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1' },
       stdio: ['ignore', 'pipe', 'pipe']
     }
   );
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   assert(ledger[0].status === 'keep', `expected accepted live TUI row, got ${ledger[0].status}`);
 
   const ui = stripAnsi(output);
-  assert(ui.includes('CHAT / PLAN / EXECUTION'), `live TUI output missing switchable workspace layout:\n${ui.slice(-5000)}`);
+  assert(ui.includes('CHAT') && ui.includes('PLAN') && ui.includes('EXECUTION'), `live TUI output missing switchable workspace layout:\n${ui.slice(-5000)}`);
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `live TUI target worktree dirty:\n${status}`);

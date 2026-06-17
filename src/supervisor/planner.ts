@@ -1,8 +1,8 @@
 import { chmod, readFile, readdir, stat } from 'node:fs/promises';
-import { execa } from 'execa';
 import { createHash } from 'node:crypto';
 import { join, relative } from 'node:path';
 import { atomicWriteFile, atomicWriteJson, exists, makeReadOnly, makeWritable } from '../shared/atomic.js';
+import { commandExists } from '../shared/commands.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { EvalSha256, GoalFile, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
 import { applyPlanDiff } from './plan.js';
@@ -49,11 +49,6 @@ export interface PlannerClarificationResume {
 
 const PLANNER_IDLE_TIMEOUT_MS = 10 * 60_000;
 const PLANNER_HARD_TIMEOUT_MS = 60 * 60_000;
-
-async function commandExists(command: string): Promise<boolean> {
-  const result = await execa('command', ['-v', command], { shell: true, reject: false });
-  return result.exitCode === 0;
-}
 
 function requirementText(goal: GoalFile): string {
   return goal.requirements.filter((req) => req.status === 'active').map((req) => req.text).join('\n');
