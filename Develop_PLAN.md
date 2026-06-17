@@ -28,7 +28,8 @@ This section records the next feature slice being implemented before the older h
   - existing runs write Chat-agent updates to the inbox, preserving hot reload behavior;
   - blank runs return the update to the TUI without writing an inbox item, so the TUI can launch the initial goal exactly once.
 - Keep the Chat agent responsible for deciding when conversation has become actionable; avoid adding prompt-specific trigger hacks for one-off examples.
-- Include the recent persisted Chat transcript in every Chat-agent turn context so switching agent or effort does not reset the effective conversation context.
+- Keep Chat context in the agent's own persisted session. Switching effort must not rebuild the conversation by replaying `.wici/chat.jsonl`.
+- Store Chat session identifiers by agent so `claude` and `codex` Chat sessions do not overwrite each other.
 - Before launching the blank-run planner, build a bounded transcript from prior Chat turns plus the triggering turn, and store it in the initial `GOAL.md` constraints as `Chat context before planning`.
 - Keep degraded/stub Chat deterministic:
   - questions and "read/inspect first" messages stay conversational;
@@ -60,7 +61,7 @@ This section records the next feature slice being implemented before the older h
 - Existing-run Chat updates still flow through inbox and planner diff.
 - TUI structure verification proves the bottom input no longer has first-message goal bypass logic.
 - Runtime agent/effort values are visible and selectable in the TUI; fixed models are derived from the selected agent and passed into Chat, Planner, and Executor command builders.
-- Changing Chat effort or agent keeps context because the next Chat turn includes the durable `.wici/chat.jsonl` transcript.
+- Changing Chat effort keeps context by resuming the same Chat agent session rather than replaying the transcript.
 - Existing typecheck and core TUI verifiers pass.
 
 # Develop Plan - Handoff And Resume Improvements

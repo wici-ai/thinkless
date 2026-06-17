@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
-import { buildChatArgs, buildCodexChatArgs, runChatTurn } from '../supervisor/chatAgent.js';
+import { buildChatArgs, buildCodexChatArgs, extractCodexSessionId, runChatTurn } from '../supervisor/chatAgent.js';
 import {
   buildInitialPlannerArgs,
   buildInitialPlannerResumeArgs,
@@ -70,6 +70,14 @@ async function main(): Promise<void> {
     model: 'gpt-5.5',
     effort: 'medium'
   });
+  const resumeCodexChatArgs = buildCodexChatArgs({
+    target: resolve('fixture/slow-target'),
+    prompt: 'chat follow-up',
+    outputLastMessage: '.wici/artifacts/chat-codex-test-2.txt',
+    model: 'gpt-5.5',
+    effort: 'xhigh',
+    resumeSessionId: 'chat-session-123'
+  });
   const firstCodex = buildExecutorArgs({
     iter: 1,
     target: resolve('fixture/slow-target'),
@@ -115,6 +123,11 @@ async function main(): Promise<void> {
   assert(codexChatArgs.includes('-c') && codexChatArgs.includes('model_reasoning_effort="medium"'), 'Codex Chat must map effort to Codex config override');
   assert(codexChatArgs[codexChatArgs.indexOf('--sandbox') + 1] === 'read-only', 'Codex Chat must run as a read-only conversation turn');
   assert(!codexChatArgs.includes('-p') && !codexChatArgs.includes('--permission-mode'), 'Codex Chat must not receive Claude-only arguments');
+  assert(!codexChatArgs.includes('--ephemeral'), 'Codex Chat must persist its own session instead of running ephemerally');
+  assert(resumeCodexChatArgs[0] === 'exec' && resumeCodexChatArgs[1] === 'resume', `Codex Chat follow-up must resume its session: ${resumeCodexChatArgs.join(' ')}`);
+  assert(resumeCodexChatArgs.includes('chat-session-123') && !resumeCodexChatArgs.includes('-C'), `Codex Chat resume must use the session id and spawn cwd, not -C: ${resumeCodexChatArgs.join(' ')}`);
+  assert(resumeCodexChatArgs.includes('model_reasoning_effort="xhigh"'), 'Codex Chat resume must apply changed effort without changing session');
+  assert(extractCodexSessionId(JSON.stringify({ type: 'thread.started', thread_id: 'chat-session-123' })) === 'chat-session-123', 'Codex Chat must extract thread_id session ids');
   assert(!plannerArgs[plannerArgs.indexOf('-p') + 1].includes('ULTRAPLAN'), 'planner prompt must not force ultra/high-effort wording');
   assert(!plannerArgs.includes('--json-schema'), 'initial planner must not use a JSON schema as a second PLAN');
   assert(!diffArgs.includes('--json-schema'), 'diff planner must not use a JSON schema as a second PLAN');
@@ -366,19 +379,22 @@ if (args.includes('--version')) {
 }
 const target = process.env.WICI_CODEX_CHAT_TARGET;
 const out = args[args.indexOf('--output-last-message') + 1];
+const resumeIndex = args.indexOf('resume');
+const resumed = resumeIndex >= 0;
 mkdirSync(dirname(out), { recursive: true });
 mkdirSync(join(target, '.wici'), { recursive: true });
 appendFileSync(join(target, '.wici', 'fake-codex-chat-args.jsonl'), JSON.stringify({ args }) + '\\n');
 writeFileSync(out, [
   '## REPLY',
   '',
-  'Codex Chat can discuss this before planning.',
+  resumed ? 'Codex Chat resumed the same session.' : 'Codex Chat can discuss this before planning.',
   '',
   '## UPDATE',
   '',
   'kind: requirement',
   'Build the requested feature after planning.'
 ].join('\\n'));
+console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-codex-chat-session' }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'unused fallback' } }));
 `
   );
@@ -404,9 +420,32 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     assert(!result.degraded, `Codex Chat should not degrade through Claude fallback: ${JSON.stringify(result)}`);
     assert(result.reply.includes('Codex Chat can discuss'), `Codex Chat reply not parsed: ${JSON.stringify(result)}`);
     assert(result.update?.text.includes('Build the requested feature'), `Codex Chat update not parsed: ${JSON.stringify(result)}`);
-    const argsLog = (await readFile(join(paths.wici, 'fake-codex-chat-args.jsonl'), 'utf8')).trim();
-    assert(argsLog.includes('"--sandbox"') && argsLog.includes('"read-only"'), `Codex Chat did not use read-only sandbox: ${argsLog}`);
-    assert(!argsLog.includes('"--permission-mode"'), `Codex Chat received Claude-only args: ${argsLog}`);
+    const followUp = await runChatTurn({
+      paths,
+      userText: 'Use higher effort but keep this chat context.',
+      goalDoc: '',
+      plan: '',
+      recentEvents: [],
+      mode: 'real',
+      runtime: { chat: { agent: 'codex', effort: 'xhigh' } },
+      writeUpdate: false
+    });
+    assert(!followUp.degraded, `Codex Chat follow-up should resume without degrading: ${JSON.stringify(followUp)}`);
+    assert(followUp.reply.includes('resumed the same session'), `Codex Chat follow-up did not parse resumed reply: ${JSON.stringify(followUp)}`);
+    const argsLog = (await readFile(join(paths.wici, 'fake-codex-chat-args.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { args: string[] });
+    assert(argsLog.length === 2, `Codex Chat should have two invocations: ${JSON.stringify(argsLog)}`);
+    assert(argsLog[0].args.includes('--sandbox') && argsLog[0].args.includes('read-only'), `Codex Chat did not use read-only sandbox: ${JSON.stringify(argsLog)}`);
+    assert(!argsLog[0].args.includes('--permission-mode') && !argsLog[1].args.includes('--permission-mode'), `Codex Chat received Claude-only args: ${JSON.stringify(argsLog)}`);
+    assert(argsLog[0].args[0] === 'exec' && argsLog[0].args[1] !== 'resume', `first Codex Chat call should start a persistent session: ${JSON.stringify(argsLog[0].args)}`);
+    assert(!argsLog[0].args.includes('--ephemeral'), `first Codex Chat call must not be ephemeral: ${JSON.stringify(argsLog[0].args)}`);
+    assert(argsLog[1].args[0] === 'exec' && argsLog[1].args[1] === 'resume', `second Codex Chat call must resume: ${JSON.stringify(argsLog[1].args)}`);
+    assert(argsLog[1].args.includes('fake-codex-chat-session'), `second Codex Chat call must resume the recorded chat session: ${JSON.stringify(argsLog[1].args)}`);
+    assert(argsLog[1].args.includes('model_reasoning_effort="xhigh"'), `second Codex Chat call must apply the changed effort: ${JSON.stringify(argsLog[1].args)}`);
+    const session = JSON.parse(await readFile(paths.chatSession, 'utf8')) as { sessions?: { codex?: { session_id?: string } } };
+    assert(session.sessions?.codex?.session_id === 'fake-codex-chat-session', `Codex Chat session was not stored by agent: ${JSON.stringify(session)}`);
   } finally {
     process.env.PATH = originalPath;
     if (originalTarget === undefined) delete process.env.WICI_CODEX_CHAT_TARGET;

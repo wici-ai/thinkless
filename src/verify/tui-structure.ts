@@ -9,7 +9,7 @@ import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../
 import { disableMouseReporting, isMouseInput, mouseScrollDelta, parseMouseInput } from '../tui/input.js';
 import { cycleRuntimeValue, defaultRuntimeSelection, formatRuntimeSelectorLine, parseRuntimeCommand } from '../tui/runtimeSettings.js';
 import { viewport, wrapLines, wrappedViewport } from '../tui/viewport.js';
-import { buildChatPrompt, buildFallbackChatTurn, shouldStartPlannerFromBlankChat, summarizePlanForChat } from '../supervisor/chatAgent.js';
+import { buildFallbackChatTurn, shouldStartPlannerFromBlankChat, summarizePlanForChat } from '../supervisor/chatAgent.js';
 
 const tuiRoot = join(TOOL_ROOT, 'src', 'tui');
 
@@ -101,7 +101,9 @@ async function main(): Promise<void> {
   assert(files.runtime.includes("RUNTIME_FIELDS: RuntimeField[] = ['agent', 'effort']"), 'runtime selector must expose agent and effort only');
   assert(files.runtime.includes('RUNTIME_AGENTS') && files.runtime.includes('runtimeModelForAgent'), 'runtime settings must offer claude/codex agents with fixed models');
 
-  assert(files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && files.chatAgent.includes('Recent Chat transcript'), 'Chat agent prompt must carry durable Chat history across agent/effort changes');
+  assert(!files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && !files.chatAgent.includes('Recent Chat transcript'), 'Chat agent must not replay persisted Chat transcript into every prompt');
+  assert(files.chatAgent.includes('resumeSessionId') && files.chatAgent.includes("'exec',\n      'resume'") && !files.chatAgent.includes("'--ephemeral'"), 'Codex Chat must persist and resume its own session instead of running ephemerally');
+  assert(files.chatAgent.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatAgent.includes("writeChatSession(ctx.paths, 'codex'"), 'Chat sessions must be stored by agent so runtime changes do not overwrite another agent session');
   assert(!files.chatAgent.includes('normalizeChatTurnResult'), 'Chat agent must trust real agent UPDATE decisions instead of normalizing them with local prompt hacks');
   assert(files.chatAgent.includes('shouldStartPlannerFromBlankChat') && files.chatAgent.includes('hasConcreteActionIntent'), 'Chat fallback must use a generalized action-intent guard only when the agent is degraded');
   assert(files.types.includes('planningContext?: string'), 'RunOptions must carry planningContext from TUI to supervisor');
@@ -165,7 +167,6 @@ async function main(): Promise<void> {
   verifyRuntimeSettings();
   verifyChatFallback();
   verifyChatPlannerGuard();
-  verifyChatPromptHistory();
   verifyBlankRunPlanningContext();
   verifyChatPromptCompression();
   verifyExecEventUsage();
@@ -283,25 +284,6 @@ function verifyChatPlannerGuard(): void {
     shouldStartPlannerFromBlankChat('可以，开始修复这个问题', { kind: 'add_requirement', text: 'Fix the discussed issue.' }),
     'blank-run planner guard must allow explicit start/fix turns'
   );
-}
-
-function verifyChatPromptHistory(): void {
-  const prompt = buildChatPrompt(
-    {
-      paths: {} as never,
-      userText: '继续刚才的问题',
-      goalDoc: '',
-      plan: '',
-      recentEvents: []
-    },
-    [
-      { ts: '2026-06-17T10:00:00.000Z', role: 'user', text: '先阅读代码，别开始 planner。' },
-      { ts: '2026-06-17T10:00:01.000Z', role: 'assistant', text: '我看到 ChatPane 管输入，App 管 supervisor。' }
-    ]
-  );
-  assert(prompt.includes('Recent Chat transcript'), `Chat prompt missing transcript heading:\n${prompt}`);
-  assert(prompt.includes('USER: 先阅读代码'), `Chat prompt missing previous user turn:\n${prompt}`);
-  assert(prompt.includes('ASSISTANT: 我看到 ChatPane'), `Chat prompt missing previous assistant turn:\n${prompt}`);
 }
 
 function verifyBlankRunPlanningContext(): void {

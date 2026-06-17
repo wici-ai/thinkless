@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execa } from 'execa';
-import { appendJsonLine, atomicWriteJson, ensureDir, readJsonFileMaybe, readJsonLines } from '../shared/atomic.js';
+import { appendJsonLine, atomicWriteJson, ensureDir, readJsonFileMaybe } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
@@ -17,9 +17,6 @@ const RECENT_EVENT_LINES = 12;
 const CHAT_PLAN_MAX_CHARS = 6_000;
 const CHAT_GOAL_MAX_CHARS = 4_000;
 const CHAT_EVENT_MESSAGE_MAX_CHARS = 240;
-const CHAT_HISTORY_MAX_ENTRIES = 18;
-const CHAT_HISTORY_MAX_CHARS = 8_000;
-const CHAT_HISTORY_ENTRY_MAX_CHARS = 1_200;
 
 export interface ChatUpdate {
   kind: 'add_requirement' | 'steer';
@@ -80,11 +77,9 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
 
     const systemPrompt = await readFile(promptPath('chat'), 'utf8');
     const safetyText = formatSafetyForPrompt(config);
-    const chatHistory = await readRecentChatHistory(ctx.paths);
-    const userPrompt = buildChatPrompt(ctx, chatHistory);
-    if (agent === 'codex') return await runCodexChatTurn(ctx, command, { model: chatTool.model, effort: chatTool.effort, systemPrompt, safetyText, userPrompt });
-
-    const sessionId = await readChatSession(ctx.paths);
+    const userPrompt = buildChatPrompt(ctx);
+    const sessionId = await readChatSession(ctx.paths, agent);
+    if (agent === 'codex') return await runCodexChatTurn(ctx, command, { model: chatTool.model, effort: chatTool.effort, systemPrompt, safetyText, userPrompt, sessionId });
 
     let result = await runClaudeStreamProcess(command, buildChatArgs({ userPrompt, systemPrompt, safetyText, sessionId, model: chatTool.model, effort: chatTool.effort }), {
       cwd: ctx.paths.target,
@@ -103,7 +98,7 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
 
     const parsed = parseChatResponse(result.stdout);
     if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, `${label} returned no usable reply.`);
-    if (parsed.sessionId) await writeChatSession(ctx.paths, parsed.sessionId);
+    if (parsed.sessionId) await writeChatSession(ctx.paths, agent, parsed.sessionId);
     // Respect the agent's judgment: a reply with no UPDATE is pure conversation.
     return { reply: parsed.reply, update: parsed.update, degraded: false };
   } catch (error) {
@@ -120,25 +115,15 @@ async function runCodexChatTurn(
     systemPrompt: string;
     safetyText?: string;
     userPrompt: string;
+    sessionId?: string;
   }
 ): Promise<ChatTurnResult> {
   await ensureDir(ctx.paths.artifacts);
   const outputLastMessage = join(ctx.paths.artifacts, `chat-codex-${Date.now()}.txt`);
-  const result = await runClaudeStreamProcess(
-    command,
-    buildCodexChatArgs({
-      target: ctx.paths.target,
-      prompt: buildCodexChatPrompt(input),
-      outputLastMessage,
-      model: input.model,
-      effort: input.effort
-    }),
-    {
-      cwd: ctx.paths.target,
-      idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS,
-      hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
-    }
-  );
+  let result = await runCodexChatProcess(ctx, command, input, outputLastMessage, input.sessionId);
+  if (input.sessionId && (result.timeoutReason || result.exitCode !== 0)) {
+    result = await runCodexChatProcess(ctx, command, input, outputLastMessage, undefined);
+  }
   if (result.timeoutReason || result.exitCode !== 0) {
     return buildFallbackChatTurn(ctx, result.timeoutReason ? `Codex Chat timed out: ${result.timeoutReason}.` : `Codex Chat exited with code ${result.exitCode}.`);
   }
@@ -146,7 +131,40 @@ async function runCodexChatTurn(
   const finalMessage = await readTextMaybe(outputLastMessage);
   const parsed = parseChatFinalMessage(finalMessage) ?? parseCodexChatResponse(result.stdout);
   if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, 'Codex Chat returned no usable reply.');
+  const sessionId = parsed.sessionId ?? extractCodexSessionId(result.stdout) ?? input.sessionId;
+  if (sessionId) await writeChatSession(ctx.paths, 'codex', sessionId);
   return { reply: parsed.reply, update: parsed.update, degraded: false };
+}
+
+function runCodexChatProcess(
+  ctx: ChatTurnContext,
+  command: string,
+  input: {
+    model?: string;
+    effort?: string;
+    systemPrompt: string;
+    safetyText?: string;
+    userPrompt: string;
+  },
+  outputLastMessage: string,
+  sessionId: string | undefined
+): ReturnType<typeof runClaudeStreamProcess> {
+  return runClaudeStreamProcess(
+    command,
+    buildCodexChatArgs({
+      target: ctx.paths.target,
+      prompt: buildCodexChatPrompt(input),
+      outputLastMessage,
+      model: input.model,
+      effort: input.effort,
+      resumeSessionId: sessionId
+    }),
+    {
+      cwd: ctx.paths.target,
+      idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS,
+      hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
+    }
+  );
 }
 
 export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Chat agent unavailable.'): ChatTurnResult {
@@ -268,7 +286,24 @@ export function buildCodexChatArgs(input: {
   outputLastMessage: string;
   model?: string;
   effort?: string;
+  resumeSessionId?: string;
 }): string[] {
+  if (input.resumeSessionId) {
+    return [
+      'exec',
+      'resume',
+      ...codexModelArgs(input.model),
+      ...codexEffortArgs(input.effort),
+      '--sandbox',
+      'read-only',
+      '--json',
+      '--output-last-message',
+      input.outputLastMessage,
+      '--skip-git-repo-check',
+      input.resumeSessionId,
+      input.prompt
+    ];
+  }
   return [
     'exec',
     ...codexModelArgs(input.model),
@@ -281,7 +316,6 @@ export function buildCodexChatArgs(input: {
     '-C',
     input.target,
     '--skip-git-repo-check',
-    '--ephemeral',
     input.prompt
   ];
 }
@@ -320,7 +354,7 @@ function codexEffortArgs(effort: string | undefined): string[] {
   return ['-c', `model_reasoning_effort=${JSON.stringify(normalized)}`];
 }
 
-export function buildChatPrompt(ctx: ChatTurnContext, chatHistory: ChatLogEntry[] = []): string {
+export function buildChatPrompt(ctx: ChatTurnContext): string {
   const events =
     ctx.recentEvents
       .slice(-RECENT_EVENT_LINES)
@@ -328,33 +362,10 @@ export function buildChatPrompt(ctx: ChatTurnContext, chatHistory: ChatLogEntry[
       .join('\n') || '(no run events yet)';
   return [
     `User message:\n${ctx.userText}`,
-    `\nRecent Chat transcript (durable conversation memory; includes prior turns even if agent or effort changed):\n${formatChatTranscriptForPrompt(chatHistory)}`,
     `\nCurrent GOAL.md:\n${truncateForChat(ctx.goalDoc.trim(), CHAT_GOAL_MAX_CHARS) || '(none yet)'}`,
     `\nCurrent PLAN.md summary:\n${summarizePlanForChat(ctx.plan)}`,
     `\nRecent run events:\n${events}`
   ].join('\n');
-}
-
-async function readRecentChatHistory(paths: RunPaths): Promise<ChatLogEntry[]> {
-  try {
-    const entries = await readJsonLines<ChatLogEntry>(paths.chat);
-    return entries.slice(-CHAT_HISTORY_MAX_ENTRIES);
-  } catch {
-    return [];
-  }
-}
-
-function formatChatTranscriptForPrompt(entries: ChatLogEntry[]): string {
-  if (entries.length === 0) return '(none yet)';
-  const text = entries
-    .map((entry) => {
-      const role = entry.role.toUpperCase();
-      const body = `${role}: ${truncateForChat(entry.text.trim(), CHAT_HISTORY_ENTRY_MAX_CHARS)}`;
-      const update = entry.update ? `\n${role} UPDATE (${entry.update.kind}): ${truncateForChat(entry.update.text.trim(), CHAT_HISTORY_ENTRY_MAX_CHARS)}` : '';
-      return `${body}${update}`;
-    })
-    .join('\n\n');
-  return truncateForChat(text, CHAT_HISTORY_MAX_CHARS);
 }
 
 export function summarizePlanForChat(plan: string, maxChars = CHAT_PLAN_MAX_CHARS): string {
@@ -433,6 +444,29 @@ function parseCodexChatResponse(raw: string): ParsedChat | null {
     if (parsed) return parsed;
   }
   return null;
+}
+
+export function extractCodexSessionId(raw: string): string | undefined {
+  for (const line of raw.split(/\r?\n/)) {
+    const record = parseJsonRecord(line.trim());
+    if (!record) continue;
+    const direct =
+      stringValue(record.session_id) ??
+      stringValue(record.sessionId) ??
+      stringValue(record.thread_id) ??
+      stringValue(record.threadId) ??
+      stringValue(record.conversation_id);
+    if (direct) return direct;
+
+    const params = recordValue(record.params);
+    const fromParams = stringValue(params?.threadId) ?? stringValue(params?.thread_id) ?? stringValue(recordValue(params?.thread)?.id);
+    if (fromParams) return fromParams;
+
+    const thread = recordValue(record.thread);
+    const fromThread = stringValue(thread?.id) ?? stringValue(thread?.sessionId) ?? stringValue(thread?.session_id);
+    if (fromThread) return fromThread;
+  }
+  return undefined;
 }
 
 function parseChatFinalMessage(text: string, sessionId?: string): ParsedChat | null {
@@ -516,13 +550,31 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-async function readChatSession(paths: RunPaths): Promise<string | undefined> {
-  const data = await readJsonFileMaybe<{ session_id?: string }>(paths.chatSession);
-  return data?.session_id;
+type ChatSessionAgent = 'claude' | 'codex';
+
+interface ChatSessionFile {
+  session_id?: string;
+  updated_at?: string;
+  sessions?: Partial<Record<ChatSessionAgent, { session_id?: string; updated_at?: string }>>;
 }
 
-async function writeChatSession(paths: RunPaths, sessionId: string): Promise<void> {
-  await atomicWriteJson(paths.chatSession, { session_id: sessionId, updated_at: timestamp() });
+async function readChatSession(paths: RunPaths, agent: ChatSessionAgent): Promise<string | undefined> {
+  const data = await readJsonFileMaybe<ChatSessionFile>(paths.chatSession);
+  return data?.sessions?.[agent]?.session_id ?? (agent === 'claude' ? data?.session_id : undefined);
+}
+
+async function writeChatSession(paths: RunPaths, agent: ChatSessionAgent, sessionId: string): Promise<void> {
+  const current = (await readJsonFileMaybe<ChatSessionFile>(paths.chatSession)) ?? {};
+  const updatedAt = timestamp();
+  await atomicWriteJson(paths.chatSession, {
+    ...current,
+    ...(agent === 'claude' ? { session_id: sessionId } : {}),
+    updated_at: updatedAt,
+    sessions: {
+      ...(current.sessions ?? {}),
+      [agent]: { session_id: sessionId, updated_at: updatedAt }
+    }
+  });
 }
 
 async function appendChat(paths: RunPaths, entry: ChatLogEntry): Promise<void> {
