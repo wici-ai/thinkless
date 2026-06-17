@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { exists } from '../shared/atomic.js';
@@ -8,9 +8,48 @@ import { runPaths } from '../shared/paths.js';
 const target = resolve('fixture/demo-tui-target');
 
 async function main(): Promise<void> {
+  const output = await runDemo(['--fresh']);
+
+  const paths = runPaths(target);
+  assert(await exists(`${target}/package.json`), 'demo command did not create the sample target package.json');
+  assert((await readFile(`${target}/src/hotpath.js`, 'utf8')).includes('uniqueSorted'), 'demo command did not create the sample hot path');
+  assert(!(await exists(paths.goal)), 'fresh demo TUI must not write .wici/goal.json before Chat intake');
+  assert(!(await exists(paths.goalDoc)), 'fresh demo TUI must not write GOAL.md before Chat intake');
+  assert(!(await exists(paths.plan)), 'fresh demo TUI must not write PLAN.md before Chat intake');
+  assert(!(await exists(paths.checkpoint)), 'fresh demo TUI must not write checkpoint.json before Chat intake');
+  assert(!(await exists(paths.events)), 'fresh demo TUI must not write events.jsonl before Chat intake');
+
+  const ui = stripAnsi(output);
+  assert(ui.includes('Thinkless') && ui.includes('CHAT') && ui.includes('PLAN') && ui.includes('EXECUTION'), `demo TUI did not render the Chat plus switchable workspace layout:\n${ui}`);
+  assert(!ui.includes('Reduce p99 latency while preserving correctness'), 'demo TUI must not seed the old default goal');
+  assert(!ui.includes('SUPERVISOR_START'), 'demo TUI must not start the supervisor before Chat intake');
+
+  await mkdir(paths.wici, { recursive: true });
+  await writeFile(paths.chatSession, `${JSON.stringify({ sessions: { claude: { session_id: 'preserve-demo-session' } } }, null, 2)}\n`);
+  await runDemo([]);
+  const session = await readFile(paths.chatSession, 'utf8');
+  assert(session.includes('preserve-demo-session'), 'demo without --fresh must preserve existing .wici chat session context');
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        target,
+        demo_created_target: true,
+        chat_first_no_blackboard_writes: true,
+        rendered_switchable_workspace: true,
+        non_fresh_preserves_chat_session: true
+      },
+      null,
+      2
+    )
+  );
+}
+
+async function runDemo(extraArgs: string[]): Promise<string> {
   const child = spawn(
     process.execPath,
-    ['--import', 'tsx', 'src/cli.tsx', 'demo', '--target', target, '--fresh', '--max-iters', '1', '--mode', 'stub', '--no-fullscreen'],
+    ['--import', 'tsx', 'src/cli.tsx', 'demo', '--target', target, ...extraArgs, '--max-iters', '1', '--mode', 'stub', '--no-fullscreen'],
     {
       cwd: resolve('.'),
       env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1' },
@@ -28,34 +67,7 @@ async function main(): Promise<void> {
 
   await waitForExit(child, 5000);
   await stopChild(child);
-
-  const paths = runPaths(target);
-  assert(await exists(`${target}/package.json`), 'demo command did not create the sample target package.json');
-  assert((await readFile(`${target}/src/hotpath.js`, 'utf8')).includes('uniqueSorted'), 'demo command did not create the sample hot path');
-  assert(!(await exists(paths.goal)), 'fresh demo TUI must not write .wici/goal.json before Chat intake');
-  assert(!(await exists(paths.goalDoc)), 'fresh demo TUI must not write GOAL.md before Chat intake');
-  assert(!(await exists(paths.plan)), 'fresh demo TUI must not write PLAN.md before Chat intake');
-  assert(!(await exists(paths.checkpoint)), 'fresh demo TUI must not write checkpoint.json before Chat intake');
-  assert(!(await exists(paths.events)), 'fresh demo TUI must not write events.jsonl before Chat intake');
-
-  const ui = stripAnsi(output);
-  assert(ui.includes('Thinkless') && ui.includes('CHAT') && ui.includes('PLAN') && ui.includes('EXECUTION'), `demo TUI did not render the Chat plus switchable workspace layout:\n${ui}`);
-  assert(!ui.includes('Reduce p99 latency while preserving correctness'), 'demo TUI must not seed the old default goal');
-  assert(!ui.includes('SUPERVISOR_START'), 'demo TUI must not start the supervisor before Chat intake');
-
-  console.log(
-    JSON.stringify(
-      {
-        ok: true,
-        target,
-        demo_created_target: true,
-        chat_first_no_blackboard_writes: true,
-        rendered_switchable_workspace: true
-      },
-      null,
-      2
-    )
-  );
+  return output;
 }
 
 async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {

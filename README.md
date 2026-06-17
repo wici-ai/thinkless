@@ -117,11 +117,13 @@ npm run verify:skills
 npm run verify:context-condensation
 ```
 
-Open a fresh local demo target in the Chat-first TUI:
+Open or resume the local demo target in the Chat-first TUI:
 
 ```bash
 npm run dev
 ```
+
+Use `npx tsx src/cli.tsx demo --fresh` when you intentionally want to reset the demo target.
 
 Run headlessly over a target:
 

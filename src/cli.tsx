@@ -81,16 +81,16 @@ program
 
 program
   .command('demo')
-  .description('Create a fresh sample target and open the Chat-first TUI')
+  .description('Create or reopen a sample target in the Chat-first TUI')
   .option('--target <path>', 'target directory', DEFAULT_DEMO_TARGET)
-  .option('--fresh', 'recreate the target before opening; default for fixture/demo-target', false)
+  .option('--fresh', 'recreate the target before opening', false)
   .option('--max-iters <n>', 'max iterations', (value) => Number(value))
   .option('--mode <mode>', 'tool mode: real, auto, or stub', 'stub')
   .option('--lock-mode <mode>', 'eval lock mode: auto or manual')
   .option('--no-fullscreen', 'render without fullscreen mode')
   .action(async (options: { target: string; fresh: boolean; maxIters?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; fullscreen: boolean }) => {
     const targetArg = options.target || DEFAULT_DEMO_TARGET;
-    const force = options.fresh || resolve(targetArg) === resolve(DEFAULT_DEMO_TARGET);
+    const force = options.fresh;
     const target = await createSampleTarget(targetArg, force);
     renderTui({
       target,
