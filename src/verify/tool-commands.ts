@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
-import { buildChatArgs } from '../supervisor/chatAgent.js';
+import { buildChatArgs, buildCodexChatArgs, runChatTurn } from '../supervisor/chatAgent.js';
 import {
   buildInitialPlannerArgs,
   buildInitialPlannerResumeArgs,
@@ -63,6 +63,13 @@ async function main(): Promise<void> {
     model: 'claude-chat-test',
     effort: 'low'
   });
+  const codexChatArgs = buildCodexChatArgs({
+    target: resolve('fixture/slow-target'),
+    prompt: 'chat with read-only context',
+    outputLastMessage: '.wici/artifacts/chat-codex-test.txt',
+    model: 'gpt5.5',
+    effort: 'medium'
+  });
   const firstCodex = buildExecutorArgs({
     iter: 1,
     target: resolve('fixture/slow-target'),
@@ -103,6 +110,11 @@ async function main(): Promise<void> {
   assert(customDiffArgs[customDiffArgs.indexOf('--effort') + 1] === 'xhigh', 'planner diff must support explicit effort selection');
   assert(chatArgs[chatArgs.indexOf('--model') + 1] === 'claude-chat-test', 'Chat agent must support explicit model selection');
   assert(chatArgs[chatArgs.indexOf('--effort') + 1] === 'low', 'Chat agent must support explicit effort selection');
+  assert(codexChatArgs[0] === 'exec' && codexChatArgs.includes('--json') && codexChatArgs.includes('--output-last-message'), 'Codex Chat must use codex exec JSON output, not Claude print args');
+  assert(codexChatArgs[codexChatArgs.indexOf('--model') + 1] === 'gpt5.5', 'Codex Chat must receive the fixed Codex model');
+  assert(codexChatArgs.includes('-c') && codexChatArgs.includes('model_reasoning_effort="medium"'), 'Codex Chat must map effort to Codex config override');
+  assert(codexChatArgs[codexChatArgs.indexOf('--sandbox') + 1] === 'read-only', 'Codex Chat must run as a read-only conversation turn');
+  assert(!codexChatArgs.includes('-p') && !codexChatArgs.includes('--permission-mode'), 'Codex Chat must not receive Claude-only arguments');
   assert(!plannerArgs[plannerArgs.indexOf('-p') + 1].includes('ULTRAPLAN'), 'planner prompt must not force ultra/high-effort wording');
   assert(!plannerArgs.includes('--json-schema'), 'initial planner must not use a JSON schema as a second PLAN');
   assert(!diffArgs.includes('--json-schema'), 'diff planner must not use a JSON schema as a second PLAN');
@@ -306,6 +318,7 @@ async function main(): Promise<void> {
   assert(headingSteps[1].id === 'S2' && headingSteps[1].status === 'active', 'heading step S2 should read status comments');
   await verifyInitialPlannerDoesNotInferBenchmark();
   await verifyPlanDiffUsage();
+  await verifyCodexChatAgent();
 
   const codexResumeHelp = await execa('codex', ['exec', 'resume', '--help'], { all: true, reject: false });
   assert((codexResumeHelp.all ?? '').includes('--output-schema <FILE>'), 'local codex resume help does not advertise --output-schema');
@@ -320,6 +333,7 @@ async function main(): Promise<void> {
         claude_plan_mode: true,
         initial_plan_usage_streamed: true,
         plan_diff_usage_streamed: true,
+        codex_chat_agent: true,
         no_markdown_benchmark_inference: true,
         codex_output_schema_strict: true,
         forced_agent_models: true,
@@ -330,6 +344,74 @@ async function main(): Promise<void> {
       2
     )
   );
+}
+
+async function verifyCodexChatAgent(): Promise<void> {
+  const target = resolve('fixture/codex-chat-agent-target');
+  const fakeBin = resolve('fixture/codex-chat-agent-bin');
+  await rm(target, { recursive: true, force: true });
+  await rm(fakeBin, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  const fakeCodex = join(fakeBin, 'codex');
+  await writeFile(
+    fakeCodex,
+    `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+const args = process.argv.slice(2);
+if (args.includes('--version')) {
+  console.log('codex-cli 0.999.0');
+  process.exit(0);
+}
+const target = process.env.WICI_CODEX_CHAT_TARGET;
+const out = args[args.indexOf('--output-last-message') + 1];
+mkdirSync(dirname(out), { recursive: true });
+mkdirSync(join(target, '.wici'), { recursive: true });
+appendFileSync(join(target, '.wici', 'fake-codex-chat-args.jsonl'), JSON.stringify({ args }) + '\\n');
+writeFileSync(out, [
+  '## REPLY',
+  '',
+  'Codex Chat can discuss this before planning.',
+  '',
+  '## UPDATE',
+  '',
+  'kind: requirement',
+  'Build the requested feature after planning.'
+].join('\\n'));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'unused fallback' } }));
+`
+  );
+  await chmod(fakeCodex, 0o755);
+
+  const paths = runPaths(target);
+  await ensureRunDirs(paths);
+  const originalPath = process.env.PATH;
+  const originalTarget = process.env.WICI_CODEX_CHAT_TARGET;
+  process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+  process.env.WICI_CODEX_CHAT_TARGET = target;
+  try {
+    const result = await runChatTurn({
+      paths,
+      userText: 'Start planning after this.',
+      goalDoc: '',
+      plan: '',
+      recentEvents: [],
+      mode: 'real',
+      runtime: { chat: { agent: 'codex', effort: 'medium' } },
+      writeUpdate: false
+    });
+    assert(!result.degraded, `Codex Chat should not degrade through Claude fallback: ${JSON.stringify(result)}`);
+    assert(result.reply.includes('Codex Chat can discuss'), `Codex Chat reply not parsed: ${JSON.stringify(result)}`);
+    assert(result.update?.text.includes('Build the requested feature'), `Codex Chat update not parsed: ${JSON.stringify(result)}`);
+    const argsLog = (await readFile(join(paths.wici, 'fake-codex-chat-args.jsonl'), 'utf8')).trim();
+    assert(argsLog.includes('"--sandbox"') && argsLog.includes('"read-only"'), `Codex Chat did not use read-only sandbox: ${argsLog}`);
+    assert(!argsLog.includes('"--permission-mode"'), `Codex Chat received Claude-only args: ${argsLog}`);
+  } finally {
+    process.env.PATH = originalPath;
+    if (originalTarget === undefined) delete process.env.WICI_CODEX_CHAT_TARGET;
+    else process.env.WICI_CODEX_CHAT_TARGET = originalTarget;
+  }
 }
 
 function assert(condition: unknown, message: string): asserts condition {

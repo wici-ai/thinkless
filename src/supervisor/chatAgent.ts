@@ -1,9 +1,11 @@
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { execa } from 'execa';
-import { appendJsonLine, atomicWriteJson, readJsonFileMaybe } from '../shared/atomic.js';
+import { appendJsonLine, atomicWriteJson, ensureDir, readJsonFileMaybe } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
+import { runtimeAgentFromCommand } from '../shared/runtime.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput } from './claudeOutput.js';
 import { runClaudeStreamProcess } from './claudeProcess.js';
@@ -66,14 +68,18 @@ export async function runChatTurn(ctx: ChatTurnContext): Promise<ChatTurnResult>
 async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
   try {
     const config = applyRuntimeSelection(await loadConfig(ctx.mode), ctx.runtime);
-    if (config.tools.mode === 'stub') return buildFallbackChatTurn(ctx, 'Claude Chat is unavailable in stub mode.');
+    if (config.tools.mode === 'stub') return buildFallbackChatTurn(ctx, 'Chat agent is unavailable in stub mode.');
     const chatTool = config.tools.chat ?? { command: config.tools.planner.command, model: undefined, effort: 'default' };
     const command = chatTool.command ?? config.tools.planner.command;
-    if (!(await commandExists(command))) return buildFallbackChatTurn(ctx, `Claude Chat command not found: ${command}.`);
+    const agent = runtimeAgentFromCommand(command, 'claude');
+    const label = agent === 'codex' ? 'Codex Chat' : 'Claude Chat';
+    if (!(await commandExists(command))) return buildFallbackChatTurn(ctx, `${label} command not found: ${command}.`);
 
     const systemPrompt = await readFile(promptPath('chat'), 'utf8');
     const safetyText = formatSafetyForPrompt(config);
     const userPrompt = buildChatPrompt(ctx);
+    if (agent === 'codex') return await runCodexChatTurn(ctx, command, { model: chatTool.model, effort: chatTool.effort, systemPrompt, safetyText, userPrompt });
+
     const sessionId = await readChatSession(ctx.paths);
 
     let result = await runClaudeStreamProcess(command, buildChatArgs({ userPrompt, systemPrompt, safetyText, sessionId, model: chatTool.model, effort: chatTool.effort }), {
@@ -89,10 +95,10 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
         hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
       });
     }
-    if (result.timeoutReason || result.exitCode !== 0) return buildFallbackChatTurn(ctx, result.timeoutReason ? `Claude Chat timed out: ${result.timeoutReason}.` : `Claude Chat exited with code ${result.exitCode}.`);
+    if (result.timeoutReason || result.exitCode !== 0) return buildFallbackChatTurn(ctx, result.timeoutReason ? `${label} timed out: ${result.timeoutReason}.` : `${label} exited with code ${result.exitCode}.`);
 
     const parsed = parseChatResponse(result.stdout);
-    if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, 'Claude Chat returned no usable reply.');
+    if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, `${label} returned no usable reply.`);
     if (parsed.sessionId) await writeChatSession(ctx.paths, parsed.sessionId);
     // Respect the agent's judgment: a reply with no UPDATE is pure conversation.
     return { reply: parsed.reply, update: parsed.update, degraded: false };
@@ -101,7 +107,45 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
   }
 }
 
-export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Claude Chat unavailable.'): ChatTurnResult {
+async function runCodexChatTurn(
+  ctx: ChatTurnContext,
+  command: string,
+  input: {
+    model?: string;
+    effort?: string;
+    systemPrompt: string;
+    safetyText?: string;
+    userPrompt: string;
+  }
+): Promise<ChatTurnResult> {
+  await ensureDir(ctx.paths.artifacts);
+  const outputLastMessage = join(ctx.paths.artifacts, `chat-codex-${Date.now()}.txt`);
+  const result = await runClaudeStreamProcess(
+    command,
+    buildCodexChatArgs({
+      target: ctx.paths.target,
+      prompt: buildCodexChatPrompt(input),
+      outputLastMessage,
+      model: input.model,
+      effort: input.effort
+    }),
+    {
+      cwd: ctx.paths.target,
+      idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS,
+      hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
+    }
+  );
+  if (result.timeoutReason || result.exitCode !== 0) {
+    return buildFallbackChatTurn(ctx, result.timeoutReason ? `Codex Chat timed out: ${result.timeoutReason}.` : `Codex Chat exited with code ${result.exitCode}.`);
+  }
+
+  const finalMessage = await readTextMaybe(outputLastMessage);
+  const parsed = parseChatFinalMessage(finalMessage) ?? parseCodexChatResponse(result.stdout);
+  if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, 'Codex Chat returned no usable reply.');
+  return { reply: parsed.reply, update: parsed.update, degraded: false };
+}
+
+export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Chat agent unavailable.'): ChatTurnResult {
   if (isLikelyQuestion(ctx.userText)) {
     return {
       reply: buildFallbackStatusReply(ctx, reason),
@@ -203,6 +247,40 @@ export function buildChatArgs(input: {
   ];
 }
 
+export function buildCodexChatArgs(input: {
+  target: string;
+  prompt: string;
+  outputLastMessage: string;
+  model?: string;
+  effort?: string;
+}): string[] {
+  return [
+    'exec',
+    ...codexModelArgs(input.model),
+    ...codexEffortArgs(input.effort),
+    '--sandbox',
+    'read-only',
+    '--json',
+    '--output-last-message',
+    input.outputLastMessage,
+    '-C',
+    input.target,
+    '--skip-git-repo-check',
+    '--ephemeral',
+    input.prompt
+  ];
+}
+
+function buildCodexChatPrompt(input: { systemPrompt: string; safetyText?: string; userPrompt: string }): string {
+  return [
+    appendSafety(input.systemPrompt, input.safetyText ?? ''),
+    '',
+    'You are running as the Chat agent through Codex exec. This is a read-only conversation turn: do not edit files, do not commit, do not push, and do not perform executor work. Use tools only for read-only inspection when needed.',
+    '',
+    input.userPrompt
+  ].join('\n');
+}
+
 function claudeModelArgs(model: string | undefined): string[] {
   const normalized = model?.trim();
   if (!normalized || normalized === 'default') return [];
@@ -213,6 +291,18 @@ function claudeEffortArgs(effort: string | undefined): string[] {
   const normalized = effort?.trim();
   if (!normalized || normalized === 'default') return [];
   return ['--effort', normalized];
+}
+
+function codexModelArgs(model: string | undefined): string[] {
+  const normalized = model?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['--model', normalized];
+}
+
+function codexEffortArgs(effort: string | undefined): string[] {
+  const normalized = effort?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['-c', `model_reasoning_effort=${JSON.stringify(normalized)}`];
 }
 
 function buildChatPrompt(ctx: ChatTurnContext): string {
@@ -286,11 +376,33 @@ export function parseChatResponse(raw: string): ParsedChat | null {
   }
   for (const item of [...parsed].reverse()) {
     if (!isClaudeEnvelope(item) || typeof item.result !== 'string') continue;
-    const reply = extractSection(item.result, 'REPLY') ?? item.result.trim();
-    const update = parseUpdate(extractSection(item.result, 'UPDATE'));
-    return { reply, update, sessionId: item.session_id };
+    const chat = parseChatFinalMessage(item.result, item.session_id);
+    if (chat) return chat;
   }
   return null;
+}
+
+function parseCodexChatResponse(raw: string): ParsedChat | null {
+  const lines = raw.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of [...lines].reverse()) {
+    const record = parseJsonRecord(line);
+    if (!record) continue;
+    const item = recordValue(recordValue(record.params)?.item) ?? recordValue(record.item) ?? record;
+    const kind = stringValue(item.type) ?? stringValue(record.type) ?? stringValue(record.method);
+    if (kind !== 'agentMessage' && kind !== 'agent_message' && kind !== 'message') continue;
+    const text = stringValue(item.text) ?? stringValue(item.message);
+    const parsed = text ? parseChatFinalMessage(text) : null;
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function parseChatFinalMessage(text: string, sessionId?: string): ParsedChat | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const reply = extractSection(trimmed, 'REPLY') ?? trimmed;
+  const update = parseUpdate(extractSection(trimmed, 'UPDATE'));
+  return { reply: reply.trim(), update, sessionId };
 }
 
 function parseUpdate(raw: string | undefined): ChatUpdate | undefined {
@@ -338,6 +450,32 @@ function stripOuterFence(lines: string[]): string[] {
 async function commandExists(command: string): Promise<boolean> {
   const result = await execa('command', ['-v', command], { shell: true, reject: false });
   return result.exitCode === 0;
+}
+
+async function readTextMaybe(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw error;
+  }
+}
+
+function parseJsonRecord(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return recordValue(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 async function readChatSession(paths: RunPaths): Promise<string | undefined> {

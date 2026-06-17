@@ -1,6 +1,6 @@
-# WiCi
+# Thinkless
 
-WiCi is a local TypeScript + Ink TUI that wraps Claude Code plan mode and Codex execution into a simpler chat-first workflow.
+Thinkless is a local TypeScript + Ink TUI that wraps Claude Code plan mode and Codex execution into a simpler chat-first workflow.
 
 The V1 path is intentionally thin:
 

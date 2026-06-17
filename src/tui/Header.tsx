@@ -14,7 +14,9 @@ export const Header = React.memo(function Header({ state }: { state: RunState })
 
   return (
     <Box justifyContent="space-between" paddingX={1}>
-      <Text bold>WiCi</Text>
+      <Box flexShrink={0}>
+        <Text bold>Thinkless</Text>
+      </Box>
       <Text color={status === 'FAILED' ? 'red' : status === 'STOP' ? 'green' : 'cyan'}>{status}</Text>
       <Text>iter {iter}</Text>
       <Text>{metricSummary(goal, baseline?.best_metric ? primaryMetricValue(baseline.best_metric) : undefined, baseline?.best_metric.unit)}</Text>

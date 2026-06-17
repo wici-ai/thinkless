@@ -101,13 +101,10 @@ expect "Which remote target"
 sleep 1
 send -- "$env(WICI_PTY_ANSWER)\\r"
 send -- "\\033\\[C"
-expect -- "--- PLAN.md ---"
+expect "Remote benchmark bootstrap"
 send -- "\\033\\[C"
 expect {
   "Reached max_iters=0" {
-    exit 0
-  }
-  "STOP" {
     exit 0
   }
   timeout {

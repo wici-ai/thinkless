@@ -43,6 +43,7 @@ async function main(): Promise<void> {
   assert(files.app.includes('shouldUseChatAgentForBlankRun'), 'App must route blank-run input through the Chat agent before planning starts');
   assert(files.app.includes('shouldAutoStartExistingRun'), 'App must avoid auto-restarting stopped runs while still supporting resume on attach');
   assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'App must wake the supervisor after Chat writes an inbox injection');
+  assert(files.app.includes('pendingSupervisorLaunchRef') && files.app.includes('setTimeout(() => launchSupervisor'), 'App must not drop Chat wakeups that arrive while the supervisor is still exiting');
   assert(files.app.includes('runtimeSelection') && files.app.includes('formatRuntimeSelectorLine') && files.app.includes('runtimeSelectorOpen'), 'App must expose a visible per-workspace runtime selector in the TUI');
   assert(files.app.includes('isRuntimeSelectorToggle') && files.app.includes('cycleRuntimeValue') && files.app.includes('inputPaused={runtimeSelectorOpen}'), 'App must let users choose runtime fields from the TUI without typing into Chat');
   assert(files.app.includes('onRuntimeChange={setRuntimeSelection}'), 'App must still support typed runtime commands for custom values');

@@ -49,6 +49,7 @@ export function App({
   const workspaceContentWidth = Math.max(32, width - 4);
   const workspaceViewportHeight = Math.max(4, height - 8);
   const startedRef = useRef(false);
+  const pendingSupervisorLaunchRef = useRef<{ goal?: string; goalSource?: RunOptions['goalSource'] } | null>(null);
   const pendingWorkspaceFocusRef = useRef(false);
   const [started, setStarted] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -62,7 +63,11 @@ export function App({
 
   const launchSupervisor = useCallback(
     (goal?: string, goalSource?: RunOptions['goalSource']) => {
-      if (!supervisor.enabled || startedRef.current) return;
+      if (!supervisor.enabled) return;
+      if (startedRef.current) {
+        pendingSupervisorLaunchRef.current = { goal, goalSource };
+        return;
+      }
       startedRef.current = true;
       setStarted(true);
       setStartError(null);
@@ -83,6 +88,9 @@ export function App({
       }).finally(() => {
         startedRef.current = false;
         setStarted(false);
+        const pending = pendingSupervisorLaunchRef.current;
+        pendingSupervisorLaunchRef.current = null;
+        if (pending) setTimeout(() => launchSupervisor(pending.goal, pending.goalSource), 0);
       });
     },
     [runtimeSelection, target, supervisor.enabled, supervisor.lockMode, supervisor.maxIters, supervisor.mode, supervisor.resumeIteration]
