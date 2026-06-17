@@ -12,6 +12,8 @@ The V1 path is intentionally thin:
 
 WiCi does not parse natural-language requirements into task-specific schemas. If the user says "700 token/s" or asks to build an app, that raw requirement goes into `GOAL.md` once Chat decides it needs planner/executor. A bounded SSH/code-reading request can stay in Chat; a longer remote deployment, debug, benchmark, or optimization loop becomes planner/executor work.
 
+Chat agents run with enough native CLI permission to complete bounded direct work themselves: Claude Chat is not forced into plan-only mode, and Codex Chat uses a network-capable sandbox. Chat still must not commit, push, deploy, run destructive commands, or start long benchmark/debug loops itself.
+
 ## Safety
 
 Real mode uses Claude Code plan mode with `--dangerously-skip-permissions` for planning and `codex exec --dangerously-bypass-approvals-and-sandbox` for execution. A disposable VM or container is safest. Direct use on a primary machine is supported when the target repo is under git and the WiCi checkout is versioned.

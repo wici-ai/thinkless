@@ -293,7 +293,7 @@ export function buildCodexChatArgs(input: {
       ...codexModelArgs(input.model),
       ...codexEffortArgs(input.effort),
       '--sandbox',
-      'workspace-write',
+      'danger-full-access',
       '--json',
       '--output-last-message',
       input.outputLastMessage,
@@ -307,7 +307,7 @@ export function buildCodexChatArgs(input: {
     ...codexModelArgs(input.model),
     ...codexEffortArgs(input.effort),
     '--sandbox',
-    'workspace-write',
+    'danger-full-access',
     '--json',
     '--output-last-message',
     input.outputLastMessage,
@@ -322,7 +322,7 @@ function buildCodexChatPrompt(input: { systemPrompt: string; safetyText?: string
   return [
     appendSafety(input.systemPrompt, input.safetyText ?? ''),
     '',
-    'You are running as the Chat agent through Codex exec. Handle lightweight direct work: short inspection, bounded read-only SSH or remote code review, and small self-contained local edits are allowed. Do not commit, push, deploy, run destructive commands, or start long benchmark/debug loops; emit UPDATE instead when planner/executor should take over.',
+    'You are running as the Chat agent through Codex exec with Chat-level permissions. Handle lightweight direct work: short inspection, bounded read-only SSH or remote code review, and small self-contained local edits are allowed. UPDATE is a planner/executor handoff, not a status note. Do not emit UPDATE just because a lightweight direct task is blocked by auth, network, sandbox, missing tools, or environment limits; explain the blocker in REPLY. Do not commit, push, deploy, run destructive commands, or start long benchmark/debug loops yourself; emit UPDATE only when planner/executor should take over.',
     '',
     input.userPrompt
   ].join('\n');

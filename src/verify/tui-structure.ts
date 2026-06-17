@@ -24,6 +24,7 @@ async function main(): Promise<void> {
     runtime: await source('runtimeSettings.ts'),
     state: await source('useRunState.ts'),
     chatAgent: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'chatAgent.ts'), 'utf8'),
+    chatPrompt: await readFile(join(TOOL_ROOT, 'prompts', 'chat.md'), 'utf8'),
     supervisor: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'index.ts'), 'utf8'),
     goalDoc: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'goalDoc.ts'), 'utf8'),
     types: await readFile(join(TOOL_ROOT, 'src', 'shared', 'types.ts'), 'utf8'),
@@ -103,8 +104,10 @@ async function main(): Promise<void> {
 
   assert(!files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && !files.chatAgent.includes('Recent Chat transcript'), 'Chat agent must not replay persisted Chat transcript into every prompt');
   assert(files.chatAgent.includes('resumeSessionId') && files.chatAgent.includes("'exec',\n      'resume'") && !files.chatAgent.includes("'--ephemeral'"), 'Codex Chat must persist and resume its own session instead of running ephemerally');
-  assert(files.chatAgent.includes("'workspace-write'") && !files.chatAgent.includes("'read-only'"), 'Codex Chat must support lightweight direct work instead of read-only-only sandboxing');
+  assert(files.chatAgent.includes("'danger-full-access'") && !files.chatAgent.includes("'read-only'"), 'Codex Chat must support bounded SSH/network inspection instead of read-only-only sandboxing');
   assert(!files.chatAgent.includes("'--permission-mode',\n    'plan'"), 'Claude Chat must not be forced into planner-only mode');
+  assert(!files.chatAgent.includes('normalizeChatTurn') && !files.chatAgent.includes('shouldKeepInChat'), 'Chat agent must not post-filter real UPDATE decisions');
+  assert(files.chatPrompt.includes('UPDATE is a handoff, not a status note') && files.chatPrompt.includes('If a lightweight direct task fails'), 'Chat prompt must raise the source UPDATE threshold instead of filtering after the fact');
   assert(files.chatAgent.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatAgent.includes("writeChatSession(ctx.paths, 'codex'"), 'Chat sessions must be stored by agent so runtime changes do not overwrite another agent session');
   assert(!files.chatAgent.includes('normalizeChatTurnResult'), 'Chat agent must trust real agent UPDATE decisions instead of normalizing them with local prompt hacks');
   assert(files.chatAgent.includes('shouldStartPlannerFromBlankChat') && files.chatAgent.includes('hasConcreteActionIntent'), 'Chat fallback must use a generalized action-intent guard only when the agent is degraded');

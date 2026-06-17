@@ -99,6 +99,12 @@ async function main(): Promise<void> {
     'README should document lightweight Chat work before planner/executor escalation'
   );
   assert(
+    readme.includes('Chat agents run with enough native CLI permission') &&
+      readme.includes('Claude Chat is not forced into plan-only mode') &&
+      readme.includes('Codex Chat uses a network-capable sandbox'),
+    'README should document Chat direct-work permissions'
+  );
+  assert(
     readme.includes('Press `Ctrl+R` to open the selector') &&
       readme.includes('bottom Chat input is paused while the selector is open') &&
       readme.includes('model is fixed by that agent') &&
