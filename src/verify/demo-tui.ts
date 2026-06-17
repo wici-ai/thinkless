@@ -13,7 +13,7 @@ async function main(): Promise<void> {
     ['--import', 'tsx', 'src/cli.tsx', 'demo', '--target', target, '--fresh', '--max-iters', '1', '--mode', 'stub', '--no-fullscreen'],
     {
       cwd: resolve('.'),
-      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color' },
+      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1' },
       stdio: ['ignore', 'pipe', 'pipe']
     }
   );
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
     output += chunk.toString('utf8');
   });
 
-  await delay(1000);
+  await waitForExit(child, 5000);
   await stopChild(child);
 
   const paths = runPaths(target);
@@ -69,6 +69,14 @@ async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
     child.kill('SIGKILL');
     await new Promise((resolve) => child.once('exit', resolve));
   }
+}
+
+async function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await Promise.race([
+    new Promise<void>((resolve) => child.once('exit', () => resolve())),
+    delay(timeoutMs).then(() => undefined)
+  ]);
 }
 
 function stripAnsi(value: string): string {

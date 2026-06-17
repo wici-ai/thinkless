@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, delimiter, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
 import { buildChatArgs, buildCodexChatArgs, extractCodexSessionId, runChatTurn } from '../supervisor/chatAgent.js';
@@ -375,8 +375,8 @@ async function verifyCodexChatAgent(): Promise<void> {
   await rm(fakeBin, { recursive: true, force: true });
   await mkdir(target, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
-  const fakeCodex = join(fakeBin, 'codex');
-  await writeFile(
+  const fakeCodex = fakeCommandPath(fakeBin, 'codex');
+  await writeFakeNodeCommand(
     fakeCodex,
     `#!/usr/bin/env node
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -407,13 +407,12 @@ console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-codex-chat
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'unused fallback' } }));
 `
   );
-  await chmod(fakeCodex, 0o755);
 
   const paths = runPaths(target);
   await ensureRunDirs(paths);
   const originalPath = process.env.PATH;
   const originalTarget = process.env.WICI_CODEX_CHAT_TARGET;
-  process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+  process.env.PATH = `${fakeBin}${delimiter}${originalPath ?? ''}`;
   process.env.WICI_CODEX_CHAT_TARGET = target;
   try {
     const result = await runChatTurn({
@@ -483,8 +482,8 @@ async function verifyPlanDiffUsage(): Promise<void> {
   await rm(fakeBin, { recursive: true, force: true });
   await mkdir(target, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
-  const fakeClaude = join(fakeBin, 'claude');
-  await writeFile(
+  const fakeClaude = fakeCommandPath(fakeBin, 'claude');
+  await writeFakeNodeCommand(
     fakeClaude,
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
@@ -511,7 +510,6 @@ console.log(JSON.stringify({
 }));
 `
   );
-  await chmod(fakeClaude, 0o755);
 
   const paths = runPaths(target);
   await ensureRunDirs(paths);
@@ -549,8 +547,8 @@ async function verifyInitialPlannerDoesNotInferBenchmark(): Promise<void> {
   await rm(fakeBin, { recursive: true, force: true });
   await mkdir(target, { recursive: true });
   await mkdir(fakeBin, { recursive: true });
-  const fakeClaude = join(fakeBin, 'claude');
-  await writeFile(
+  const fakeClaude = fakeCommandPath(fakeBin, 'claude');
+  await writeFakeNodeCommand(
     fakeClaude,
     `#!/usr/bin/env node
 if (process.argv.includes('--version')) {
@@ -596,7 +594,6 @@ console.log(JSON.stringify({
 }));
 `
   );
-  await chmod(fakeClaude, 0o755);
 
   const paths = runPaths(target);
   await ensureRunDirs(paths);
@@ -627,6 +624,21 @@ console.log(JSON.stringify({
   assert(savedGoal.metric.name === goal.metric.name, `fresh planner materialization must not rewrite goal metric: ${JSON.stringify(savedGoal.metric)}`);
   const plan = await readFile(paths.plan, 'utf8');
   assert(plan.includes('This is planner prose inside PLAN.md'), `planner prose was not preserved in PLAN.md:\n${plan}`);
+}
+
+function fakeCommandPath(dir: string, name: string): string {
+  return join(dir, process.platform === 'win32' ? `${name}.cmd` : name);
+}
+
+async function writeFakeNodeCommand(commandPath: string, source: string): Promise<void> {
+  if (process.platform === 'win32') {
+    const scriptName = `${basename(commandPath, '.cmd')}.js`;
+    await writeFile(join(commandPath, '..', scriptName), source);
+    await writeFile(commandPath, `@echo off\r\nnode "%~dp0${scriptName}" %*\r\n`);
+    return;
+  }
+  await writeFile(commandPath, source);
+  await chmod(commandPath, 0o755);
 }
 
 await main();

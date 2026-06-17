@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { resolveCommandForSpawn } from '../shared/commands.js';
 
 export interface ClaudeStreamOptions {
   cwd: string;
@@ -28,9 +29,11 @@ export async function runClaudeStreamProcess(
   args: string[],
   options: ClaudeStreamOptions
 ): Promise<ClaudeStreamResult> {
-  const child = spawn(command, args, {
+  const resolved = await resolveCommandForSpawn(command, args);
+  const child = spawn(resolved.command, resolved.args, {
     cwd: options.cwd,
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: resolved.shell
   });
 
   let stdout = '';

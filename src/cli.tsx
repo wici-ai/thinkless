@@ -186,7 +186,14 @@ function renderTui(options: {
   if (options.fullscreen && interactive) {
     renderInAlternateScreen(tree);
   } else {
-    render(tree, { interactive });
+    const instance = render(tree, { interactive });
+    // Test hook: non-interactive Ink output is only guaranteed after a clean unmount.
+    if (process.env.WICI_TUI_RENDER_ONCE === '1') {
+      const delayMs = Number(process.env.WICI_TUI_RENDER_ONCE_DELAY_MS ?? 250);
+      void instance.waitUntilRenderFlush()
+        .then(() => new Promise((resolve) => setTimeout(resolve, Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 250)))
+        .then(() => instance.unmount());
+    }
   }
 }
 

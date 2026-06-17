@@ -1,6 +1,7 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { commandExists } from '../shared/commands.js';
 import type { Checkpoint } from '../shared/types.js';
 import {
   assertNoActiveToolVersionDrift,
@@ -139,6 +140,9 @@ async function runFakeToolUpdaterCheck(): Promise<Array<{ tool: string; args: st
     const claude = join(dir, 'claude');
     await writeFakeTool(codex, 'codex', 'codex-cli 9.0.0', logPath);
     await writeFakeTool(claude, 'claude', '9.0.0 (Claude Code)', logPath);
+    assert(await commandExists(codex), 'shared command resolver should find explicit fake Codex path');
+    assert(await commandExists(claude), 'shared command resolver should find explicit fake Claude path');
+    assert(!(await commandExists(join(dir, 'missing-tool'))), 'shared command resolver should reject missing explicit paths');
     const config = fakeConfig('real');
     config.tools.executor.command = codex;
     config.tools.planner.command = claude;

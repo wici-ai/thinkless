@@ -4,6 +4,7 @@ import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
 import { runChatTurn, shouldStartPlannerFromBlankChat, type ChatTurnResult } from '../supervisor/chatAgent.js';
 import type { ChatLogEntry, GoalFile, Injection, OutboxMessage, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
+import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { isMouseInput, mouseScrollDelta } from './input.js';
 import { PAGE_SIZE, scrollBy, wrapLines, wrappedViewport } from './viewport.js';
 import { defaultRuntimeSelection, parseRuntimeCommand } from './runtimeSettings.js';
@@ -58,7 +59,7 @@ export function ChatHistoryPane({
   const isActive = active || isFocused;
   const history = buildChatHistory(outbox, injections, goal, chat);
   const goalSummary = currentGoalSummary(goal);
-  const activeOutbox = outbox.filter((message) => isActiveOutboxMessage(message, supervisorState));
+  const activeOutbox = outbox.filter((message) => isActiveOutboxMessage(message, supervisorState, goal));
   const sourceLines = [
     ...history,
     ...buildActiveOutboxLines(activeOutbox),
@@ -117,7 +118,7 @@ export function ChatHistoryPane({
         </Text>
       ) : null}
       <Text color="cyan">{goalSummary}</Text>
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" height={viewportHeight} overflow="hidden">
         {view.lines.map((line, index) => (
           <Text key={`${view.start + index}-${line.id}`} color={line.color} bold={line.bold}>
             {line.text || ' '}
@@ -283,7 +284,7 @@ export function ChatInputBox({
   }, { isActive: interactive && !inputPaused });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={isFocused || interactive ? 'cyan' : 'gray'} paddingX={1}>
+    <Box flexDirection="column" height={4} flexShrink={0} borderStyle="round" borderColor={isFocused || interactive ? 'cyan' : 'gray'} paddingX={1}>
       <Text color={isFocused || interactive ? 'cyan' : 'gray'} bold>
         YOU
       </Text>
@@ -483,10 +484,11 @@ function buildActiveOutboxLines(outbox: OutboxMessage[]): ChatHistoryLine[] {
     .flatMap((message) => blockLines(message.kind, message.text, message.kind === 'error' ? 'red' : 'magenta', `active-${message.id}`, message.ts));
 }
 
-function isActiveOutboxMessage(message: OutboxMessage, supervisorState: string | undefined): boolean {
+function isActiveOutboxMessage(message: OutboxMessage, supervisorState: string | undefined, goal: GoalFile | null): boolean {
   if (message.answered) return false;
   if (message.kind === 'question') return true;
   if (message.kind !== 'error') return false;
+  if (!goal && message.text.includes(INITIAL_GOAL_REQUIRED_MESSAGE)) return false;
   return supervisorState !== 'STOP' && supervisorState !== 'FAILED';
 }
 

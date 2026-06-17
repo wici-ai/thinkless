@@ -4,8 +4,9 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createSampleTarget } from '../sample.js';
 import { exists } from '../shared/atomic.js';
+import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { runPaths } from '../shared/paths.js';
-import type { GoalFile, Checkpoint } from '../shared/types.js';
+import type { GoalFile, Checkpoint, OutboxMessage, RunEvent } from '../shared/types.js';
 import type { RunState } from '../tui/useRunState.js';
 import { shouldAutoStartExistingRun, shouldUseChatAgentForBlankRun } from '../tui/App.js';
 import { buildFallbackChatTurn, shouldStartPlannerFromBlankChat } from '../supervisor/chatAgent.js';
@@ -85,6 +86,40 @@ async function main(): Promise<void> {
       }
     }),
     'a historical baseline.json alone must not block fresh Chat-agent intake'
+  );
+  assert(
+    shouldUseChatAgentForBlankRun({
+      supervisorEnabled: true,
+      supervisorStarted: false,
+      state: {
+        ...blank,
+        events: [event('ERROR', INITIAL_GOAL_REQUIRED_MESSAGE)],
+        outbox: [outbox('error', INITIAL_GOAL_REQUIRED_MESSAGE)]
+      }
+    }),
+    'stale initial-goal startup errors must not block fresh Chat-agent intake'
+  );
+  assert(
+    !shouldUseChatAgentForBlankRun({
+      supervisorEnabled: true,
+      supervisorStarted: false,
+      state: {
+        ...blank,
+        events: [event('SUPERVISOR_START', 'Starting WiCi supervisor')]
+      }
+    }),
+    'real run events must still block blank-run Chat-agent intake'
+  );
+  assert(
+    !shouldUseChatAgentForBlankRun({
+      supervisorEnabled: true,
+      supervisorStarted: false,
+      state: {
+        ...blank,
+        outbox: [outbox('question', 'Planner needs clarification before producing PLAN.md. Which host?')]
+      }
+    }),
+    'real outbox messages must still block blank-run Chat-agent intake'
   );
   assert(shouldAutoStartExistingRun({ ...blank, goal: goal() }), 'existing goal without a STOP checkpoint should auto-start');
   assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('STOP') }), 'stopped run should not auto-restart without new chat');
@@ -272,6 +307,25 @@ function checkpoint(supervisor_state: Checkpoint['supervisor_state']): Checkpoin
     sessions: {},
     drained_inbox: [],
     updated_at: '2026-06-14T00:00:00.000Z'
+  };
+}
+
+function event(type: string, message: string): RunEvent {
+  return {
+    seq: 1,
+    ts: '2026-06-14T00:00:00.000Z',
+    type,
+    level: type === 'ERROR' ? 'error' : 'info',
+    message
+  };
+}
+
+function outbox(kind: OutboxMessage['kind'], text: string): OutboxMessage {
+  return {
+    id: `out-${kind}`,
+    ts: '2026-06-14T00:00:00.000Z',
+    kind,
+    text
   };
 }
 

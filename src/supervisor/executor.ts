@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { execa } from 'execa';
 import { atomicWriteFile, atomicWriteJson, exists } from '../shared/atomic.js';
+import { commandExists, resolveCommandForSpawn } from '../shared/commands.js';
 import { schemaPath, type RunPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, IterResult, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
 import { CodexRunError, appendCodexRunTranscript, assertCodexRunSucceeded, parseCodexRunEvents, syntheticCodexRunEvent } from './codexRun.js';
@@ -62,11 +62,6 @@ export class ExecutorPreemptedError extends Error {
 
 export function isExecutorPreempted(error: unknown): error is ExecutorPreemptedError {
   return error instanceof ExecutorPreemptedError;
-}
-
-async function commandExists(command: string): Promise<boolean> {
-  const result = await execa('command', ['-v', command], { shell: true, reject: false });
-  return result.exitCode === 0;
 }
 
 export async function runExecutorStep(
@@ -298,9 +293,11 @@ async function runCodexProcess(
   const hardTimeoutMs = options.hardTimeoutMs ?? EXECUTOR_HARD_TIMEOUT_MS;
   const heartbeatMs = options.heartbeatMs ?? EXECUTOR_HEARTBEAT_MS;
   const firstMeaningfulEventTimeoutMs = options.firstMeaningfulEventTimeoutMs ?? EXECUTOR_FIRST_MEANINGFUL_EVENT_TIMEOUT_MS;
-  const child = spawn(command, args, {
+  const resolved = await resolveCommandForSpawn(command, args);
+  const child = spawn(resolved.command, resolved.args, {
     cwd: options.cwd,
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: resolved.shell
   });
 
   let stdout = '';
