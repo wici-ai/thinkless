@@ -455,10 +455,10 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     assert(argsLog[1].args.includes('fake-codex-chat-session'), `second Codex Chat call must resume the recorded chat session: ${JSON.stringify(argsLog[1].args)}`);
     assert(argsLog[1].args.includes('--dangerously-bypass-approvals-and-sandbox') && !argsLog[1].args.includes('--sandbox'), `Codex Chat resume used unsupported sandbox args: ${JSON.stringify(argsLog[1].args)}`);
     assert(argsLog[1].args.includes('model_reasoning_effort="xhigh"'), `second Codex Chat call must apply the changed effort: ${JSON.stringify(argsLog[1].args)}`);
-    const session = JSON.parse(await readFile(paths.chatSession, 'utf8')) as { runtime_selection?: { chat?: { agent?: string; effort?: string } }; sessions?: { codex?: { session_id?: string; runtime?: { agent?: string; effort?: string } } } };
+    const session = JSON.parse(await readFile(paths.chatSession, 'utf8')) as { runtime_selection?: unknown; sessions?: { codex?: { session_id?: string; runtime?: { agent?: string; effort?: string } } } };
     assert(session.sessions?.codex?.session_id === 'fake-codex-chat-session', `Codex Chat session was not stored by agent: ${JSON.stringify(session)}`);
     assert(session.sessions.codex.runtime?.agent === 'codex' && session.sessions.codex.runtime.effort === 'xhigh', `Codex Chat session did not persist runtime: ${JSON.stringify(session)}`);
-    assert(session.runtime_selection?.chat?.agent === 'codex' && session.runtime_selection.chat.effort === 'xhigh', `Codex Chat did not persist TUI runtime selection: ${JSON.stringify(session)}`);
+    assert(session.runtime_selection === undefined, `Chat session file must not be overwritten by UI runtime persistence: ${JSON.stringify(session)}`);
     const restored = await readPersistedRuntimeSelection(paths);
     assert(restored?.chat?.agent === 'codex' && restored.chat.effort === 'xhigh', `persisted runtime did not restore Codex Chat settings: ${JSON.stringify(restored)}`);
 

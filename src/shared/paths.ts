@@ -26,6 +26,7 @@ export interface RunPaths {
   codexRun: string;
   chat: string;
   chatSession: string;
+  runtimeSelection: string;
   goal: string;
   goalDoc: string;
   checkpoint: string;
@@ -70,6 +71,7 @@ export function runPaths(target: string): RunPaths {
     codexRun: join(wici, 'codex-run.jsonl'),
     chat: join(wici, 'chat.jsonl'),
     chatSession: join(wici, 'chat-session.json'),
+    runtimeSelection: join(wici, 'runtime-selection.json'),
     goal: join(wici, 'goal.json'),
     goalDoc: join(root, 'GOAL.md'),
     checkpoint: join(wici, 'checkpoint.json'),

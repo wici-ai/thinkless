@@ -125,7 +125,13 @@ async function runCodexChatTurn(
   const result = await runCodexChatProcess(ctx, command, input, outputLastMessage, input.sessionId);
   if (result.timeoutReason || result.exitCode !== 0) {
     const action = input.sessionId ? 'resume failed' : 'exited';
-    return buildFallbackChatTurn(ctx, result.timeoutReason ? `Codex Chat ${action}: timed out (${result.timeoutReason}).` : `Codex Chat ${action} with code ${result.exitCode}.`);
+    const detail = codexFailureDetail(result.all);
+    return buildFallbackChatTurn(
+      ctx,
+      result.timeoutReason
+        ? `Codex Chat ${action}: timed out (${result.timeoutReason})${detail ? `: ${detail}` : ''}.`
+        : `Codex Chat ${action} with code ${result.exitCode}${detail ? `: ${detail}` : ''}.`
+    );
   }
 
   const finalMessage = await readTextMaybe(outputLastMessage);
@@ -134,6 +140,26 @@ async function runCodexChatTurn(
   const sessionId = parsed.sessionId ?? extractCodexSessionId(result.stdout) ?? input.sessionId;
   if (sessionId) await writeChatSession(ctx.paths, 'codex', sessionId, { agent: 'codex', model: input.model, effort: input.effort });
   return { reply: parsed.reply, update: parsed.update, degraded: false };
+}
+
+function codexFailureDetail(output: string): string {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => parseCodexErrorLine(line) ?? line)
+    .filter((line) => !line.includes('"type":"thread.started"') && !line.includes('"type":"turn.started"'));
+  const errors = lines.filter((line) => /error|failed|unexpected status|not found|unauthorized|forbidden/i.test(line));
+  return truncateForChat((errors.length > 0 ? errors : lines).slice(-6).join(' | '), 900);
+}
+
+function parseCodexErrorLine(line: string): string | null {
+  try {
+    const parsed = JSON.parse(line) as { type?: string; message?: string; error?: { message?: string } };
+    return parsed.error?.message ?? parsed.message ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function runCodexChatProcess(

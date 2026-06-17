@@ -29,13 +29,13 @@ async function main(): Promise<void> {
     paths.chatSession,
     `${JSON.stringify(
       {
-        runtime_selection: { chat: { agent: 'codex', model: 'gpt-5.5', effort: 'high' } },
         sessions: { codex: { session_id: 'preserve-demo-session', updated_at: '2026-06-18T00:00:00.000Z' } }
       },
       null,
       2
     )}\n`
   );
+  await writeFile(paths.runtimeSelection, `${JSON.stringify({ chat: { agent: 'codex', model: 'gpt-5.5', effort: 'high' } }, null, 2)}\n`);
   const reopenedOutput = await runDemo([]);
   const session = await readFile(paths.chatSession, 'utf8');
   assert(session.includes('preserve-demo-session'), 'demo without --fresh must preserve existing .wici chat session context');

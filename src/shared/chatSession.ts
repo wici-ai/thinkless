@@ -35,17 +35,9 @@ export async function writeChatSession(paths: RunPaths, agent: ChatSessionAgent,
   const updatedAt = timestamp();
   const normalizedRuntime = runtime ? normalizeAgentRuntime(runtime, agent) : current.sessions?.[agent]?.runtime;
   await atomicWriteJson(paths.chatSession, {
-    ...current,
+    session_id: agent === 'claude' ? sessionId : current.session_id,
     ...(agent === 'claude' ? { session_id: sessionId } : {}),
     updated_at: updatedAt,
-    ...(normalizedRuntime
-      ? {
-          runtime_selection: {
-            ...(current.runtime_selection ?? {}),
-            chat: normalizedRuntime
-          }
-        }
-      : {}),
     sessions: {
       ...(current.sessions ?? {}),
       [agent]: {
@@ -58,6 +50,8 @@ export async function writeChatSession(paths: RunPaths, agent: ChatSessionAgent,
 }
 
 export async function readPersistedRuntimeSelection(paths: RunPaths): Promise<RuntimeSelection | undefined> {
+  const runtime = await readJsonFileMaybe<RuntimeSelection>(paths.runtimeSelection);
+  if (runtime) return normalizeRuntimeSelection(runtime);
   const data = await readChatSessionFile(paths);
   if (!data) return undefined;
   if (data.runtime_selection) return normalizeRuntimeSelection(data.runtime_selection);
@@ -66,12 +60,7 @@ export async function readPersistedRuntimeSelection(paths: RunPaths): Promise<Ru
 }
 
 export async function writePersistedRuntimeSelection(paths: RunPaths, runtime: RuntimeSelection): Promise<void> {
-  const current = (await readChatSessionFile(paths)) ?? {};
-  await atomicWriteJson(paths.chatSession, {
-    ...current,
-    updated_at: timestamp(),
-    runtime_selection: normalizeRuntimeSelection(runtime)
-  });
+  await atomicWriteJson(paths.runtimeSelection, normalizeRuntimeSelection(runtime));
 }
 
 async function readChatSessionFile(paths: RunPaths): Promise<ChatSessionFile | null> {

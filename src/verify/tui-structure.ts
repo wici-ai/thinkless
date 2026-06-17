@@ -114,7 +114,7 @@ async function main(): Promise<void> {
   assert(!files.chatAgent.includes("'--permission-mode',\n    'plan'"), 'Claude Chat must not be forced into planner-only mode');
   assert(!files.chatAgent.includes('normalizeChatTurn') && !files.chatAgent.includes('shouldKeepInChat'), 'Chat agent must not post-filter real UPDATE decisions');
   assert(files.chatPrompt.includes('UPDATE is a handoff, not a status note') && files.chatPrompt.includes('If a lightweight direct task fails'), 'Chat prompt must raise the source UPDATE threshold instead of filtering after the fact');
-  assert(files.chatSession.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatSession.includes('runtime_selection') && files.chatSession.includes('readPersistedRuntimeSelection'), 'Chat sessions must store per-agent sessions and persisted runtime for TUI resume');
+  assert(files.chatSession.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatSession.includes('paths.runtimeSelection') && files.chatSession.includes('readPersistedRuntimeSelection'), 'Chat sessions must store per-agent sessions and keep persisted TUI runtime in a separate file');
   assert(files.chatAgent.includes("writeChatSession(ctx.paths, 'codex'") && files.chatAgent.includes("agent: 'codex'"), 'Codex Chat must persist its session together with runtime metadata');
   assert(!files.chatAgent.includes('normalizeChatTurnResult'), 'Chat agent must trust real agent UPDATE decisions instead of normalizing them with local prompt hacks');
   assert(files.chatAgent.includes('shouldStartPlannerFromBlankChat') && files.chatAgent.includes('hasConcreteActionIntent'), 'Chat fallback must use a generalized action-intent guard only when the agent is degraded');
