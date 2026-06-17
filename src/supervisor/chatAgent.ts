@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { appendJsonLine, ensureDir } from '../shared/atomic.js';
+import { appendJsonLine, atomicWriteFile, ensureDir } from '../shared/atomic.js';
 import { commandExists } from '../shared/commands.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { readChatSession, writeChatSession } from '../shared/chatSession.js';
@@ -10,7 +10,7 @@ import { runtimeAgentFromCommand } from '../shared/runtime.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput } from './claudeOutput.js';
-import { runClaudeStreamProcess } from './claudeProcess.js';
+import { runClaudeStreamProcess, type ClaudeStreamResult } from './claudeProcess.js';
 import { writeInjection } from './inbox.js';
 
 const CHAT_IDLE_TIMEOUT_MS = 2 * 60_000;
@@ -83,11 +83,14 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
     const sessionId = await readChatSession(ctx.paths, agent);
     if (agent === 'codex') return await runCodexChatTurn(ctx, command, { model: chatTool.model, effort: chatTool.effort, systemPrompt, safetyText, userPrompt, sessionId });
 
+    const artifactStamp = chatArtifactStamp();
     let result = await runClaudeStreamProcess(command, buildChatArgs({ userPrompt, systemPrompt, safetyText, sessionId, model: chatTool.model, effort: chatTool.effort }), {
       cwd: ctx.paths.target,
       idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS,
       hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
     });
+    let artifactPath = await writeClaudeChatArtifacts(ctx.paths, result, artifactStamp, sessionId ? 'resume' : 'fresh');
+    let action = sessionId ? 'resume failed' : 'exited';
     // A stale/rejected resume session is common; retry once as a fresh session.
     if (sessionId && (result.exitCode !== 0 || result.timeoutReason)) {
       result = await runClaudeStreamProcess(command, buildChatArgs({ userPrompt, systemPrompt, safetyText, model: chatTool.model, effort: chatTool.effort }), {
@@ -95,8 +98,10 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
         idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS,
         hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
       });
+      artifactPath = await writeClaudeChatArtifacts(ctx.paths, result, artifactStamp, 'fresh');
+      action = 'exited';
     }
-    if (result.timeoutReason || result.exitCode !== 0) return buildFallbackChatTurn(ctx, result.timeoutReason ? `${label} timed out: ${result.timeoutReason}.` : `${label} exited with code ${result.exitCode}.`);
+    if (result.timeoutReason || result.exitCode !== 0) return buildFallbackChatTurn(ctx, claudeFailureReason(label, action, result, artifactPath));
 
     const parsed = parseChatResponse(result.stdout);
     if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, `${label} returned no usable reply.`);
@@ -153,6 +158,99 @@ function codexFailureDetail(output: string): string {
   return truncateForChat((errors.length > 0 ? errors : lines).slice(-6).join(' | '), 900);
 }
 
+function claudeFailureReason(label: string, action: string, result: ClaudeStreamResult, artifactPath: string): string {
+  const detail = claudeFailureDetail(result);
+  const status = result.timeoutReason
+    ? `timed out (${result.timeoutReason})`
+    : result.exitCode !== null
+      ? `with code ${result.exitCode}`
+      : `with signal ${result.signal ?? 'unknown'}`;
+  return `${label} ${action} ${status}${detail ? `: ${detail}` : ''}. See ${artifactPath}`;
+}
+
+function claudeFailureDetail(result: ClaudeStreamResult): string {
+  const jsonDetails = claudeJsonFailureDetails(result.stdout);
+  const stderrLines = significantFailureLines(result.stderr);
+  const stdoutLines = significantFailureLines(result.stdout);
+  return truncateForChat(uniqueStrings([...jsonDetails, ...stderrLines, ...stdoutLines]).slice(-8).join(' | '), 900);
+}
+
+function claudeJsonFailureDetails(stdout: string): string[] {
+  const details: string[] = [];
+  try {
+    const parsed = parseClaudeJsonOutput(stdout);
+    for (const item of parsed) {
+      if (!isClaudeEnvelope(item)) continue;
+      const error = stringField(item, 'error');
+      const subtype = stringField(item, 'subtype');
+      const result = typeof item.result === 'string' ? item.result.trim() : '';
+      const text = textFromClaudeMessage(item);
+      if (error) details.push(error);
+      if (result) details.push(result);
+      if (text) details.push(text);
+      if (item.is_error && subtype) details.push(subtype);
+    }
+  } catch {
+    // Raw stdout/stderr summaries below cover non-JSON failures.
+  }
+  return details;
+}
+
+function significantFailureLines(output: string): string[] {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => parseFailureJsonLine(line) ?? line);
+  const errors = lines.filter((line) => /error|failed|failure|timeout|timed out|unavailable|unauthorized|forbidden|invalid|no available/i.test(line));
+  return (errors.length > 0 ? errors : lines).slice(-8);
+}
+
+function parseFailureJsonLine(line: string): string | null {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (!parsed || typeof parsed !== 'object') return null;
+    const record = parsed as Record<string, unknown>;
+    const direct = stringField(record, 'error') ?? stringField(record, 'message') ?? stringField(record, 'result');
+    if (direct) return direct;
+    const message = record.message;
+    if (message && typeof message === 'object') {
+      const nested = stringField(message, 'error') ?? stringField(message, 'message');
+      if (nested) return nested;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function textFromClaudeMessage(item: unknown): string | null {
+  if (!item || typeof item !== 'object' || !('message' in item)) return null;
+  const message = (item as { message?: unknown }).message;
+  if (!message || typeof message !== 'object' || !('content' in message)) return null;
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return null;
+  for (const part of content) {
+    if (!part || typeof part !== 'object') continue;
+    const type = stringField(part, 'type');
+    const text = stringField(part, 'text');
+    if (type === 'text' && text?.trim()) return text.trim();
+  }
+  return null;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
 function parseCodexErrorLine(line: string): string | null {
   try {
     const parsed = JSON.parse(line) as { type?: string; message?: string; error?: { message?: string } };
@@ -191,6 +289,21 @@ function runCodexChatProcess(
       hardTimeoutMs: CHAT_HARD_TIMEOUT_MS
     }
   );
+}
+
+async function writeClaudeChatArtifacts(paths: RunPaths, result: ClaudeStreamResult, stamp: string, label: string): Promise<string> {
+  await ensureDir(paths.artifacts);
+  const base = `chat-claude-${stamp}-${label}`;
+  await Promise.all([
+    atomicWriteFile(join(paths.artifacts, `${base}.stdout.jsonl`), result.stdout),
+    atomicWriteFile(join(paths.artifacts, `${base}.stderr.log`), result.stderr),
+    atomicWriteFile(join(paths.artifacts, `${base}.all.log`), result.all)
+  ]);
+  return `.wici/artifacts/${base}.all.log`;
+}
+
+function chatArtifactStamp(): string {
+  return new Date().toISOString().replace(/[^0-9A-Za-z]+/g, '-').replace(/^-|-$/g, '');
 }
 
 export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Chat agent unavailable.'): ChatTurnResult {
@@ -570,6 +683,12 @@ function recordValue(value: unknown): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function stringField(value: unknown, key: string): string | null {
+  if (!value || typeof value !== 'object' || !(key in value)) return null;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === 'string' && field.trim() ? field.trim() : null;
 }
 
 async function appendChat(paths: RunPaths, entry: ChatLogEntry): Promise<void> {

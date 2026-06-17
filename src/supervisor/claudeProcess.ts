@@ -11,6 +11,7 @@ export interface ClaudeStreamOptions {
 
 export interface ClaudeStreamResult {
   stdout: string;
+  stderr: string;
   all: string;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -93,6 +94,7 @@ export async function runClaudeStreamProcess(
 
   return {
     stdout,
+    stderr,
     all: `${stdout}${stderr}`,
     exitCode: exit.code,
     signal: exit.signal,

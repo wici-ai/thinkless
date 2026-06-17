@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, delimiter, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
@@ -343,6 +343,7 @@ async function main(): Promise<void> {
   await verifyInitialPlannerDoesNotInferBenchmark();
   await verifyPlanDiffUsage();
   await verifyCodexChatAgent();
+  await verifyClaudeChatFailureDetails();
 
   const codexResumeHelp = await execa('codex', ['exec', 'resume', '--help'], { all: true, reject: false });
   assert((codexResumeHelp.all ?? '').includes('--output-schema <FILE>'), 'local codex resume help does not advertise --output-schema');
@@ -358,6 +359,7 @@ async function main(): Promise<void> {
         initial_plan_usage_streamed: true,
         plan_diff_usage_streamed: true,
         codex_chat_agent: true,
+        claude_chat_failure_detail: true,
         no_markdown_benchmark_inference: true,
         codex_output_schema_strict: true,
         forced_agent_models: true,
@@ -368,6 +370,54 @@ async function main(): Promise<void> {
       2
     )
   );
+}
+
+async function verifyClaudeChatFailureDetails(): Promise<void> {
+  const target = resolve('fixture/claude-chat-failure-target');
+  const fakeBin = resolve('fixture/claude-chat-failure-bin');
+  await rm(target, { recursive: true, force: true });
+  await rm(fakeBin, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  const fakeClaude = fakeCommandPath(fakeBin, 'claude');
+  await writeFakeNodeCommand(
+    fakeClaude,
+    `#!/usr/bin/env node
+if (process.argv.includes('--version')) {
+  console.log('2.1.999 (Fake Claude Code)');
+  process.exit(0);
+}
+console.error('API Error: 503 No available accounts: no available accounts for v2.pincc.ai');
+process.exit(1);
+`
+  );
+
+  const paths = runPaths(target);
+  await ensureRunDirs(paths);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}${delimiter}${originalPath ?? ''}`;
+  try {
+    const result = await runChatTurn({
+      paths,
+      userText: '你好',
+      goalDoc: '',
+      plan: '',
+      recentEvents: [],
+      mode: 'real',
+      runtime: { chat: { agent: 'claude', effort: 'high' } },
+      writeUpdate: false
+    });
+    assert(result.degraded, `Claude Chat failure should degrade locally: ${JSON.stringify(result)}`);
+    assert(result.reply.includes('503 No available accounts'), `Claude Chat failure detail was swallowed:\n${result.reply}`);
+    assert(result.reply.includes('.wici/artifacts/chat-claude-'), `Claude Chat failure should include artifact path:\n${result.reply}`);
+    const files = await readdir(paths.artifacts);
+    const allLog = files.find((name) => /^chat-claude-.*-fresh\.all\.log$/.test(name));
+    assert(allLog, `Claude Chat failure did not write all.log artifact: ${JSON.stringify(files)}`);
+    const raw = await readFile(join(paths.artifacts, allLog), 'utf8');
+    assert(raw.includes('503 No available accounts'), `Claude Chat all.log artifact missing stderr detail:\n${raw}`);
+  } finally {
+    process.env.PATH = originalPath;
+  }
 }
 
 async function verifyCodexChatAgent(): Promise<void> {

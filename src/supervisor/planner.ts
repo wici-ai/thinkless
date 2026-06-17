@@ -325,7 +325,7 @@ async function runPlannerProcess(
   });
   await progressChain;
 
-  const stderr = result.all.slice(result.stdout.length);
+  const stderr = result.stderr;
   if (result.timeoutReason === 'hard') {
     throw new Error(`Planner exceeded hard timeout after ${Math.round(PLANNER_HARD_TIMEOUT_MS / 1000)}s without producing PLAN.md artifacts`);
   }
