@@ -2,13 +2,15 @@ import React, { useRef, useState } from 'react';
 import { Box, Text, useFocus, useInput } from 'ink';
 import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
-import { runChatTurn } from '../supervisor/chatAgent.js';
+import { runChatTurn, shouldStartPlannerFromBlankChat, type ChatTurnResult } from '../supervisor/chatAgent.js';
 import type { ChatLogEntry, GoalFile, Injection, OutboxMessage, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
 import { isMouseInput, mouseScrollDelta } from './input.js';
 import { PAGE_SIZE, scrollBy, wrapLines, wrappedViewport } from './viewport.js';
 import { defaultRuntimeSelection, parseRuntimeCommand } from './runtimeSettings.js';
 
 type ChatColor = 'white' | 'gray' | 'cyan' | 'cyanBright' | 'green' | 'yellow' | 'red' | 'magenta';
+const PLANNING_CONTEXT_MAX_ENTRIES = 14;
+const PLANNING_CONTEXT_MAX_CHARS = 10_000;
 
 interface ChatContextProps {
   outbox?: OutboxMessage[];
@@ -136,6 +138,7 @@ export function ChatInputBox({
   goalDoc = '',
   plan = '',
   events = [],
+  chat = [],
   mode,
   runtime = defaultRuntimeSelection(),
   contentWidth = 80,
@@ -153,12 +156,13 @@ export function ChatInputBox({
   goalDoc?: string;
   plan?: string;
   events?: RunEvent[];
+  chat?: ChatLogEntry[];
   mode?: ToolMode;
   runtime?: RuntimeSelection;
   contentWidth?: number;
   inputPaused?: boolean;
   blankRun?: boolean;
-  onPlanningRequested?: (text: string) => void;
+  onPlanningRequested?: (text: string, planningContext?: string) => void;
   onInjection?: () => void;
   onRuntimeChange?: (runtime: RuntimeSelection) => void;
   onBusyChange?: (busy: boolean) => void;
@@ -221,17 +225,27 @@ export function ChatInputBox({
       const result = await runChatTurn({ paths, userText: text, goalDoc, plan, recentEvents: events, mode, runtime, writeUpdate: !blankRun });
       if (result.update) {
         if (blankRun && onPlanningRequested) {
+          // Trust real Chat-agent UPDATE decisions; only guard local degraded fallback.
+          if (result.degraded && !shouldStartPlannerFromBlankChat(text, result.update)) {
+            onLocalStatus?.('conversation only: planner not started');
+            return;
+          }
+          const planningContext = buildBlankRunPlanningContext(chat, text, result);
           onLocalStatus?.(`planning: ${result.update.text}`);
-          onPlanningRequested(result.update.text);
+          onPlanningRequested(result.update.text, planningContext);
         } else {
           onInjection?.();
         }
       }
     } catch {
       // Defensive fallback: never drop the user's message if the agent errors.
-      if (blankRun && onPlanningRequested) {
+      const fallbackUpdate = { kind: 'add_requirement' as const, text };
+      if (blankRun && onPlanningRequested && shouldStartPlannerFromBlankChat(text, fallbackUpdate)) {
+        const planningContext = buildBlankRunPlanningContext(chat, text, { reply: '', update: fallbackUpdate, degraded: true });
         onLocalStatus?.(`planning: ${text}`);
-        onPlanningRequested(text);
+        onPlanningRequested(text, planningContext);
+      } else if (blankRun) {
+        onLocalStatus?.('conversation only: planner not started');
       } else {
         await writeInjection(paths, { kind: 'add_requirement', text, priority: 'normal' });
         onLocalStatus?.(`add_requirement: ${text}`);
@@ -309,7 +323,7 @@ export function ChatPane({
   viewportHeight?: number;
   inputPaused?: boolean;
   blankRun?: boolean;
-  onPlanningRequested?: (text: string) => void;
+  onPlanningRequested?: (text: string, planningContext?: string) => void;
   onInjection?: () => void;
   systemLine?: string | null;
 }) {
@@ -338,6 +352,7 @@ export function ChatPane({
         goalDoc={goalDoc}
         plan={plan}
         events={events}
+        chat={chat}
         mode={mode}
         runtime={runtime}
         contentWidth={contentWidth}
@@ -350,6 +365,37 @@ export function ChatPane({
       />
     </Box>
   );
+}
+
+export function buildBlankRunPlanningContext(chat: ChatLogEntry[], userText: string, result: ChatTurnResult): string {
+  const entries = chat.slice(-PLANNING_CONTEXT_MAX_ENTRIES);
+  const contextEntries = [...entries];
+  if (!lastUserEntryMatches(contextEntries, userText)) {
+    contextEntries.push({ ts: timestampSortKey(), role: 'user', text: userText });
+  }
+  if (result.reply.trim() || result.update) {
+    contextEntries.push({
+      ts: timestampSortKey(),
+      role: 'assistant',
+      text: result.reply.trim() || '(planner update emitted without a conversational reply)',
+      ...(result.update ? { update: result.update } : {})
+    });
+  }
+  const text = contextEntries
+    .slice(-PLANNING_CONTEXT_MAX_ENTRIES)
+    .map((entry) => {
+      const label = entry.role.toUpperCase();
+      const update = entry.update ? `\n${label} UPDATE (${entry.update.kind}): ${entry.update.text.trim()}` : '';
+      return `${label}: ${entry.text.trim()}${update}`;
+    })
+    .filter((line) => line.trim().length > 0)
+    .join('\n\n');
+  return truncate(text, PLANNING_CONTEXT_MAX_CHARS);
+}
+
+function lastUserEntryMatches(entries: ChatLogEntry[], userText: string): boolean {
+  const lastUser = [...entries].reverse().find((entry) => entry.role === 'user');
+  return lastUser?.text.trim() === userText.trim();
 }
 
 async function writeAnswer(paths: ReturnType<typeof runPaths>, raw: string, fallbackReplyKey: string | undefined) {

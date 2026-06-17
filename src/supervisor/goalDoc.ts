@@ -47,11 +47,17 @@ export function renderGoalMarkdown(goal: GoalFile): string {
         ]),
     '',
     '## Constraints',
-    ...(goal.constraints.length > 0 ? goal.constraints.map((constraint) => `- ${constraint}`) : ['- none']),
+    ...(goal.constraints.length > 0 ? goal.constraints.map(renderConstraintMarkdown) : ['- none']),
     '',
     '## Notes',
     '- This markdown goal is the user-facing contract for the run.',
     '- WiCi keeps .wici/goal.json only as internal derived state for durable execution.',
     '- Deployment, SSH, model discovery, benchmark setup, and validation belong in PLAN.md and optional .opt scripts, then Codex executes them inside the loop.'
   ].join('\n')}\n`;
+}
+
+function renderConstraintMarkdown(constraint: string): string {
+  const lines = constraint.replace(/\r\n/g, '\n').split('\n');
+  const [first = '', ...rest] = lines;
+  return [`- ${first}`, ...rest.map((line) => `  ${line}`)].join('\n');
 }

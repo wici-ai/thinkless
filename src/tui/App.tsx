@@ -49,7 +49,7 @@ export function App({
   const workspaceContentWidth = Math.max(32, width - 4);
   const workspaceViewportHeight = Math.max(4, height - 8);
   const startedRef = useRef(false);
-  const pendingSupervisorLaunchRef = useRef<{ goal?: string; goalSource?: RunOptions['goalSource'] } | null>(null);
+  const pendingSupervisorLaunchRef = useRef<{ goal?: string; goalSource?: RunOptions['goalSource']; planningContext?: string } | null>(null);
   const pendingWorkspaceFocusRef = useRef(false);
   const [started, setStarted] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -62,10 +62,10 @@ export function App({
   const runtimePane = runtimePaneFromWorkspace(workspaceTab);
 
   const launchSupervisor = useCallback(
-    (goal?: string, goalSource?: RunOptions['goalSource']) => {
+    (goal?: string, goalSource?: RunOptions['goalSource'], planningContext?: string) => {
       if (!supervisor.enabled) return;
       if (startedRef.current) {
-        pendingSupervisorLaunchRef.current = { goal, goalSource };
+        pendingSupervisorLaunchRef.current = { goal, goalSource, planningContext };
         return;
       }
       startedRef.current = true;
@@ -79,7 +79,8 @@ export function App({
         resumeIteration: supervisor.resumeIteration,
         mode: supervisor.mode,
         lockMode: supervisor.lockMode,
-        runtime: runtimeSelection
+        runtime: runtimeSelection,
+        planningContext
       };
       void runSupervisor(options).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -90,7 +91,7 @@ export function App({
         setStarted(false);
         const pending = pendingSupervisorLaunchRef.current;
         pendingSupervisorLaunchRef.current = null;
-        if (pending) setTimeout(() => launchSupervisor(pending.goal, pending.goalSource), 0);
+        if (pending) setTimeout(() => launchSupervisor(pending.goal, pending.goalSource, pending.planningContext), 0);
       });
     },
     [runtimeSelection, target, supervisor.enabled, supervisor.lockMode, supervisor.maxIters, supervisor.mode, supervisor.resumeIteration]
@@ -204,12 +205,13 @@ export function App({
         goalDoc={state.goalDoc}
         plan={state.plan}
         events={state.events}
+        chat={state.chat}
         mode={supervisor.mode}
         runtime={runtimeSelection}
         contentWidth={inputContentWidth}
         inputPaused={runtimeSelectorOpen}
         blankRun={blankRunChat}
-        onPlanningRequested={(goal) => launchSupervisor(goal, 'tui_chat')}
+        onPlanningRequested={(goal, planningContext) => launchSupervisor(goal, 'tui_chat', planningContext)}
         onInjection={() => launchSupervisor(undefined)}
         onRuntimeChange={setRuntimeSelection}
         onBusyChange={setChatBusy}

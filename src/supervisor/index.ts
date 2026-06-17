@@ -85,7 +85,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     await ensureTargetGitignore(paths);
 
     const hadGoalBeforeStart = await exists(paths.goal);
-    let goal = await ensureGoal(paths, options.goal, config);
+    let goal = await ensureGoal(paths, options.goal, config, options.planningContext);
     const maxIters = resolveMaxIters(options.maxIters, goal.budget.max_iters ?? config.budget.max_iters);
     let checkpoint = await loadCheckpoint(paths, goal);
     let loadedSnapshot: CheckpointSnapshot | null = null;
@@ -1291,7 +1291,7 @@ function directLedgerEntry(args: {
   };
 }
 
-async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | undefined, config: WiCiConfig): Promise<GoalFile> {
+async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | undefined, config: WiCiConfig, planningContext?: string): Promise<GoalFile> {
   const existing = await readJsonFileMaybe<GoalFile>(paths.goal);
   if (existing) {
     await ensureGoalDoc(paths, existing);
@@ -1301,6 +1301,10 @@ async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | und
     throw new Error('Initial goal is required. In the TUI, type the first goal in Chat; for headless run, pass --goal.');
   }
   const initialText = text.trim();
+  const constraints = ['Keep GOAL.md and PLAN.md as the source of truth.', 'Commit confirmed progress and keep rollback available.'];
+  if (planningContext?.trim()) {
+    constraints.push(`Chat context before planning:\n${planningContext.trim()}`);
+  }
   const goal: GoalFile = {
     run_id: `run-${Date.now()}`,
     version: 1,
@@ -1313,7 +1317,7 @@ async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | und
       }
     ],
     acceptance_criteria: [],
-    constraints: ['Keep GOAL.md and PLAN.md as the source of truth.', 'Commit confirmed progress and keep rollback available.'],
+    constraints,
     metric: {
       name: PLANNER_SELECTED_METRIC,
       direction: 'maximize',

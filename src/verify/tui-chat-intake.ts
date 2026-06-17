@@ -8,11 +8,13 @@ import { runPaths } from '../shared/paths.js';
 import type { GoalFile, Checkpoint } from '../shared/types.js';
 import type { RunState } from '../tui/useRunState.js';
 import { shouldAutoStartExistingRun, shouldUseChatAgentForBlankRun } from '../tui/App.js';
-import { buildFallbackChatTurn } from '../supervisor/chatAgent.js';
+import { buildFallbackChatTurn, shouldStartPlannerFromBlankChat } from '../supervisor/chatAgent.js';
+import { buildBlankRunPlanningContext } from '../tui/ChatPane.js';
 import { runSupervisor } from '../supervisor/index.js';
 
 const target = resolve('fixture/tui-chat-intake-target');
 const provenanceTarget = resolve('fixture/tui-chat-intake-provenance-target');
+const contextTarget = resolve('fixture/tui-chat-intake-context-target');
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
@@ -89,7 +91,9 @@ async function main(): Promise<void> {
   assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('FAILED') }), 'failed run should not auto-restart without new chat');
   assert(shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('PLAN') }), 'active plan state should auto-start on TUI attach');
   verifyDegradedBlankRunChatDecision();
+  verifyBlankRunPlanningContext();
   await verifyGoalSourceNotRetroactive();
+  await verifyPlannerReceivesChatContext();
 
   console.log(
     JSON.stringify(
@@ -100,6 +104,8 @@ async function main(): Promise<void> {
         blank_chat_routes_through_agent: true,
         degraded_inspection_does_not_start_planner: true,
         degraded_plan_request_starts_planner: true,
+        introduction_does_not_start_planner: true,
+        planner_receives_chat_context: true,
         historical_baseline_does_not_block_chat: true,
         goal_source_not_retroactive: true
       },
@@ -133,6 +139,45 @@ function verifyDegradedBlankRunChatDecision(): void {
     'stub'
   );
   assert(planning.update?.kind === 'add_requirement', `degraded concrete planning request should start planner: ${JSON.stringify(planning)}`);
+
+  const intro = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: '介绍一下你自己',
+      goalDoc: '',
+      plan: '',
+      recentEvents: []
+    },
+    'stub'
+  );
+  assert(!intro.update, `self-introduction should stay conversational: ${JSON.stringify(intro)}`);
+  assert(
+    !shouldStartPlannerFromBlankChat('介绍一下你自己', { kind: 'add_requirement', text: '介绍一下你自己' }),
+    'blank-run degraded guard must reject non-actionable fallback updates'
+  );
+  assert(
+    shouldStartPlannerFromBlankChat('可以，开始修复这个问题', { kind: 'add_requirement', text: 'Fix the discussed issue.' }),
+    'blank-run planner guard must allow explicit start/fix requests'
+  );
+}
+
+function verifyBlankRunPlanningContext(): void {
+  const context = buildBlankRunPlanningContext(
+    [
+      { ts: '2026-06-17T10:00:00.000Z', role: 'user', text: '先阅读代码，别开始 planner。' },
+      { ts: '2026-06-17T10:00:01.000Z', role: 'assistant', text: '我看到 TUI 里有 chat/runtime/supervisor 三段链路。' }
+    ],
+    '按刚才讨论的去修复',
+    {
+      reply: '我会启动 planner，并带上前面的上下文。',
+      update: { kind: 'add_requirement', text: 'Fix the chat-to-planner context handoff.' },
+      degraded: false
+    }
+  );
+  assert(context.includes('USER: 先阅读代码'), `planning context should include previous user turns:\n${context}`);
+  assert(context.includes('ASSISTANT: 我看到 TUI'), `planning context should include previous assistant turns:\n${context}`);
+  assert(context.includes('USER: 按刚才讨论的去修复'), `planning context should include the triggering user turn:\n${context}`);
+  assert(context.includes('ASSISTANT UPDATE (add_requirement): Fix the chat-to-planner context handoff.'), `planning context should include the emitted update:\n${context}`);
 }
 
 async function verifyGoalSourceNotRetroactive(): Promise<void> {
@@ -162,6 +207,27 @@ async function verifyGoalSourceNotRetroactive(): Promise<void> {
   assert(second.state === 'STOP', `retroactive provenance run should stop cleanly: ${JSON.stringify(second)}`);
   const after = JSON.parse(await readFile(checkpointPath, 'utf8')) as Checkpoint;
   assert(after.goal_source === undefined, `existing run goal_source should not be written retroactively, got ${after.goal_source}`);
+}
+
+async function verifyPlannerReceivesChatContext(): Promise<void> {
+  await createSampleTarget(contextTarget, true);
+  const result = await runSupervisor({
+    target: contextTarget,
+    goal: 'Fix the selected TUI chat intake behavior.',
+    goalSource: 'tui_chat',
+    planningContext: ['USER: 先阅读代码并解释 TUI 结构。', 'ASSISTANT: Chat input is bottom-mounted and runtime changes are TUI state.', 'USER: 现在按这个上下文开始修。'].join('\n'),
+    maxIters: 0,
+    mode: 'stub'
+  });
+  assert(result.state === 'STOP', `context handoff run should stop cleanly: ${JSON.stringify(result)}`);
+  const paths = runPaths(contextTarget);
+  const goalFile = JSON.parse(await readFile(paths.goal, 'utf8')) as GoalFile;
+  assert(goalFile.requirements[0]?.text === 'Fix the selected TUI chat intake behavior.', `planning context must not rewrite the requirement: ${JSON.stringify(goalFile.requirements)}`);
+  assert(goalFile.constraints.some((constraint) => constraint.includes('Chat context before planning') && constraint.includes('runtime changes are TUI state')), `goal.json missing chat context constraint: ${JSON.stringify(goalFile.constraints)}`);
+  const goalDoc = await readFile(paths.goalDoc, 'utf8');
+  assert(goalDoc.includes('Chat context before planning:'), `GOAL.md missing chat context heading:\n${goalDoc}`);
+  assert(goalDoc.includes('  USER: 先阅读代码并解释 TUI 结构。'), `GOAL.md should render multiline chat context as an indented constraint:\n${goalDoc}`);
+  assert(goalDoc.includes('  ASSISTANT: Chat input is bottom-mounted'), `GOAL.md missing assistant context:\n${goalDoc}`);
 }
 
 function blankState(root: string): RunState {

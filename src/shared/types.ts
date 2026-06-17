@@ -434,6 +434,7 @@ export interface RunOptions {
   lockMode?: 'auto' | 'manual';
   resumeIteration?: number;
   runtime?: RuntimeSelection;
+  planningContext?: string;
 }
 
 export interface ToolInvocationResult {

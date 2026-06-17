@@ -2,14 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
-import { buildChatHistory, currentGoalSummary } from '../tui/ChatPane.js';
+import { buildBlankRunPlanningContext, buildChatHistory, currentGoalSummary } from '../tui/ChatPane.js';
 import { codexDisplayLines, formatEvent, visibleEvents } from '../tui/ExecPane.js';
 import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
 import { disableMouseReporting, isMouseInput, mouseScrollDelta, parseMouseInput } from '../tui/input.js';
 import { cycleRuntimeValue, defaultRuntimeSelection, formatRuntimeSelectorLine, parseRuntimeCommand } from '../tui/runtimeSettings.js';
 import { viewport, wrapLines, wrappedViewport } from '../tui/viewport.js';
-import { buildFallbackChatTurn, summarizePlanForChat } from '../supervisor/chatAgent.js';
+import { buildChatPrompt, buildFallbackChatTurn, shouldStartPlannerFromBlankChat, summarizePlanForChat } from '../supervisor/chatAgent.js';
 
 const tuiRoot = join(TOOL_ROOT, 'src', 'tui');
 
@@ -23,6 +23,10 @@ async function main(): Promise<void> {
     input: await source('input.ts'),
     runtime: await source('runtimeSettings.ts'),
     state: await source('useRunState.ts'),
+    chatAgent: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'chatAgent.ts'), 'utf8'),
+    supervisor: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'index.ts'), 'utf8'),
+    goalDoc: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'goalDoc.ts'), 'utf8'),
+    types: await readFile(join(TOOL_ROOT, 'src', 'shared', 'types.ts'), 'utf8'),
     crashHandlers: await readFile(join(TOOL_ROOT, 'src', 'shared', 'crashHandlers.ts'), 'utf8'),
     cli: await readFile(join(TOOL_ROOT, 'src', 'cli.tsx'), 'utf8')
   };
@@ -50,7 +54,8 @@ async function main(): Promise<void> {
   assert(files.app.includes('runtime: runtimeSelection'), 'App must pass TUI runtime settings into supervisor launches');
   assert(files.app.includes('appendSupervisorError') && files.app.includes('Supervisor error:'), 'App must persist supervisor crashes without flooding the Chat transcript');
   assert(files.app.includes("launchSupervisor(supervisor.initialGoal, 'tui_goal_option')"), 'App must keep --goal as an explicit automation shortcut');
-  assert(files.app.includes("launchSupervisor(goal, 'tui_chat')"), 'App must mark blank-run Chat-agent planning as TUI Chat source');
+  assert(files.app.includes("launchSupervisor(goal, 'tui_chat', planningContext)"), 'App must mark blank-run Chat-agent planning as TUI Chat source and pass Chat context');
+  assert(files.app.includes('planningContext') && files.app.includes('pendingSupervisorLaunchRef'), 'App must preserve Chat planning context across delayed supervisor launches');
   assert(files.app.includes('goal={state.goal}'), 'App must pass durable goal state into Chat history');
   assert(files.app.includes('supervisorState={state.checkpoint?.supervisor_state}'), 'App must pass terminal supervisor state into Chat so stale errors do not occupy the input pane');
   assertNoControlWrites('App', files.app);
@@ -76,6 +81,7 @@ async function main(): Promise<void> {
     'ChatPane must not swallow ordinary letters as scroll shortcuts'
   );
   assert(files.chat.includes('runChatTurn') && files.chat.includes('writeUpdate: !blankRun'), 'ChatPane must always let the Chat agent decide whether blank-run input should start planning');
+  assert(files.chat.includes('result.degraded && !shouldStartPlannerFromBlankChat') && files.chat.includes('buildBlankRunPlanningContext'), 'ChatPane must guard only degraded blank-run planner starts and pass conversation context when planning starts');
   assert(files.chat.includes('onPlanningRequested') && files.chat.includes('blankRun'), 'ChatPane must launch planning only from a Chat-agent update on blank runs');
   assert(!files.chat.includes('acceptInitialGoal') && !files.chat.includes('onInitialGoal'), 'ChatPane must not bypass the Chat agent for first-message goal intake');
   assert(files.chat.includes('onInjection?.()'), 'ChatPane must notify App after writing inbox injections');
@@ -94,6 +100,13 @@ async function main(): Promise<void> {
   assert(files.runtime.includes('formatRuntimeSelectorLine') && files.runtime.includes('cycleRuntimeValue') && files.runtime.includes('RUNTIME_FIELDS'), 'runtime settings must expose selector formatting and value cycling');
   assert(files.runtime.includes("RUNTIME_FIELDS: RuntimeField[] = ['agent', 'effort']"), 'runtime selector must expose agent and effort only');
   assert(files.runtime.includes('RUNTIME_AGENTS') && files.runtime.includes('runtimeModelForAgent'), 'runtime settings must offer claude/codex agents with fixed models');
+
+  assert(files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && files.chatAgent.includes('Recent Chat transcript'), 'Chat agent prompt must carry durable Chat history across agent/effort changes');
+  assert(!files.chatAgent.includes('normalizeChatTurnResult'), 'Chat agent must trust real agent UPDATE decisions instead of normalizing them with local prompt hacks');
+  assert(files.chatAgent.includes('shouldStartPlannerFromBlankChat') && files.chatAgent.includes('hasConcreteActionIntent'), 'Chat fallback must use a generalized action-intent guard only when the agent is degraded');
+  assert(files.types.includes('planningContext?: string'), 'RunOptions must carry planningContext from TUI to supervisor');
+  assert(files.supervisor.includes('planningContext') && files.supervisor.includes('Chat context before planning:'), 'Supervisor must add Chat context to the initial GOAL.md contract');
+  assert(files.goalDoc.includes('renderConstraintMarkdown'), 'GOAL.md renderer must preserve multiline Chat context constraints');
 
   assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
   assert(files.goal.includes('useInput') && files.goal.includes('active?: boolean') && files.goal.includes('const isActive = active ?? isFocused'), 'GoalPane scroll input must be gated on the active top tab or focus');
@@ -151,6 +164,9 @@ async function main(): Promise<void> {
   verifyMouseScroll();
   verifyRuntimeSettings();
   verifyChatFallback();
+  verifyChatPlannerGuard();
+  verifyChatPromptHistory();
+  verifyBlankRunPlanningContext();
   verifyChatPromptCompression();
   verifyExecEventUsage();
   verifyCodexDisplayLines();
@@ -252,6 +268,59 @@ function verifyChatFallback(): void {
   assert(result.reply.trim().length > 0, 'Chat fallback must never produce an empty assistant reply');
   assert(!result.update, `Question fallback must not queue an add_requirement update: ${JSON.stringify(result)}`);
   assert(result.reply.includes('S6 Tune speed'), `Question fallback should summarize current plan step:\n${result.reply}`);
+}
+
+function verifyChatPlannerGuard(): void {
+  assert(
+    !shouldStartPlannerFromBlankChat('介绍一下你自己', { kind: 'add_requirement', text: '介绍一下你自己' }),
+    'blank-run degraded guard must reject non-actionable fallback turns'
+  );
+  assert(
+    !shouldStartPlannerFromBlankChat('请先阅读当前代码库，暂时不要开始计划。', { kind: 'add_requirement', text: 'Read the current repository.' }),
+    'blank-run planner guard must reject context-gathering-only turns'
+  );
+  assert(
+    shouldStartPlannerFromBlankChat('可以，开始修复这个问题', { kind: 'add_requirement', text: 'Fix the discussed issue.' }),
+    'blank-run planner guard must allow explicit start/fix turns'
+  );
+}
+
+function verifyChatPromptHistory(): void {
+  const prompt = buildChatPrompt(
+    {
+      paths: {} as never,
+      userText: '继续刚才的问题',
+      goalDoc: '',
+      plan: '',
+      recentEvents: []
+    },
+    [
+      { ts: '2026-06-17T10:00:00.000Z', role: 'user', text: '先阅读代码，别开始 planner。' },
+      { ts: '2026-06-17T10:00:01.000Z', role: 'assistant', text: '我看到 ChatPane 管输入，App 管 supervisor。' }
+    ]
+  );
+  assert(prompt.includes('Recent Chat transcript'), `Chat prompt missing transcript heading:\n${prompt}`);
+  assert(prompt.includes('USER: 先阅读代码'), `Chat prompt missing previous user turn:\n${prompt}`);
+  assert(prompt.includes('ASSISTANT: 我看到 ChatPane'), `Chat prompt missing previous assistant turn:\n${prompt}`);
+}
+
+function verifyBlankRunPlanningContext(): void {
+  const context = buildBlankRunPlanningContext(
+    [
+      { ts: '2026-06-17T10:00:00.000Z', role: 'user', text: '先读一下代码。' },
+      { ts: '2026-06-17T10:00:01.000Z', role: 'assistant', text: 'TUI 现在是上方 workspace，底部 chat input。' }
+    ],
+    '开始按这个方向修',
+    {
+      reply: '我会交给 planner。',
+      update: { kind: 'add_requirement', text: 'Fix the TUI Chat intake context handoff.' },
+      degraded: false
+    }
+  );
+  assert(context.includes('USER: 先读一下代码。'), `planning context missing prior user turn:\n${context}`);
+  assert(context.includes('ASSISTANT: TUI 现在是上方 workspace'), `planning context missing assistant turn:\n${context}`);
+  assert(context.includes('USER: 开始按这个方向修'), `planning context missing trigger turn:\n${context}`);
+  assert(context.includes('ASSISTANT UPDATE (add_requirement): Fix the TUI Chat intake context handoff.'), `planning context missing update:\n${context}`);
 }
 
 function verifyChatPromptCompression(): void {

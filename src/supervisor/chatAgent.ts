@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execa } from 'execa';
-import { appendJsonLine, atomicWriteJson, ensureDir, readJsonFileMaybe } from '../shared/atomic.js';
+import { appendJsonLine, atomicWriteJson, ensureDir, readJsonFileMaybe, readJsonLines } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
@@ -17,6 +17,9 @@ const RECENT_EVENT_LINES = 12;
 const CHAT_PLAN_MAX_CHARS = 6_000;
 const CHAT_GOAL_MAX_CHARS = 4_000;
 const CHAT_EVENT_MESSAGE_MAX_CHARS = 240;
+const CHAT_HISTORY_MAX_ENTRIES = 18;
+const CHAT_HISTORY_MAX_CHARS = 8_000;
+const CHAT_HISTORY_ENTRY_MAX_CHARS = 1_200;
 
 export interface ChatUpdate {
   kind: 'add_requirement' | 'steer';
@@ -77,7 +80,8 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
 
     const systemPrompt = await readFile(promptPath('chat'), 'utf8');
     const safetyText = formatSafetyForPrompt(config);
-    const userPrompt = buildChatPrompt(ctx);
+    const chatHistory = await readRecentChatHistory(ctx.paths);
+    const userPrompt = buildChatPrompt(ctx, chatHistory);
     if (agent === 'codex') return await runCodexChatTurn(ctx, command, { model: chatTool.model, effort: chatTool.effort, systemPrompt, safetyText, userPrompt });
 
     const sessionId = await readChatSession(ctx.paths);
@@ -171,6 +175,19 @@ export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Chat agent
   };
 }
 
+export function shouldStartPlannerFromBlankChat(userText: string, update: ChatUpdate | undefined): boolean {
+  if (!update) return false;
+  if (isLikelyContextGatheringOnly(userText)) return false;
+  if (isLikelyQuestion(userText) && !hasConcreteActionIntent(userText) && !hasConcreteActionIntent(update.text)) return false;
+  return hasConcreteActionIntent(userText) || hasConcreteActionIntent(update.text);
+}
+
+function hasConcreteActionIntent(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  return /(plan|goal|requirement|execute|start|run|implement|build|create|add|remove|delete|change|update|fix|repair|optimi[sz]e|test|verify|deploy|ship|commit|push|规划|计划|制定|执行|开始|启动|运行|实现|开发|构建|创建|新增|添加|删除|移除|修改|更新|修复|优化|测试|验证|部署|发布|提交|推送|完成|做到|要求|目标)/i.test(normalized);
+}
+
 function buildFallbackStatusReply(ctx: ChatTurnContext, reason: string): string {
   const planStep = currentPlanStep(ctx.plan);
   const lastEvent = ctx.recentEvents.at(-1);
@@ -213,13 +230,11 @@ function isLikelyContextGatheringOnly(text: string): boolean {
   const wantsInspection = /(阅读|读一下|看一下|看看|了解|熟悉|分析一下|先看|inspect|read|explore|understand|look over|take a look)/i.test(normalized);
   if (!wantsInspection) return false;
   const asksForPlanOrExecution = /(plan|规划|计划|制定计划|执行|开始|start|run|implement|build|fix|optimi[sz]e|修复|实现|开发|优化)/i.test(normalized);
-  return !asksForPlanOrExecution || /(先|first|before|暂时|先别|不要开始)/i.test(normalized);
+  return !asksForPlanOrExecution || /(暂时|先别|别开始|不要开始|不要计划|不要执行|先不要|先不用|before planning|before starting)/i.test(normalized);
 }
 
 function isLikelyPlanningRequest(text: string): boolean {
-  const normalized = text.trim().toLowerCase();
-  if (!normalized) return false;
-  return /(plan|规划|计划|制定|执行|开始|start|run|implement|build|create|add|fix|repair|optimi[sz]e|ship|改|修|修复|实现|开发|优化|新增|创建|完成|做到|要求|目标)/i.test(normalized);
+  return hasConcreteActionIntent(text);
 }
 
 export function buildChatArgs(input: {
@@ -305,7 +320,7 @@ function codexEffortArgs(effort: string | undefined): string[] {
   return ['-c', `model_reasoning_effort=${JSON.stringify(normalized)}`];
 }
 
-function buildChatPrompt(ctx: ChatTurnContext): string {
+export function buildChatPrompt(ctx: ChatTurnContext, chatHistory: ChatLogEntry[] = []): string {
   const events =
     ctx.recentEvents
       .slice(-RECENT_EVENT_LINES)
@@ -313,10 +328,33 @@ function buildChatPrompt(ctx: ChatTurnContext): string {
       .join('\n') || '(no run events yet)';
   return [
     `User message:\n${ctx.userText}`,
+    `\nRecent Chat transcript (durable conversation memory; includes prior turns even if agent or effort changed):\n${formatChatTranscriptForPrompt(chatHistory)}`,
     `\nCurrent GOAL.md:\n${truncateForChat(ctx.goalDoc.trim(), CHAT_GOAL_MAX_CHARS) || '(none yet)'}`,
     `\nCurrent PLAN.md summary:\n${summarizePlanForChat(ctx.plan)}`,
     `\nRecent run events:\n${events}`
   ].join('\n');
+}
+
+async function readRecentChatHistory(paths: RunPaths): Promise<ChatLogEntry[]> {
+  try {
+    const entries = await readJsonLines<ChatLogEntry>(paths.chat);
+    return entries.slice(-CHAT_HISTORY_MAX_ENTRIES);
+  } catch {
+    return [];
+  }
+}
+
+function formatChatTranscriptForPrompt(entries: ChatLogEntry[]): string {
+  if (entries.length === 0) return '(none yet)';
+  const text = entries
+    .map((entry) => {
+      const role = entry.role.toUpperCase();
+      const body = `${role}: ${truncateForChat(entry.text.trim(), CHAT_HISTORY_ENTRY_MAX_CHARS)}`;
+      const update = entry.update ? `\n${role} UPDATE (${entry.update.kind}): ${truncateForChat(entry.update.text.trim(), CHAT_HISTORY_ENTRY_MAX_CHARS)}` : '';
+      return `${body}${update}`;
+    })
+    .join('\n\n');
+  return truncateForChat(text, CHAT_HISTORY_MAX_CHARS);
 }
 
 export function summarizePlanForChat(plan: string, maxChars = CHAT_PLAN_MAX_CHARS): string {
