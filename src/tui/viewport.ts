@@ -8,6 +8,16 @@ export interface TextViewport<T = string> {
 
 export const PAGE_SIZE = 8;
 
+export interface ScrollKeyInput {
+  upArrow?: boolean;
+  downArrow?: boolean;
+  pageUp?: boolean;
+  pageDown?: boolean;
+  home?: boolean;
+  end?: boolean;
+  ctrl?: boolean;
+}
+
 export function wrapLines(lines: string[], width: number): string[] {
   const limit = Math.max(1, Math.floor(width));
   const output: string[] = [];
@@ -91,4 +101,20 @@ function wrappedTextAt(text: string, width: number, index: number): string {
 
 export function scrollBy(current: number, delta: number, maxScroll: number): number {
   return Math.min(maxScroll, Math.max(0, current + delta));
+}
+
+export function scrollDeltaForInput(input: string, key: ScrollKeyInput, pageSize = PAGE_SIZE): number | 'home' | 'end' | null {
+  if (key.upArrow) return 1;
+  if (key.downArrow) return -1;
+  if (key.pageUp) return pageSize;
+  if (key.pageDown) return -pageSize;
+  if (key.home) return 'home';
+  if (key.end) return 'end';
+  if (!key.ctrl) return null;
+  const normalized = input.toLowerCase();
+  if (normalized === 'k' || normalized === 'p') return 1;
+  if (normalized === 'j' || normalized === 'n') return -1;
+  if (normalized === 'u' || normalized === 'b') return pageSize;
+  if (normalized === 'd' || normalized === 'f') return -pageSize;
+  return null;
 }

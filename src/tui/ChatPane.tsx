@@ -6,7 +6,7 @@ import { runChatTurn, shouldStartPlannerFromBlankChat, type ChatTurnResult } fro
 import type { ChatLogEntry, GoalFile, Injection, OutboxMessage, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { isMouseInput, mouseScrollDelta } from './input.js';
-import { PAGE_SIZE, scrollBy, wrapLines, wrappedViewport } from './viewport.js';
+import { scrollBy, scrollDeltaForInput, wrapLines, wrappedViewport } from './viewport.js';
 import { defaultRuntimeSelection, parseRuntimeCommand } from './runtimeSettings.js';
 
 type ChatColor = 'white' | 'gray' | 'cyan' | 'cyanBright' | 'green' | 'yellow' | 'red' | 'magenta';
@@ -85,28 +85,13 @@ export function ChatHistoryPane({
       return;
     }
     if (isMouseInput(input)) return;
-    if (key.upArrow) {
-      setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
-      return;
-    }
-    if (key.downArrow) {
-      setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
-      return;
-    }
-    if (key.pageUp) {
-      setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
-      return;
-    }
-    if (key.pageDown) {
-      setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
-      return;
-    }
-    if (key.home) {
+    const keyboardScroll = scrollDeltaForInput(input, key);
+    if (keyboardScroll === 'home') {
       setScrollOffset(view.maxScroll);
-      return;
-    }
-    if (key.end) {
+    } else if (keyboardScroll === 'end') {
       setScrollOffset(0);
+    } else if (keyboardScroll !== null) {
+      setScrollOffset((current) => scrollBy(current, keyboardScroll, view.maxScroll));
     }
   }, { isActive: interactive && active });
 

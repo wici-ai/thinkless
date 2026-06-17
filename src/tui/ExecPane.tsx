@@ -4,7 +4,7 @@ import Spinner from 'ink-spinner';
 import type { RunEvent } from '../shared/types.js';
 import type { RunState } from './useRunState.js';
 import { isMouseInput, mouseScrollDelta } from './input.js';
-import { PAGE_SIZE, scrollBy, wrappedViewport } from './viewport.js';
+import { scrollBy, scrollDeltaForInput, wrappedViewport } from './viewport.js';
 
 const VISIBLE_EVENTS = 18;
 const MAX_FIELD_CHARS = 1_200;
@@ -41,12 +41,12 @@ export const ExecPane = React.memo(function ExecPane({
     const wheel = mouseScrollDelta(input);
     if (wheel !== 0) setScrollOffset((current) => scrollBy(current, wheel, view.maxScroll));
     else if (isMouseInput(input)) return;
-    else if (key.upArrow) setScrollOffset((current) => scrollBy(current, 1, view.maxScroll));
-    else if (key.downArrow) setScrollOffset((current) => scrollBy(current, -1, view.maxScroll));
-    else if (key.pageUp) setScrollOffset((current) => scrollBy(current, PAGE_SIZE, view.maxScroll));
-    else if (key.pageDown) setScrollOffset((current) => scrollBy(current, -PAGE_SIZE, view.maxScroll));
-    else if (key.home) setScrollOffset(view.maxScroll);
-    else if (key.end) setScrollOffset(0);
+    else {
+      const keyboardScroll = scrollDeltaForInput(input, key);
+      if (keyboardScroll === 'home') setScrollOffset(view.maxScroll);
+      else if (keyboardScroll === 'end') setScrollOffset(0);
+      else if (keyboardScroll !== null) setScrollOffset((current) => scrollBy(current, keyboardScroll, view.maxScroll));
+    }
   }, { isActive });
 
   return (

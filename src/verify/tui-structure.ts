@@ -8,7 +8,7 @@ import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
 import { disableMouseReporting, isMouseInput, mouseScrollDelta, parseMouseInput } from '../tui/input.js';
 import { cycleRuntimeValue, defaultRuntimeSelection, formatRuntimeSelectorLine, parseRuntimeCommand } from '../tui/runtimeSettings.js';
-import { viewport, wrapLines, wrappedViewport } from '../tui/viewport.js';
+import { scrollDeltaForInput, viewport, wrapLines, wrappedViewport } from '../tui/viewport.js';
 import { buildFallbackChatTurn, shouldStartPlannerFromBlankChat, summarizePlanForChat } from '../supervisor/chatAgent.js';
 
 const tuiRoot = join(TOOL_ROOT, 'src', 'tui');
@@ -22,6 +22,7 @@ async function main(): Promise<void> {
     header: await source('Header.tsx'),
     input: await source('input.ts'),
     runtime: await source('runtimeSettings.ts'),
+    viewport: await source('viewport.ts'),
     state: await source('useRunState.ts'),
     chatAgent: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'chatAgent.ts'), 'utf8'),
     chatSession: await readFile(join(TOOL_ROOT, 'src', 'shared', 'chatSession.ts'), 'utf8'),
@@ -135,7 +136,7 @@ async function main(): Promise<void> {
   assert(files.exec.includes("useFocus({ id: 'exec'"), 'ExecPane must be focusable for scroll controls');
   assert(files.exec.includes('useInput') && files.exec.includes('active?: boolean') && files.exec.includes('const isActive = active ?? isFocused'), 'ExecPane input must be gated on the active top tab or focus');
   for (const key of ['upArrow', 'downArrow', 'pageUp', 'pageDown', 'home', 'end']) {
-    assert(files.exec.includes(`key.${key}`), `ExecPane missing ${key} scroll binding`);
+    assert(files.exec.includes('scrollDeltaForInput') && files.viewport.includes(`${key}?: boolean`) && files.viewport.includes(`key.${key}`), `ExecPane missing ${key} scroll binding`);
   }
   assert(files.exec.includes('visibleEvents') && files.exec.includes('scrollOffset'), 'ExecPane must render an in-pane scroll viewport');
   assert(files.exec.includes('mouseScrollDelta') && !files.exec.includes("input === 'k'") && !files.exec.includes("input === 'g'"), 'ExecPane must support wheel scroll without swallowing ordinary letters');
@@ -216,6 +217,11 @@ function verifyTextViewport(): void {
   assert(view.lines.join(',') === '2,3', `viewport should scroll independently, got ${view.lines.join(',')}`);
   const lazy = wrappedViewport(['abcdef', 'gh'], 2, 1, 2);
   assert(lazy.lines.join('|') === 'cd|ef' && lazy.total === 4 && lazy.maxScroll === 2, `wrappedViewport should only materialize visible wrapped lines, got ${JSON.stringify(lazy)}`);
+  assert(scrollDeltaForInput('k', { ctrl: false }) === null, 'ordinary letters must not scroll while typing');
+  assert(scrollDeltaForInput('k', { ctrl: true }) === 1, 'Ctrl-K should scroll up as a keyboard fallback');
+  assert(scrollDeltaForInput('j', { ctrl: true }) === -1, 'Ctrl-J should scroll down as a keyboard fallback');
+  assert(scrollDeltaForInput('u', { ctrl: true }) === 8, 'Ctrl-U should page up as a keyboard fallback');
+  assert(scrollDeltaForInput('d', { ctrl: true }) === -8, 'Ctrl-D should page down as a keyboard fallback');
 }
 
 function verifyMouseScroll(): void {
