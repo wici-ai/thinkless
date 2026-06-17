@@ -67,7 +67,7 @@ async function main(): Promise<void> {
     target: resolve('fixture/slow-target'),
     prompt: 'chat with read-only context',
     outputLastMessage: '.wici/artifacts/chat-codex-test.txt',
-    model: 'gpt5.5',
+    model: 'gpt-5.5',
     effort: 'medium'
   });
   const firstCodex = buildExecutorArgs({
@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   assert(chatArgs[chatArgs.indexOf('--model') + 1] === 'claude-chat-test', 'Chat agent must support explicit model selection');
   assert(chatArgs[chatArgs.indexOf('--effort') + 1] === 'low', 'Chat agent must support explicit effort selection');
   assert(codexChatArgs[0] === 'exec' && codexChatArgs.includes('--json') && codexChatArgs.includes('--output-last-message'), 'Codex Chat must use codex exec JSON output, not Claude print args');
-  assert(codexChatArgs[codexChatArgs.indexOf('--model') + 1] === 'gpt5.5', 'Codex Chat must receive the fixed Codex model');
+  assert(codexChatArgs[codexChatArgs.indexOf('--model') + 1] === 'gpt-5.5', 'Codex Chat must receive the fixed Codex model');
   assert(codexChatArgs.includes('-c') && codexChatArgs.includes('model_reasoning_effort="medium"'), 'Codex Chat must map effort to Codex config override');
   assert(codexChatArgs[codexChatArgs.indexOf('--sandbox') + 1] === 'read-only', 'Codex Chat must run as a read-only conversation turn');
   assert(!codexChatArgs.includes('-p') && !codexChatArgs.includes('--permission-mode'), 'Codex Chat must not receive Claude-only arguments');
@@ -300,11 +300,11 @@ async function main(): Promise<void> {
   assert(loadedConfig.tools.chat?.command === 'claude', 'default config should expose Chat agent command');
   assert(loadedConfig.tools.chat?.model === 'opus4.8' && loadedConfig.tools.planner.model === 'opus4.8', 'Claude-backed panes must force opus4.8 by default');
   assert(loadedConfig.tools.chat?.effort === 'high' && loadedConfig.tools.planner.effort === 'high', 'Claude-backed panes must default to high effort');
-  assert(loadedConfig.tools.executor.model === 'gpt5.5' && loadedConfig.tools.executor.effort === 'medium', 'Codex-backed executor must force gpt5.5 medium by default');
+  assert(loadedConfig.tools.executor.model === 'gpt-5.5' && loadedConfig.tools.executor.effort === 'medium', 'Codex-backed executor must force gpt-5.5 medium by default');
   const switchedConfig = await loadConfig('stub');
   applyRuntimeSelection(switchedConfig, { planner: { agent: 'codex', effort: 'fast' }, executor: { agent: 'claude', effort: 'ultracode' } });
   assert(switchedConfig.tools.planner.command === 'codex', 'runtime agent switch must allow planner pane to select codex');
-  assert(switchedConfig.tools.planner.model === 'gpt5.5' && switchedConfig.tools.planner.effort === 'fast', 'codex agent selection must force gpt5.5 and codex effort options');
+  assert(switchedConfig.tools.planner.model === 'gpt-5.5' && switchedConfig.tools.planner.effort === 'fast', 'codex agent selection must force gpt-5.5 and codex effort options');
   assert(switchedConfig.tools.executor.command === 'claude', 'runtime agent switch must allow execution pane to select claude');
   assert(switchedConfig.tools.executor.model === 'opus4.8' && switchedConfig.tools.executor.effort === 'ultracode', 'claude agent selection must force opus4.8 and claude effort options');
   assert(loadedConfig.budget.max_iters === 0, 'default config max_iters=0 should disable WiCi iteration hard caps for real runs');

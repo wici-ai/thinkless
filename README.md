@@ -143,7 +143,7 @@ Use `--mode stub`, `--mode auto`, or `--mode real` on `run` / `tui`.
 
 In an interactive TUI with no existing run and no `--goal`, the top Chat History / Goal/Plan / Execution workspace starts empty and can be switched with the left/right arrows, while the Chat input stays fixed at the bottom. The first natural-language Chat message is ordinary conversation first: the Chat agent may answer questions or inspect the repo without starting a run. When the user asks for a plan, or the Chat agent decides the requirement is concrete enough, it emits an update; WiCi creates `GOAL.md`, records `goal_source: "tui_chat"`, and starts Claude Code plan mode. If Claude needs a clarification before materializing `PLAN.md`, or later while updating `PLAN.md` after a hot-reload Chat message, WiCi surfaces that as a Chat question and routes the next ordinary Chat message back as the answer. That answer wakes the stopped supervisor and resumes the same Claude planner session.
 
-The active workspace shows its current runtime selection. Press `Ctrl+R` to open the selector, use left/right to choose `agent` or `effort`, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. `agent` is always one of `claude` or `codex`; model is fixed by that agent: `claude` uses `opus4.8`, and `codex` uses `gpt5.5`.
+The active workspace shows its current runtime selection. Press `Ctrl+R` to open the selector, use left/right to choose `agent` or `effort`, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. `agent` is always one of `claude` or `codex`; model is fixed by that agent: `claude` uses `opus4.8`, and `codex` uses `gpt-5.5`.
 
 Typed commands remain available for custom values that are not in the selector presets:
 
@@ -152,7 +152,7 @@ Typed commands remain available for custom values that are not in the selector p
 /effort execution high
 ```
 
-Valid panes are `chat`, `plan`/`planner`, and `execution`/`exec`/`executor`. Claude effort options are `high`, `xhigh`, `max`, and `ultracode`. Codex effort options are `fast`, `medium`, `high`, and `xhigh`. Claude-backed panes receive `--model opus4.8` and the selected `--effort`; Codex-backed panes receive `--model gpt5.5`, and Codex effort is passed through config as `model_reasoning_effort`.
+Valid panes are `chat`, `plan`/`planner`, and `execution`/`exec`/`executor`. Claude effort options are `high`, `xhigh`, `max`, and `ultracode`. Codex effort options are `fast`, `medium`, `high`, and `xhigh`. Claude-backed panes receive `--model opus4.8` and the selected `--effort`; Codex-backed panes receive `--model gpt-5.5`, and Codex effort is passed through config as `model_reasoning_effort`.
 
 Planner output is markdown artifacts, not a second goal schema:
 

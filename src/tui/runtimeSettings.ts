@@ -86,7 +86,7 @@ export function parseRuntimeCommand(text: string, current: RuntimeSelection): { 
   if (command === 'model') {
     return {
       next: current,
-      status: 'model is fixed by agent: claude=opus4.8 codex=gpt5.5'
+      status: 'model is fixed by agent: claude=opus4.8 codex=gpt-5.5'
     };
   }
 

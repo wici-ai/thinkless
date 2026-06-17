@@ -14,7 +14,7 @@
     },
     "executor": {
       "command": "codex",
-      "model": "gpt5.5",
+      "model": "gpt-5.5",
       "effort": "medium",
       "dangerouslyBypassApprovalsAndSandbox": true
     }

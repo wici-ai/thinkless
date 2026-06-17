@@ -14,8 +14,8 @@ This section records the next feature slice being implemented before the older h
    - PLAN workspace: planner agent and effort.
    - EXECUTION workspace: executor agent and effort.
    - Agent choices are exactly `claude` and `codex`.
-   - Model is not user-selectable: `claude` always maps to `opus4.8`, and `codex` always maps to `gpt5.5`.
-   - Effort choices depend on the selected agent: Claude/opus4.8 uses `high`, `xhigh`, `max`, `ultracode`; Codex/gpt5.5 uses `fast`, `medium`, `high`, `xhigh`.
+   - Model is not user-selectable: `claude` always maps to `opus4.8`, and `codex` always maps to `gpt-5.5`.
+   - Effort choices depend on the selected agent: Claude/opus4.8 uses `high`, `xhigh`, `max`, `ultracode`; Codex/gpt-5.5 uses `fast`, `medium`, `high`, `xhigh`.
    - Defaults preserve the intended behavior: Chat/PLAN use `claude` + `high`, execution uses `codex` + `medium`.
 
 ## Design Decisions
@@ -43,7 +43,7 @@ This section records the next feature slice being implemented before the older h
 - Pass Chat settings into `runChatTurn`; pass PLAN/EXECUTION settings into `runSupervisor`.
 - For Codex execution, map effort to the Codex config override `model_reasoning_effort` via `-c`.
 - For Claude-backed panes, pass `--model opus4.8` and selected `--effort`.
-- For Codex-backed panes, pass `--model gpt5.5` and selected effort through Codex config.
+- For Codex-backed panes, pass `--model gpt-5.5` and selected effort through Codex config.
 
 ## Acceptance Checks
 
