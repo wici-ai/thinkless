@@ -43,7 +43,7 @@ async function main(): Promise<void> {
 
   assert(files.app.includes('useInput') && files.app.includes('useFocusManager'), 'App must keep keyboard focus management at the top level');
   assert(files.app.includes('enableMouseReporting'), 'App must enable terminal mouse reporting for pane-local wheel scroll');
-  assert(files.input.includes('ENABLE_MOUSE_REPORTING_SEQUENCE') && files.input.includes('DISABLE_MOUSE_REPORTING_SEQUENCE') && files.input.includes('disableMouseReporting') && files.input.includes("'SIGINT'") && files.input.includes('?1002h') && !files.input.includes('?1003h'), 'TUI mouse mode must enable wheel-friendly button tracking, avoid all-motion tracking, and install cleanup handlers');
+  assert(files.input.includes("ENABLE_MOUSE_REPORTING_SEQUENCE = '\\x1b[?1007h'") && files.input.includes('DISABLE_MOUSE_REPORTING_SEQUENCE') && files.input.includes('disableMouseReporting') && files.input.includes("'SIGINT'") && !files.input.includes('?1000h') && !files.input.includes('?1002h') && !files.input.includes('?1003h'), 'TUI default scroll mode must match Codex alternate-scroll behavior without enabling mouse capture');
   assert(files.input.includes('parseSgrMouseInputs') && files.input.includes('parseUrxvtMouseInputs') && files.input.includes('parseX10MouseInputs'), 'TUI mouse parser must cover common terminal mouse encodings');
   assert(files.app.includes('parseMouseInput') && files.app.includes('workspaceFocusId(workspaceTab)'), 'App must focus the active workspace pane from mouse clicks');
   assert(files.app.includes("focus('chat-input')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat input');
