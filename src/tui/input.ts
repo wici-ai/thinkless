@@ -1,4 +1,4 @@
-export const ENABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1007h';
+export const ENABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1007l\x1b[?1000h\x1b[?1002h\x1b[?1006h';
 export const DISABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1007l\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l';
 
 export function enableMouseReporting(stdout: NodeJS.WriteStream): () => void {
