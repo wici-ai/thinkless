@@ -20,6 +20,7 @@ import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { readPersistedRuntimeSelection } from '../shared/chatSession.js';
 import type { GoalFile, WiCiConfig } from '../shared/types.js';
 import { resolveMaxIters } from '../supervisor/index.js';
+import { formatDelay, isTransientNetworkFailure, transientFailureReason, transientRetryMessage } from '../supervisor/transientRetry.js';
 
 async function main(): Promise<void> {
   const iterSchema = JSON.parse(await readFile(schemaPath('iter-result'), 'utf8')) as { additionalProperties?: unknown };
@@ -310,6 +311,7 @@ async function main(): Promise<void> {
     })
   );
   assert(systemProgress?.usage.total_tokens === 16152, 'planner usage parser must extract system total tokens from stream-json events');
+  verifyTransientRetryDetection();
 
   assert(firstCodex.includes('--output-schema'), 'first codex exec missing --output-schema');
   assert(firstCodex.includes('--output-last-message'), 'first codex exec missing --output-last-message');
@@ -360,6 +362,7 @@ async function main(): Promise<void> {
         plan_diff_usage_streamed: true,
         codex_chat_agent: true,
         claude_chat_failure_detail: true,
+        transient_retry_detection: true,
         no_markdown_benchmark_inference: true,
         codex_output_schema_strict: true,
         forced_agent_models: true,
@@ -534,6 +537,17 @@ function assertThrows(fn: () => unknown, message: string): void {
     threw = true;
   }
   assert(threw, message);
+}
+
+function verifyTransientRetryDetection(): void {
+  assert(isTransientNetworkFailure('API Error: 503 No available accounts: no available accounts for v2.pincc.ai'), '503 API errors should be retried as transient');
+  assert(isTransientNetworkFailure('HTTP 502 Bad Gateway from upstream'), '502 bad gateway should be retried as transient');
+  assert(isTransientNetworkFailure('Cloudflare 524 gateway timeout'), '524 gateway timeout should be retried as transient');
+  assert(isTransientNetworkFailure('error_status=400 request failed before provider routing'), '400 provider/routing failures should be retried as transient');
+  assert(!isTransientNetworkFailure('Planner output did not contain structured plan artifacts'), 'structured planner failures must not be retried as network failures');
+  assert(transientFailureReason('noise\nAPI Error: 502 Bad Gateway').includes('502'), 'transient retry reason should preserve the useful failing status');
+  assert(formatDelay(10 * 60_000) === '10m', 'default transient retry delay should format as 10m');
+  assert(transientRetryMessage('Planner', { attempt: 1, delayMs: 10 * 60_000, reason: 'API Error: 503' }).includes('retry 2 in 10m'), 'retry event message should include the next attempt and delay');
 }
 
 async function verifyPlanDiffUsage(): Promise<void> {

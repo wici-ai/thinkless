@@ -4,7 +4,7 @@ import { Header } from './Header.js';
 import { ChatHistoryPane, ChatInputBox } from './ChatPane.js';
 import { GoalPane } from './GoalPane.js';
 import { ExecPane } from './ExecPane.js';
-import { useRunState } from './useRunState.js';
+import { useRunState, type RunState } from './useRunState.js';
 import { runSupervisor } from '../supervisor/index.js';
 import type { RunOptions, ToolMode } from '../shared/types.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
@@ -220,7 +220,7 @@ export function App({
               interactive={interactive}
               outbox={state.outbox}
               injections={state.injections}
-            goal={state.goal}
+              goal={state.goal}
               supervisorState={state.checkpoint?.supervisor_state}
               chat={state.chat}
               contentWidth={workspaceContentWidth}
@@ -229,6 +229,7 @@ export function App({
               showTitle={false}
               systemLine={startError}
               localStatus={chatLocalStatus}
+              activityStatus={buildActivityStatus(state)}
               busy={chatBusy}
             />
           ) : workspaceTab === 'plan' ? (
@@ -319,6 +320,44 @@ export function shouldAutoStartExistingRun(state: ReturnType<typeof useRunState>
   return true;
 }
 
+export function buildActivityStatus(state: RunState): string | null {
+  const checkpoint = state.checkpoint;
+  if (!checkpoint || checkpoint.supervisor_state === 'STOP' || checkpoint.supervisor_state === 'FAILED') return null;
+  const latest = [...state.events].reverse();
+  const latestEvent = latest[0];
+  if (latestEvent?.type === 'PLAN_RETRY_WAIT' || latestEvent?.type === 'EXECUTE_RETRY_WAIT') {
+    return `waiting: ${shortEventMessage(latestEvent)}`;
+  }
+  if (checkpoint.supervisor_state === 'PLAN') {
+    const event = latest.find((item) => item.type.startsWith('PLAN_'));
+    return event ? `planner ${eventAge(event.ts)}: ${shortEventMessage(event)}` : 'planner is updating PLAN.md';
+  }
+  if (checkpoint.supervisor_state === 'EXECUTE') {
+    const event = latest.find((item) => item.type.startsWith('EXECUTE_'));
+    const step = checkpoint.next_step ? ` ${checkpoint.next_step}` : '';
+    return event ? `executor${step} ${eventAge(event.ts)}: ${shortEventMessage(event)}` : `executor${step} is running`;
+  }
+  if (!latestEvent) return checkpoint.supervisor_state.toLowerCase();
+  return `${checkpoint.supervisor_state.toLowerCase()} ${eventAge(latestEvent.ts)}: ${shortEventMessage(latestEvent)}`;
+}
+
+function shortEventMessage(event: RunState['events'][number]): string {
+  const text = event.message.replace(/\s+/g, ' ').trim();
+  return truncate(text, 180);
+}
+
+function eventAge(ts: string): string {
+  const parsed = Date.parse(ts);
+  if (!Number.isFinite(parsed)) return 'recently';
+  const seconds = Math.max(0, Math.round((Date.now() - parsed) / 1000));
+  if (seconds < 5) return 'now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h ago`;
+}
+
 export function shouldUseChatAgentForBlankRun(input: {
   supervisorEnabled: boolean;
   supervisorStarted: boolean;
@@ -336,4 +375,8 @@ function hasRunBlackboard(state: ReturnType<typeof useRunState>): boolean {
 
 function isInitialGoalRequiredText(text: string | undefined): boolean {
   return Boolean(text?.includes(INITIAL_GOAL_REQUIRED_MESSAGE));
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, Math.max(0, limit - 3))}...` : text;
 }

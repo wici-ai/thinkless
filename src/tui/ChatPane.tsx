@@ -24,6 +24,7 @@ interface ChatContextProps {
   chat?: ChatLogEntry[];
   mode?: ToolMode;
   runtime?: RuntimeSelection;
+  activityStatus?: string | null;
 }
 
 export function ChatHistoryPane({
@@ -38,6 +39,7 @@ export function ChatHistoryPane({
   active = true,
   systemLine,
   localStatus,
+  activityStatus,
   busy = false,
   showTitle = true
 }: {
@@ -51,6 +53,7 @@ export function ChatHistoryPane({
   viewportHeight?: number;
   systemLine?: string | null;
   localStatus?: string | null;
+  activityStatus?: string | null;
   busy?: boolean;
   active?: boolean;
   showTitle?: boolean;
@@ -65,6 +68,7 @@ export function ChatHistoryPane({
     ...buildActiveOutboxLines(activeOutbox),
     ...(systemLine ? blockLines('system', systemLine, 'red', `system-${systemLine}`) : []),
     ...(localStatus ? blockLines('queued command', localStatus, 'yellow', `local-${localStatus}`) : []),
+    ...(activityStatus ? blockLines('activity', activityStatus, 'cyan', `activity-${activityStatus}`) : []),
     ...(busy ? [{ id: 'busy', ts: timestampSortKey(), text: 'Assistant is thinking...', color: 'yellow' as ChatColor, bold: true }] : [])
   ];
   const [scrollOffset, setScrollOffset] = useState(0);
@@ -295,6 +299,7 @@ export function ChatPane({
   chat = [],
   mode,
   runtime,
+  activityStatus,
   contentWidth = 32,
   viewportHeight = 12,
   inputPaused = false,
@@ -329,6 +334,7 @@ export function ChatPane({
         active
         systemLine={systemLine}
         localStatus={localStatus}
+        activityStatus={activityStatus}
         busy={busy}
       />
       <ChatInputBox

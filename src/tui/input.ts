@@ -1,12 +1,12 @@
 export function enableMouseReporting(stdout: NodeJS.WriteStream): () => void {
-  stdout.write('\x1b[?1000h\x1b[?1006h');
+  stdout.write('\x1b[?1000h\x1b[?1006h\x1b[?1007h');
   installMouseCleanup(stdout);
   return () => disableMouseReporting(stdout);
 }
 
 export function disableMouseReporting(stdout: NodeJS.WriteStream = process.stdout): void {
   try {
-    stdout.write('\x1b[?1006l\x1b[?1002l\x1b[?1000l');
+    stdout.write('\x1b[?1007l\x1b[?1006l\x1b[?1002l\x1b[?1000l');
   } catch {
     // Best-effort terminal cleanup only.
   }
@@ -33,12 +33,16 @@ function exitCodeForSignal(signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP'): number {
 }
 
 export function mouseScrollDelta(input: string): number {
-  const match = /(?:\x1b)?\[<(\d+);\d+;\d+[mM]/.exec(input);
-  if (!match) return 0;
-  const code = Number(match[1]);
-  if (code === 64) return 1;
-  if (code === 65) return -1;
-  return 0;
+  let delta = 0;
+  const matches = input.matchAll(/(?:\x1b)?\[<(\d+);\d+;\d+[mM]/g);
+  for (const match of matches) {
+    const code = Number(match[1]);
+    if (code < 64) continue;
+    const wheelButton = code & 3;
+    if (wheelButton === 0) delta += 1;
+    else if (wheelButton === 1) delta -= 1;
+  }
+  return delta;
 }
 
 export function isMouseInput(input: string): boolean {

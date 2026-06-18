@@ -1,5 +1,6 @@
 import { chmod, readFile, readdir, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { join, relative } from 'node:path';
 import { atomicWriteFile, atomicWriteJson, exists, makeReadOnly, makeWritable } from '../shared/atomic.js';
 import { commandExists } from '../shared/commands.js';
@@ -12,6 +13,7 @@ import { isPlannerSelectedMetricName, primaryMetricName } from './metricFormat.j
 import { isClaudeEnvelope, parseClaudeJsonOutput, type ClaudeUsage } from './claudeOutput.js';
 import { runClaudeStreamProcess } from './claudeProcess.js';
 import { saveGoalFiles } from './goalDoc.js';
+import { isTransientNetworkFailure, transientFailureReason, transientRetryDelayMs, type TransientRetryInfo } from './transientRetry.js';
 
 interface PlannerOutput {
   session_id?: string;
@@ -40,6 +42,8 @@ export interface PlannerUsageProgress {
   totalCostUsd?: number;
   usage: ClaudeUsage;
 }
+
+export type PlannerRetryProgress = TransientRetryInfo;
 
 export interface PlannerClarificationResume {
   sessionId?: string;
@@ -81,6 +85,7 @@ export async function runInitialPlanner(
   goal: GoalFile,
   config: WiCiConfig,
   onProgress?: (progress: PlannerUsageProgress) => Promise<void>,
+  onRetry?: (retry: PlannerRetryProgress) => Promise<void>,
   resume?: PlannerClarificationResume
 ): Promise<PlannerInvocationResult> {
   const available = await commandExists(config.tools.planner.command);
@@ -117,7 +122,8 @@ export async function runInitialPlanner(
         args,
         {
           cwd: paths.target,
-          onProgress
+          onProgress,
+          onRetry
         }
       );
       await persistPlannerRaw(paths, resume ? 'initial-resume' : 'initial', result);
@@ -148,7 +154,8 @@ export async function runPlanDiff(
   plannerSessionId: string | undefined,
   newText: string,
   config: WiCiConfig,
-  onProgress?: (progress: PlannerUsageProgress) => Promise<void>
+  onProgress?: (progress: PlannerUsageProgress) => Promise<void>,
+  onRetry?: (retry: PlannerRetryProgress) => Promise<void>
 ): Promise<PlannerInvocationResult> {
   const available = await commandExists(config.tools.planner.command);
   if (config.tools.mode === 'real' && !available) {
@@ -176,7 +183,7 @@ export async function runPlanDiff(
           systemPrompt,
           safetyText
         }),
-        { cwd: paths.target, onProgress }
+        { cwd: paths.target, onProgress, onRetry }
       );
       await persistPlannerRaw(paths, `diff-${Date.now()}`, result);
       const response = extractPlannerResponse(result.stdout);
@@ -304,39 +311,49 @@ async function runPlannerProcess(
   options: {
     cwd: string;
     onProgress?: (progress: PlannerUsageProgress) => Promise<void>;
+    onRetry?: (retry: PlannerRetryProgress) => Promise<void>;
   }
 ): Promise<{ stdout: string; all: string }> {
-  let progressChain = Promise.resolve();
-  let lastUsageSignature = '';
-  const emitProgress = (line: string) => {
-    const progress = plannerProgressFromLine(line);
-    if (!progress || !options.onProgress) return;
-    const signature = JSON.stringify(progress);
-    if (signature === lastUsageSignature) return;
-    lastUsageSignature = signature;
-    progressChain = progressChain.then(() => options.onProgress?.(progress)).then(() => undefined);
-  };
+  for (let attempt = 1; ; attempt += 1) {
+    let progressChain = Promise.resolve();
+    let lastUsageSignature = '';
+    const emitProgress = (line: string) => {
+      const progress = plannerProgressFromLine(line);
+      if (!progress || !options.onProgress) return;
+      const signature = JSON.stringify(progress);
+      if (signature === lastUsageSignature) return;
+      lastUsageSignature = signature;
+      progressChain = progressChain.then(() => options.onProgress?.(progress)).then(() => undefined);
+    };
 
-  const result = await runClaudeStreamProcess(command, args, {
-    cwd: options.cwd,
-    idleTimeoutMs: PLANNER_IDLE_TIMEOUT_MS,
-    hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS,
-    onLine: emitProgress
-  });
-  await progressChain;
+    const result = await runClaudeStreamProcess(command, args, {
+      cwd: options.cwd,
+      idleTimeoutMs: PLANNER_IDLE_TIMEOUT_MS,
+      hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS,
+      onLine: emitProgress
+    });
+    await progressChain;
 
-  const stderr = result.stderr;
-  if (result.timeoutReason === 'hard') {
-    throw new Error(`Planner exceeded hard timeout after ${Math.round(PLANNER_HARD_TIMEOUT_MS / 1000)}s without producing PLAN.md artifacts`);
+    const stderr = result.stderr;
+    if (result.timeoutReason === 'hard') {
+      throw new Error(`Planner exceeded hard timeout after ${Math.round(PLANNER_HARD_TIMEOUT_MS / 1000)}s without producing PLAN.md artifacts`);
+    }
+    if (result.timeoutReason === 'idle') {
+      throw new Error(`Planner timed out after ${Math.round(PLANNER_IDLE_TIMEOUT_MS / 1000)}s without planner output`);
+    }
+    if (result.exitCode !== 0) {
+      const detail = summarizePlannerFailure(result.stdout, stderr);
+      const combined = `${result.stdout}\n${stderr}\n${detail}`;
+      if (isTransientNetworkFailure(combined)) {
+        const retry = { attempt, delayMs: transientRetryDelayMs(), reason: transientFailureReason(combined) };
+        await options.onRetry?.(retry);
+        await delay(retry.delayMs);
+        continue;
+      }
+      throw new Error(`Planner exited with code ${result.exitCode ?? `signal ${result.signal}`}${detail ? `: ${detail}` : ''}`);
+    }
+    return { stdout: result.stdout, all: result.all };
   }
-  if (result.timeoutReason === 'idle') {
-    throw new Error(`Planner timed out after ${Math.round(PLANNER_IDLE_TIMEOUT_MS / 1000)}s without planner output`);
-  }
-  if (result.exitCode !== 0) {
-    const detail = summarizePlannerFailure(result.stdout, stderr);
-    throw new Error(`Planner exited with code ${result.exitCode ?? `signal ${result.signal}`}${detail ? `: ${detail}` : ''}`);
-  }
-  return { stdout: result.stdout, all: result.all };
 }
 
 function summarizePlannerFailure(stdout: string, stderr: string): string {

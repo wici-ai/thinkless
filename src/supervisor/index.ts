@@ -17,6 +17,7 @@ import {
   verifyEvalHashes,
   type PlannerClarificationResume,
   type PlannerQuestion,
+  type PlannerRetryProgress,
   type PlannerUsageProgress
 } from './planner.js';
 import { nextExecutableStep, parsePlanSteps, readPlan, setPlanStepStatus } from './plan.js';
@@ -57,6 +58,7 @@ import { recordAcceptedArchiveEntry, restoreLedgerFile, selectArchiveParent } fr
 import { formatSkillsForPrompt, recordSkillFromKeep, retrieveSkills } from './skills.js';
 import { codexUsageFromError } from './codexRun.js';
 import { PLANNER_SELECTED_METRIC, formatPrimaryMetricTransition, primaryMetricTag, primaryMetricValue } from './metricFormat.js';
+import { isTransientNetworkFailure, transientFailureReason, transientRetryDelayMs, transientRetryMessage } from './transientRetry.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
@@ -198,6 +200,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     await saveStableIterationSnapshot(paths, goal, checkpoint, baseline);
 
     let steerText: string | undefined;
+    const transientExecutorRetries = new Map<string, number>();
 
     while (checkpoint.iter < maxIters) {
       const backstop = await hardBackstop(paths, goal);
@@ -258,8 +261,14 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         }
         checkpoint.supervisor_state = 'PLAN';
         await saveCheckpoint(paths, checkpoint);
-        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, withLessons(steerText ?? '', memoryText), config, (progress) =>
-          emitPlannerUsage(events, progress, { phase: 'plan_diff' })
+        const diff = await runPlanDiff(
+          paths,
+          goal,
+          checkpoint.sessions.planner,
+          withLessons(steerText ?? '', memoryText),
+          config,
+          (progress) => emitPlannerUsage(events, progress, { phase: 'plan_diff' }),
+          (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff' })
         );
         const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
         if (waitingForPlanner) {
@@ -333,6 +342,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           }
         });
         checkpoint.sessions.executor = iterResult.invocation.sessionId ?? checkpoint.sessions.executor;
+        transientExecutorRetries.delete(`${step.id}:${nextIter}`);
         await events.emit('EXECUTE_DONE', iterResult.notes, {
           step_done: iterResult.step_done,
           tests_pass: iterResult.tests_pass,
@@ -341,6 +351,42 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         });
       } catch (error) {
         const usage = codexUsageFromError(error);
+        const reason = errorMessage(error);
+        if (isTransientNetworkFailure(reason)) {
+          const retryKey = `${step.id}:${nextIter}`;
+          const attempt = (transientExecutorRetries.get(retryKey) ?? 0) + 1;
+          transientExecutorRetries.set(retryKey, attempt);
+          const retry = {
+            attempt,
+            delayMs: transientRetryDelayMs(),
+            reason: transientFailureReason(reason)
+          };
+          await events.emit('EXECUTE_RETRY_WAIT', transientRetryMessage('Executor', retry), usage ? { iter: nextIter, step_id: step.id, usage, ...retry } : { iter: nextIter, step_id: step.id, ...retry }, 'warn');
+          await revertToBest(paths, baseline.best_commit);
+          await setPlanStepStatus(paths, step.id, 'pending');
+          checkpoint = {
+            ...checkpoint,
+            supervisor_state: 'EXECUTE',
+            iter: nextIter - 1,
+            next_step: step.id,
+            ledger_seq: await lineCount(paths.ledger),
+            events_seq: events.seq,
+            plan_hash: await hashFile(paths.plan)
+          };
+          await saveCheckpoint(paths, checkpoint);
+          await delay(retry.delayMs);
+          await events.emit('EXECUTE_RETRY', `Retrying ${step.id} after transient network failure`, {
+            iter: nextIter,
+            step_id: step.id,
+            attempt
+          }, 'warn');
+          checkpoint = {
+            ...checkpoint,
+            events_seq: events.seq
+          };
+          await saveCheckpoint(paths, checkpoint);
+          continue;
+        }
         await events.emit('EXECUTE_FAILED', error instanceof Error ? error.message : String(error), usage ? { usage } : undefined, 'error');
         await revertToBest(paths, baseline.best_commit);
         await setPlanStepStatus(paths, step.id, 'pending');
@@ -436,8 +482,14 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           plan_hash: await hashFile(paths.plan)
         };
         await saveCheckpoint(paths, checkpoint);
-        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, withLessons(steerText ?? '', memoryText), config, (progress) =>
-          emitPlannerUsage(events, progress, { phase: 'plan_diff', safe_point: 'evaluate' })
+        const diff = await runPlanDiff(
+          paths,
+          goal,
+          checkpoint.sessions.planner,
+          withLessons(steerText ?? '', memoryText),
+          config,
+          (progress) => emitPlannerUsage(events, progress, { phase: 'plan_diff', safe_point: 'evaluate' }),
+          (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff', safe_point: 'evaluate' })
         );
         const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
         if (waitingForPlanner) {
@@ -690,8 +742,14 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           ].filter(Boolean).join(' '),
           memoryText
         );
-        const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, replanText, config, (progress) =>
-          emitPlannerUsage(events, progress, { phase: 'stuck_replan', step_id: step.id })
+        const diff = await runPlanDiff(
+          paths,
+          goal,
+          checkpoint.sessions.planner,
+          replanText,
+          config,
+          (progress) => emitPlannerUsage(events, progress, { phase: 'stuck_replan', step_id: step.id }),
+          (retry) => emitPlannerRetry(events, retry, { phase: 'stuck_replan', step_id: step.id })
         );
         const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
         if (waitingForPlanner) {
@@ -800,6 +858,7 @@ async function runDirectPlanExecution(
   options: RunOptions
 ): Promise<SupervisorResult> {
   let steerText: string | undefined;
+  const transientExecutorRetries = new Map<string, number>();
 
   while (checkpoint.iter < maxIters) {
     const pendingUpdate = await applyDirectPendingInjections(paths, goal, checkpoint, config, events);
@@ -863,6 +922,7 @@ async function runDirectPlanExecution(
       if (!run.result) throw new Error('Executor stopped without a result');
       const iterResult = run.result;
       checkpoint.sessions.executor = iterResult.invocation.sessionId ?? checkpoint.sessions.executor;
+      transientExecutorRetries.delete(`${step.id}:${nextIter}`);
       if (run.executorApp) {
         checkpoint.sessions.executorApp = run.executorApp;
       }
@@ -974,6 +1034,42 @@ async function runDirectPlanExecution(
       }
       const usage = codexUsageFromError(error);
       const reason = errorMessage(error);
+      if (isTransientNetworkFailure(reason)) {
+        const retryKey = `${step.id}:${nextIter}`;
+        const attempt = (transientExecutorRetries.get(retryKey) ?? 0) + 1;
+        transientExecutorRetries.set(retryKey, attempt);
+        const retry = {
+          attempt,
+          delayMs: transientRetryDelayMs(),
+          reason: transientFailureReason(reason)
+        };
+        await events.emit('EXECUTE_RETRY_WAIT', transientRetryMessage('Executor', retry), usage ? { iter: nextIter, step_id: step.id, mode: 'direct', usage, ...retry } : { iter: nextIter, step_id: step.id, mode: 'direct', ...retry }, 'warn');
+        await revertToBest(paths, checkpoint.best_commit ?? 'NO_HEAD');
+        await setPlanStepStatus(paths, step.id, 'pending', nextIter);
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'EXECUTE',
+          iter: nextIter - 1,
+          next_step: step.id,
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq,
+          plan_hash: await hashFile(paths.plan)
+        };
+        await saveCheckpoint(paths, checkpoint);
+        await delay(retry.delayMs);
+        await events.emit('EXECUTE_RETRY', `Retrying ${step.id} after transient network failure`, {
+          iter: nextIter,
+          step_id: step.id,
+          mode: 'direct',
+          attempt
+        }, 'warn');
+        checkpoint = {
+          ...checkpoint,
+          events_seq: events.seq
+        };
+        await saveCheckpoint(paths, checkpoint);
+        continue;
+      }
       await events.emit('EXECUTE_RECOVERABLE_FAILURE', reason, usage ? { usage, mode: 'direct' } : { mode: 'direct' }, 'warn');
       const ledgerEntry = directLedgerEntry({
         iter: nextIter,
@@ -1086,8 +1182,14 @@ async function applyDirectPendingInjections(
     plan_hash: await hashFile(paths.plan)
   };
   await saveCheckpoint(paths, checkpoint);
-  const diff = await runPlanDiff(paths, goal, checkpoint.sessions.planner, steerText ?? '', config, (progress) =>
-    emitPlannerUsage(events, progress, { phase: 'direct_plan_diff' })
+  const diff = await runPlanDiff(
+    paths,
+    goal,
+    checkpoint.sessions.planner,
+    steerText ?? '',
+    config,
+    (progress) => emitPlannerUsage(events, progress, { phase: 'direct_plan_diff' }),
+    (retry) => emitPlannerRetry(events, retry, { phase: 'direct_plan_diff' })
   );
   const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
   if (waitingForPlanner) {
@@ -1371,7 +1473,14 @@ async function ensurePlanAndLegacyBaselineState(
     await events.emit('PLAN_START', 'Planner is materializing PLAN.md and optional validation scripts');
     let result: Awaited<ReturnType<typeof runInitialPlanner>>;
     try {
-      result = await runInitialPlanner(paths, goal, config, (progress) => emitPlannerUsage(events, progress, { phase: plannerResume ? 'initial_resume' : 'initial' }), plannerResume);
+      result = await runInitialPlanner(
+        paths,
+        goal,
+        config,
+        (progress) => emitPlannerUsage(events, progress, { phase: plannerResume ? 'initial_resume' : 'initial' }),
+        (retry) => emitPlannerRetry(events, retry, { phase: plannerResume ? 'initial_resume' : 'initial' }),
+        plannerResume
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await events.emit('PLAN_FAILED', message, undefined, 'error');
@@ -1441,7 +1550,8 @@ async function ensurePlanAndLegacyBaselineState(
         plannerResume.sessionId ?? checkpoint.sessions.planner,
         `Planner clarification answer:\nQuestion: ${plannerResume.question ?? '(not recorded)'}\nAnswer:\n${plannerResume.answer}`,
         config,
-        (progress) => emitPlannerUsage(events, progress, { phase: 'plan_diff_resume' })
+        (progress) => emitPlannerUsage(events, progress, { phase: 'plan_diff_resume' }),
+        (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff_resume' })
       );
       const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
       if (waitingForPlanner) {
@@ -2132,6 +2242,10 @@ function formatPlannerUsage(progress: PlannerUsageProgress): string {
 
 async function emitPlannerUsage(events: EventWriter, progress: PlannerUsageProgress, extra: Record<string, unknown> = {}): Promise<void> {
   await events.emit('PLAN_USAGE', formatPlannerUsage(progress), { ...progress, ...extra });
+}
+
+async function emitPlannerRetry(events: EventWriter, retry: PlannerRetryProgress, extra: Record<string, unknown> = {}): Promise<void> {
+  await events.emit('PLAN_RETRY_WAIT', transientRetryMessage('Planner', retry), { ...extra, ...retry }, 'warn');
 }
 
 function formatExecutorProgress(progress: ExecutorProgress): string {

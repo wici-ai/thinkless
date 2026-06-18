@@ -59,6 +59,7 @@ async function main(): Promise<void> {
   assert(files.app.includes('onRuntimeChange={setRuntimeSelection}'), 'App must still support typed runtime commands for custom values');
   assert(files.app.includes('runtime: runtimeSelection'), 'App must pass TUI runtime settings into supervisor launches');
   assert(files.app.includes('appendSupervisorError') && files.app.includes('Supervisor error:'), 'App must persist supervisor crashes without flooding the Chat transcript');
+  assert(files.app.includes('buildActivityStatus(state)') && files.app.includes("type === 'EXECUTE_RETRY_WAIT'") && files.app.includes("type.startsWith('EXECUTE_')"), 'App must surface compact live supervisor activity in the Chat pane');
   assert(files.app.includes("launchSupervisor(supervisor.initialGoal, 'tui_goal_option')"), 'App must keep --goal as an explicit automation shortcut');
   assert(files.app.includes("launchSupervisor(goal, 'tui_chat', planningContext)"), 'App must mark blank-run Chat-agent planning as TUI Chat source and pass Chat context');
   assert(files.app.includes('planningContext') && files.app.includes('pendingSupervisorLaunchRef'), 'App must preserve Chat planning context across delayed supervisor launches');
@@ -74,6 +75,7 @@ async function main(): Promise<void> {
   assert(files.chat.includes('currentGoalSummary'), 'ChatPane must keep current goal in a compact header outside transcript history');
   assert(files.chat.includes('isActiveOutboxMessage') && files.chat.includes("supervisorState !== 'STOP'") && files.chat.includes("supervisorState !== 'FAILED'"), 'ChatPane must hide stale error outbox messages after terminal run states');
   assert(files.chat.includes('wrappedViewport') && files.chat.includes('line.color') && files.chat.includes('line.bold'), 'ChatPane must preserve per-line role styling instead of guessing colors from text prefixes');
+  assert(files.chat.includes('activityStatus') && files.chat.includes("blockLines('activity'"), 'ChatPane must render compact live activity without writing it into chat history');
   assert(!files.chat.includes('chatLineColor'), 'ChatPane must not color chat by fragile string-prefix guessing');
   assert(files.chat.includes('Number.POSITIVE_INFINITY'), 'ChatPane must not truncate long chat turns before the scroll viewport');
   assert(files.chat.includes('wrappedViewport') && files.chat.includes('wrapLines'), 'ChatPane must render full wrapped content through a scroll viewport');
@@ -120,6 +122,7 @@ async function main(): Promise<void> {
   assert(files.chatAgent.includes('shouldStartPlannerFromBlankChat') && files.chatAgent.includes('hasConcreteActionIntent'), 'Chat fallback must use a generalized action-intent guard only when the agent is degraded');
   assert(files.types.includes('planningContext?: string'), 'RunOptions must carry planningContext from TUI to supervisor');
   assert(files.supervisor.includes('planningContext') && files.supervisor.includes('Chat context before planning:'), 'Supervisor must add Chat context to the initial GOAL.md contract');
+  assert(files.supervisor.includes('PLAN_RETRY_WAIT') && files.supervisor.includes('EXECUTE_RETRY_WAIT') && files.supervisor.includes('transientRetryDelayMs'), 'Supervisor must wait and retry transient planner/executor network failures');
   assert(files.goalDoc.includes('renderConstraintMarkdown'), 'GOAL.md renderer must preserve multiline Chat context constraints');
 
   assert(files.goal.includes("useFocus({ id: 'goal'"), 'GoalPane must be focusable for Tab navigation');
@@ -228,6 +231,9 @@ function verifyMouseScroll(): void {
   assert(mouseScrollDelta('\x1b[<64;20;10M') === 1, 'mouse wheel up should scroll into pane history');
   assert(mouseScrollDelta('\x1b[<65;20;10M') === -1, 'mouse wheel down should scroll toward pane tail');
   assert(mouseScrollDelta('[<65;20;10M') === -1, 'mouse wheel without ESC prefix should still scroll');
+  assert(mouseScrollDelta('\x1b[<64;20;10M\x1b[<64;20;9M') === 2, 'touchpad chunks can contain multiple wheel events');
+  assert(mouseScrollDelta('\x1b[<68;20;10M') === 1, 'modified wheel up should still scroll');
+  assert(mouseScrollDelta('\x1b[<69;20;10M') === -1, 'modified wheel down should still scroll');
   assert(isMouseInput('[<65;31;33M'), 'raw SGR mouse text without ESC should be swallowed');
   const click = parseMouseInput('\x1b[<0;12;4M');
   assert(click?.code === 0 && click.x === 12 && click.y === 4 && click.released === false, 'mouse click parser should expose coordinates for pane focus');
