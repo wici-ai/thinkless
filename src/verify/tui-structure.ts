@@ -179,7 +179,8 @@ async function main(): Promise<void> {
   assert(!files.cli.includes('withFullScreen'), 'CLI must not use fullscreen-ink as the default renderer because it can enter alternate screen without painting Ink output');
   assert(files.cli.includes('renderInAlternateScreen') && files.cli.includes('?1049h') && files.cli.includes('?1049l'), 'CLI fullscreen mode must manage alternate screen directly around Ink render');
   assert(files.cli.includes('ENABLE_MOUSE_REPORTING_SEQUENCE') && files.cli.includes('DISABLE_MOUSE_REPORTING_SEQUENCE'), 'CLI fullscreen mode must enable mouse reporting before Ink effects and disable it during cleanup');
-  assert(files.cli.includes('installTuiInputTrace') && files.inputTrace.includes('WICI_TUI_INPUT_TRACE') && files.inputTrace.includes('tui-input.jsonl'), 'CLI must support opt-in raw TUI input tracing for terminal mouse diagnosis');
+  assert(files.cli.includes('const cleanupRawMode = enableRawModeForTerminalInput();\n  writeTerminalControl(`\\x1b[?1049h'), 'CLI fullscreen mode must enable raw input before alternate-screen scroll setup');
+  assert(files.cli.includes('installTuiInputTrace') && files.inputTrace.includes('traceInkInput') && files.app.includes('traceInkInput') && files.inputTrace.includes('WICI_TUI_INPUT_TRACE') && files.inputTrace.includes('tui-input.jsonl'), 'CLI must support opt-in raw and Ink-level TUI input tracing for terminal mouse diagnosis');
   assert(files.crashHandlers.includes('performance.clearMarks') && files.crashHandlers.includes('performance.clearMeasures'), 'TUI runtime guards must clean Node user-timing entries without switching React/Ink to production mode');
 
   verifyVisibleEvents();

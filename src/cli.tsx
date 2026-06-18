@@ -202,6 +202,7 @@ function renderTui(options: {
 }
 
 function renderInAlternateScreen(tree: React.ReactElement, cleanupInputTrace: () => void): void {
+  const cleanupRawMode = enableRawModeForTerminalInput();
   writeTerminalControl(`\x1b[?1049h\x1b[2J\x1b[3J\x1b[H\x1b[?25l${ENABLE_MOUSE_REPORTING_SEQUENCE}`);
   const instance = render(tree, { interactive: true });
   writeTerminalControl(ENABLE_MOUSE_REPORTING_SEQUENCE);
@@ -210,6 +211,7 @@ function renderInAlternateScreen(tree: React.ReactElement, cleanupInputTrace: ()
     if (cleaned) return;
     cleaned = true;
     cleanupInputTrace();
+    cleanupRawMode();
     writeTerminalControl(`${DISABLE_MOUSE_REPORTING_SEQUENCE}\x1b[?25h\x1b[2J\x1b[3J\x1b[H\x1b[?1049l`);
   };
   process.once('exit', cleanup);
@@ -220,6 +222,25 @@ function renderInAlternateScreen(tree: React.ReactElement, cleanupInputTrace: ()
     });
   }
   void instance.waitUntilExit().finally(cleanup);
+}
+
+function enableRawModeForTerminalInput(stdin: NodeJS.ReadStream = process.stdin): () => void {
+  const wasRaw = stdin.isRaw === true;
+  try {
+    stdin.setRawMode?.(true);
+    stdin.resume();
+  } catch {
+    // Ink will still attempt to configure stdin; this is a best-effort
+    // match for crossterm's raw-mode-before-alt-screen ordering.
+  }
+  return () => {
+    if (wasRaw) return;
+    try {
+      stdin.setRawMode?.(false);
+    } catch {
+      // Best-effort terminal state management.
+    }
+  };
 }
 
 function writeTerminalControl(sequence: string): void {

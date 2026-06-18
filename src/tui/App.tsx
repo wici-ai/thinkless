@@ -11,6 +11,7 @@ import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { readPersistedRuntimeSelection, writePersistedRuntimeSelection } from '../shared/chatSession.js';
 import { runPaths } from '../shared/paths.js';
 import { enableMouseReporting, parseMouseInput } from './input.js';
+import { traceInkInput } from './inputTrace.js';
 import { appendSupervisorError } from './supervisorLog.js';
 import {
   cycleRuntimeValue,
@@ -168,6 +169,7 @@ export function App({
   );
 
   useInput((input, key) => {
+    traceInkInput('app', input, key as unknown as Record<string, unknown>);
     if (isRuntimeSelectorToggle(input, key)) {
       setRuntimeSelectorOpen((current) => !current);
       return;
