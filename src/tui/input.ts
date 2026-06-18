@@ -1,12 +1,15 @@
+export const ENABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1007h';
+export const DISABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1007l\x1b[?1006l\x1b[?1002l\x1b[?1000l';
+
 export function enableMouseReporting(stdout: NodeJS.WriteStream): () => void {
-  stdout.write('\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1007h');
+  stdout.write(ENABLE_MOUSE_REPORTING_SEQUENCE);
   installMouseCleanup(stdout);
   return () => disableMouseReporting(stdout);
 }
 
 export function disableMouseReporting(stdout: NodeJS.WriteStream = process.stdout): void {
   try {
-    stdout.write('\x1b[?1007l\x1b[?1006l\x1b[?1002l\x1b[?1000l');
+    stdout.write(DISABLE_MOUSE_REPORTING_SEQUENCE);
   } catch {
     // Best-effort terminal cleanup only.
   }

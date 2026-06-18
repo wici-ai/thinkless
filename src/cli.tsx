@@ -6,6 +6,7 @@ import { writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { App } from './tui/App.js';
+import { DISABLE_MOUSE_REPORTING_SEQUENCE, ENABLE_MOUSE_REPORTING_SEQUENCE } from './tui/input.js';
 import { installTuiInputTrace } from './tui/inputTrace.js';
 import { runSupervisor } from './supervisor/index.js';
 import { createSampleTarget } from './sample.js';
@@ -201,14 +202,15 @@ function renderTui(options: {
 }
 
 function renderInAlternateScreen(tree: React.ReactElement, cleanupInputTrace: () => void): void {
-  writeTerminalControl('\x1b[?1049h\x1b[2J\x1b[3J\x1b[H\x1b[?25l');
+  writeTerminalControl(`\x1b[?1049h\x1b[2J\x1b[3J\x1b[H\x1b[?25l${ENABLE_MOUSE_REPORTING_SEQUENCE}`);
   const instance = render(tree, { interactive: true });
+  writeTerminalControl(ENABLE_MOUSE_REPORTING_SEQUENCE);
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
     cleanupInputTrace();
-    writeTerminalControl('\x1b[?1007l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[2J\x1b[3J\x1b[H\x1b[?1049l');
+    writeTerminalControl(`${DISABLE_MOUSE_REPORTING_SEQUENCE}\x1b[?25h\x1b[2J\x1b[3J\x1b[H\x1b[?1049l`);
   };
   process.once('exit', cleanup);
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
