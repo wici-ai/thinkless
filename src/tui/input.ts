@@ -1,8 +1,11 @@
 export const ENABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1000h\x1b[?1006h';
-export const DISABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1007l\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l';
+export const DISABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l';
+export const ENABLE_ALTERNATE_SCROLL_SEQUENCE = '\x1b[?1007h';
+export const DISABLE_ALTERNATE_SCROLL_SEQUENCE = '\x1b[?1007l';
+export const DISABLE_POINTER_INPUT_SEQUENCE = `${DISABLE_ALTERNATE_SCROLL_SEQUENCE}${DISABLE_MOUSE_REPORTING_SEQUENCE}`;
 
 export function enableMouseReporting(stdout: NodeJS.WriteStream): () => void {
-  stdout.write(ENABLE_MOUSE_REPORTING_SEQUENCE);
+  stdout.write(`${DISABLE_ALTERNATE_SCROLL_SEQUENCE}${ENABLE_MOUSE_REPORTING_SEQUENCE}`);
   installMouseCleanup(stdout);
   return () => disableMouseReporting(stdout);
 }
@@ -15,17 +18,39 @@ export function disableMouseReporting(stdout: NodeJS.WriteStream = process.stdou
   }
 }
 
+export function enableAlternateScroll(stdout: NodeJS.WriteStream): () => void {
+  stdout.write(`${DISABLE_MOUSE_REPORTING_SEQUENCE}${ENABLE_ALTERNATE_SCROLL_SEQUENCE}`);
+  installMouseCleanup(stdout);
+  return () => disableAlternateScroll(stdout);
+}
+
+export function disableAlternateScroll(stdout: NodeJS.WriteStream = process.stdout): void {
+  try {
+    stdout.write(DISABLE_ALTERNATE_SCROLL_SEQUENCE);
+  } catch {
+    // Best-effort terminal cleanup only.
+  }
+}
+
 let cleanupInstalled = false;
 
 function installMouseCleanup(stdout: NodeJS.WriteStream): void {
   if (cleanupInstalled) return;
   cleanupInstalled = true;
-  process.once('exit', () => disableMouseReporting(stdout));
+  process.once('exit', () => disablePointerInput(stdout));
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     process.once(signal, () => {
-      disableMouseReporting(stdout);
+      disablePointerInput(stdout);
       process.exit(exitCodeForSignal(signal));
     });
+  }
+}
+
+export function disablePointerInput(stdout: NodeJS.WriteStream = process.stdout): void {
+  try {
+    stdout.write(DISABLE_POINTER_INPUT_SEQUENCE);
+  } catch {
+    // Best-effort terminal cleanup only.
   }
 }
 

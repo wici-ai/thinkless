@@ -116,10 +116,11 @@ async function main(): Promise<void> {
     'README should document per-workspace runtime selection commands'
   );
   assert(
-    readme.includes('Terminal text selection and copy are enabled by default') &&
+    readme.includes('Terminal text selection/copy and touchpad or mouse-wheel scrolling are both enabled by default') &&
+      readme.includes('alternate-scroll behavior') &&
       readme.includes('`--mouse-reporting`') &&
       readme.includes('may disable native terminal text selection'),
-    'README should document copy-first default mouse behavior'
+    'README should document copy-and-touchpad-scroll default pointer behavior'
   );
   assert(readme.includes('WICI_PLANNER_EFFORT') && readme.includes('WICI_EXECUTOR_AGENT') && readme.includes('WICI_EXECUTOR_EFFORT'), 'README should document runtime environment overrides');
   assert(readme.includes('npm run verify:release-tag'), 'README should document the guarded release tag verifier');
