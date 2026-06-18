@@ -6,6 +6,7 @@ import { writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { App } from './tui/App.js';
+import { installTuiInputTrace } from './tui/inputTrace.js';
 import { runSupervisor } from './supervisor/index.js';
 import { createSampleTarget } from './sample.js';
 import type { ToolMode } from './shared/types.js';
@@ -169,6 +170,7 @@ function renderTui(options: {
 }): void {
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   installCrashHandlers(options.target);
+  const cleanupInputTrace = interactive ? installTuiInputTrace(options.target) : () => undefined;
   const tree = (
     <App
       target={options.target}
@@ -184,9 +186,10 @@ function renderTui(options: {
     />
   );
   if (options.fullscreen && interactive) {
-    renderInAlternateScreen(tree);
+    renderInAlternateScreen(tree, cleanupInputTrace);
   } else {
     const instance = render(tree, { interactive });
+    void instance.waitUntilExit().finally(cleanupInputTrace);
     // Test hook: non-interactive Ink output is only guaranteed after a clean unmount.
     if (process.env.WICI_TUI_RENDER_ONCE === '1') {
       const delayMs = Number(process.env.WICI_TUI_RENDER_ONCE_DELAY_MS ?? 250);
@@ -197,13 +200,14 @@ function renderTui(options: {
   }
 }
 
-function renderInAlternateScreen(tree: React.ReactElement): void {
+function renderInAlternateScreen(tree: React.ReactElement, cleanupInputTrace: () => void): void {
   writeTerminalControl('\x1b[?1049h\x1b[2J\x1b[3J\x1b[H\x1b[?25l');
   const instance = render(tree, { interactive: true });
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    cleanupInputTrace();
     writeTerminalControl('\x1b[?1007l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[2J\x1b[3J\x1b[H\x1b[?1049l');
   };
   process.once('exit', cleanup);

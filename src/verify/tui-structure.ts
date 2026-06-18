@@ -7,6 +7,7 @@ import { codexDisplayLines, formatEvent, visibleEvents } from '../tui/ExecPane.j
 import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
 import { disableMouseReporting, isMouseInput, mouseScrollDelta, parseMouseInput } from '../tui/input.js';
+import { shouldTraceInput } from '../tui/inputTrace.js';
 import { cycleRuntimeValue, defaultRuntimeSelection, formatRuntimeSelectorLine, parseRuntimeCommand } from '../tui/runtimeSettings.js';
 import { scrollDeltaForInput, viewport, wrapLines, wrappedViewport } from '../tui/viewport.js';
 import { buildFallbackChatTurn, shouldStartPlannerFromBlankChat, summarizePlanForChat } from '../supervisor/chatAgent.js';
@@ -21,6 +22,7 @@ async function main(): Promise<void> {
     goal: await source('GoalPane.tsx'),
     header: await source('Header.tsx'),
     input: await source('input.ts'),
+    inputTrace: await source('inputTrace.ts'),
     runtime: await source('runtimeSettings.ts'),
     viewport: await source('viewport.ts'),
     state: await source('useRunState.ts'),
@@ -177,11 +179,13 @@ async function main(): Promise<void> {
   assert(!files.cli.includes('withFullScreen'), 'CLI must not use fullscreen-ink as the default renderer because it can enter alternate screen without painting Ink output');
   assert(files.cli.includes('renderInAlternateScreen') && files.cli.includes('?1049h') && files.cli.includes('?1049l'), 'CLI fullscreen mode must manage alternate screen directly around Ink render');
   assert(files.cli.includes('?1007l') && files.cli.includes('?1006l') && files.cli.includes('?1002l'), 'CLI fullscreen cleanup must leave terminal mouse modes disabled');
+  assert(files.cli.includes('installTuiInputTrace') && files.inputTrace.includes('WICI_TUI_INPUT_TRACE') && files.inputTrace.includes('tui-input.jsonl'), 'CLI must support opt-in raw TUI input tracing for terminal mouse diagnosis');
   assert(files.crashHandlers.includes('performance.clearMarks') && files.crashHandlers.includes('performance.clearMeasures'), 'TUI runtime guards must clean Node user-timing entries without switching React/Ink to production mode');
 
   verifyVisibleEvents();
   verifyTextViewport();
   verifyMouseScroll();
+  verifyInputTraceFilter();
   verifyRuntimeSettings();
   verifyChatFallback();
   verifyChatPlannerGuard();
@@ -248,6 +252,13 @@ function verifyMouseScroll(): void {
   assert(legacyClick?.code === 0 && legacyClick.x === 12 && legacyClick.y === 4, 'legacy mouse parser should expose coordinates for pane focus');
   assert(mouseScrollDelta('k') === 0, 'ordinary keyboard input must not parse as mouse scroll');
   assert(typeof disableMouseReporting === 'function', 'disableMouseReporting must be importable for terminal cleanup');
+}
+
+function verifyInputTraceFilter(): void {
+  assert(shouldTraceInput('\x1b[<64;20;10M'), 'input trace should capture SGR mouse sequences');
+  assert(shouldTraceInput('\x1b[A'), 'input trace should capture cursor escape sequences');
+  assert(shouldTraceInput(`\x1b[M${String.fromCharCode(96)}${String.fromCharCode(52)}${String.fromCharCode(42)}`), 'input trace should capture legacy mouse sequences');
+  assert(!shouldTraceInput('ordinary chat text'), 'input trace must not capture ordinary chat text');
 }
 
 function verifyRuntimeSettings(): void {
