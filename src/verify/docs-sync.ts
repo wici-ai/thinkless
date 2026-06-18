@@ -143,6 +143,11 @@ async function main(): Promise<void> {
     'README should document automatic Codex/Claude update checks without a pending-update start gate'
   );
   assert(
+    readme.includes('Codex `doctor` reachability failures are recorded as diagnostics') &&
+      readme.includes('not a hard real-mode start gate'),
+    'README should document advisory Codex doctor diagnostics'
+  );
+  assert(
     readme.includes('Do not pass the canary as `--goal`; the release proof is the Chat-first path.'),
     'README should document Chat-first canary execution'
   );

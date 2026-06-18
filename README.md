@@ -251,6 +251,8 @@ codex --version
 npx tsx src/cli.tsx doctor --deep
 ```
 
+Codex `doctor` reachability failures are recorded as diagnostics, not a hard real-mode start gate. Real mode still requires the Codex/Claude commands to be present and version checks to succeed.
+
 Set provider-specific environment variables in the shell or container runtime. Keep credentials out of the repository and out of committed config files.
 
 Before a real run, pin the WiCi version you are using:

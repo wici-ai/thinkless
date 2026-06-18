@@ -9,6 +9,7 @@ export interface ToolHealth {
   available: boolean;
   version?: string;
   doctor?: string;
+  doctorError?: string;
   updatePending?: boolean;
   error?: string;
 }
@@ -119,8 +120,9 @@ async function inspectTool(command: string, versionArgs: string[], doctorArgs: s
     available: true,
     version: (version.all ?? version.stdout).trim(),
     doctor: doctorOutput,
+    doctorError: parseCodexDoctorError(doctorOutput, doctor?.exitCode ?? 0),
     updatePending: doctorOutput ? parseCodexUpdatePending(doctorOutput) : undefined,
-    error: version.exitCode === 0 ? parseCodexDoctorError(doctorOutput, doctor?.exitCode ?? 0) : 'tool reported a non-zero version check'
+    error: version.exitCode === 0 ? undefined : 'tool reported a non-zero version check'
   };
 }
 

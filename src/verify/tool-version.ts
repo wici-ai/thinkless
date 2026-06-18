@@ -5,6 +5,7 @@ import { commandExists } from '../shared/commands.js';
 import type { Checkpoint } from '../shared/types.js';
 import {
   assertNoActiveToolVersionDrift,
+  assertRealToolsReady,
   parseCodexDoctorError,
   parseCodexUpdatePending,
   reconcileToolVersionDrift,
@@ -88,7 +89,25 @@ async function main(): Promise<void> {
   );
   assert(
     parseCodexDoctorError('15 ok · 1 fail degraded', 1) === 'tool reported a non-zero health check',
-    'degraded Codex doctor failures must still block real mode'
+    'degraded Codex doctor failures should still be captured as diagnostics'
+  );
+  assertRealToolsReady(fakeConfig('real'), {
+    ...fakeReport(false),
+    codex: {
+      ...fakeReport(false).codex,
+      doctorError: 'tool reported a non-zero health check'
+    }
+  });
+  expectThrows(
+    () =>
+      assertRealToolsReady(fakeConfig('real'), {
+        ...fakeReport(false),
+        codex: {
+          ...fakeReport(false).codex,
+          error: 'tool reported a non-zero version check'
+        }
+      }),
+    'Real mode requires healthy tools'
   );
   assert(
     parseCodexUpdatePending('version                  0.139.0\nlatest version           0.140.0') === true,
