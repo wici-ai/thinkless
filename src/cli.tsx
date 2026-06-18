@@ -68,7 +68,8 @@ program
   .option('--lock-mode <mode>', 'eval lock mode: auto or manual')
   .option('--no-supervisor', 'do not start the supervisor loop')
   .option('--no-fullscreen', 'render without fullscreen mode')
-  .action((options: { target: string; goal?: string; maxIters?: number; resumeIteration?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; supervisor: boolean; fullscreen: boolean }) => {
+  .option('--mouse-reporting', 'enable mouse wheel/click tracking; disables native terminal text selection', false)
+  .action((options: { target: string; goal?: string; maxIters?: number; resumeIteration?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; supervisor: boolean; fullscreen: boolean; mouseReporting: boolean }) => {
     renderTui({
       target: resolve(options.target),
       goal: options.goal,
@@ -77,7 +78,8 @@ program
       mode: options.mode,
       lockMode: options.lockMode,
       supervisor: options.supervisor,
-      fullscreen: options.fullscreen
+      fullscreen: options.fullscreen,
+      mouseReporting: options.mouseReporting
     });
   });
 
@@ -90,7 +92,8 @@ program
   .option('--mode <mode>', 'tool mode: real, auto, or stub', 'stub')
   .option('--lock-mode <mode>', 'eval lock mode: auto or manual')
   .option('--no-fullscreen', 'render without fullscreen mode')
-  .action(async (options: { target: string; fresh: boolean; maxIters?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; fullscreen: boolean }) => {
+  .option('--mouse-reporting', 'enable mouse wheel/click tracking; disables native terminal text selection', false)
+  .action(async (options: { target: string; fresh: boolean; maxIters?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; fullscreen: boolean; mouseReporting: boolean }) => {
     const targetArg = options.target || DEFAULT_DEMO_TARGET;
     const force = options.fresh;
     const target = await createSampleTarget(targetArg, force);
@@ -100,7 +103,8 @@ program
       mode: options.mode,
       lockMode: options.lockMode,
       supervisor: true,
-      fullscreen: options.fullscreen
+      fullscreen: options.fullscreen,
+      mouseReporting: options.mouseReporting
     });
   });
 
@@ -168,6 +172,7 @@ function renderTui(options: {
   lockMode?: 'auto' | 'manual';
   supervisor: boolean;
   fullscreen: boolean;
+  mouseReporting: boolean;
 }): void {
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   installCrashHandlers(options.target);
@@ -184,10 +189,11 @@ function renderTui(options: {
         mode: options.mode,
         lockMode: options.lockMode
       }}
+      mouseReporting={options.mouseReporting}
     />
   );
   if (options.fullscreen && interactive) {
-    renderInAlternateScreen(tree, cleanupInputTrace);
+    renderInAlternateScreen(tree, cleanupInputTrace, options.mouseReporting);
   } else {
     const instance = render(tree, { interactive });
     void instance.waitUntilExit().finally(cleanupInputTrace);
@@ -201,11 +207,12 @@ function renderTui(options: {
   }
 }
 
-function renderInAlternateScreen(tree: React.ReactElement, cleanupInputTrace: () => void): void {
+function renderInAlternateScreen(tree: React.ReactElement, cleanupInputTrace: () => void, mouseReporting: boolean): void {
   const cleanupRawMode = enableRawModeForTerminalInput();
-  writeTerminalControl(`\x1b[?1049h\x1b[2J\x1b[3J\x1b[H\x1b[?25l${ENABLE_MOUSE_REPORTING_SEQUENCE}`);
+  const mouseSequence = mouseReporting ? ENABLE_MOUSE_REPORTING_SEQUENCE : DISABLE_MOUSE_REPORTING_SEQUENCE;
+  writeTerminalControl(`\x1b[?1049h\x1b[2J\x1b[3J\x1b[H\x1b[?25l${mouseSequence}`);
   const instance = render(tree, { interactive: true });
-  writeTerminalControl(ENABLE_MOUSE_REPORTING_SEQUENCE);
+  writeTerminalControl(mouseSequence);
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return;

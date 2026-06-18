@@ -115,6 +115,12 @@ async function main(): Promise<void> {
       readme.includes('model_reasoning_effort'),
     'README should document per-workspace runtime selection commands'
   );
+  assert(
+    readme.includes('Terminal text selection and copy are enabled by default') &&
+      readme.includes('`--mouse-reporting`') &&
+      readme.includes('may disable native terminal text selection'),
+    'README should document copy-first default mouse behavior'
+  );
   assert(readme.includes('WICI_PLANNER_EFFORT') && readme.includes('WICI_EXECUTOR_AGENT') && readme.includes('WICI_EXECUTOR_EFFORT'), 'README should document runtime environment overrides');
   assert(readme.includes('npm run verify:release-tag'), 'README should document the guarded release tag verifier');
   assert(readme.includes('planner-*.stdout.jsonl') && readme.includes('.wici/codex-run.jsonl'), 'README should document planner and Codex transcript paths');

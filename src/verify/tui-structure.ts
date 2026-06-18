@@ -42,10 +42,10 @@ async function main(): Promise<void> {
   assert(staticUses.length === 0, `TUI panes must use scrollable viewports instead of Static regions, found ${JSON.stringify(staticUses)}`);
 
   assert(files.app.includes('useInput') && files.app.includes('useFocusManager'), 'App must keep keyboard focus management at the top level');
-  assert(files.app.includes('enableMouseReporting'), 'App must enable terminal mouse reporting for pane-local wheel scroll');
-  assert(files.input.includes("ENABLE_MOUSE_REPORTING_SEQUENCE = '\\x1b[?1000h\\x1b[?1006h'") && files.input.includes('DISABLE_MOUSE_REPORTING_SEQUENCE') && files.input.includes('disableMouseReporting') && files.input.includes("'SIGINT'") && !files.input.includes('?1002h\\x1b[?1006h') && !files.input.includes('?1003h') && !files.input.includes('?1007h'), 'TUI default scroll mode must match the known-working Apple Terminal wheel capture sequence');
+  assert(files.app.includes('mouseReporting = false') && files.app.includes('disableMouseReporting(stdout)') && files.app.includes('if (!mouseReporting)'), 'App must keep terminal text selection/copy working by disabling mouse reporting by default');
+  assert(files.input.includes("ENABLE_MOUSE_REPORTING_SEQUENCE = '\\x1b[?1000h\\x1b[?1006h'") && files.input.includes('DISABLE_MOUSE_REPORTING_SEQUENCE') && files.input.includes('disableMouseReporting') && files.input.includes("'SIGINT'") && !files.input.includes('?1002h\\x1b[?1006h') && !files.input.includes('?1003h') && !files.input.includes('?1007h'), 'TUI opt-in mouse mode must match the known-working Apple Terminal wheel capture sequence');
   assert(files.input.includes('parseSgrMouseInputs') && files.input.includes('parseUrxvtMouseInputs') && files.input.includes('parseX10MouseInputs'), 'TUI mouse parser must cover common terminal mouse encodings');
-  assert(files.app.includes('parseMouseInput') && files.app.includes('workspaceFocusId(workspaceTab)'), 'App must focus the active workspace pane from mouse clicks');
+  assert(files.app.includes('mouseReporting ? parseMouseInput(input) : null') && files.app.includes('workspaceFocusId(workspaceTab)'), 'App must only consume mouse clicks when opt-in mouse reporting is enabled');
   assert(files.app.includes("focus('chat-input')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat input');
   assert(files.app.includes('<ChatHistoryPane') && files.app.includes('<ChatInputBox') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render top Chat/Plan/Execution tabs plus the bottom Chat input');
   assert(files.app.includes('workspaceTab') && files.app.includes('key.leftArrow') && files.app.includes('key.rightArrow'), 'App must switch the Plan/Execution workspace with left/right arrows');
@@ -174,12 +174,13 @@ async function main(): Promise<void> {
   assert(files.cli.includes(".command('tui')"), 'CLI must expose the tui command');
   assert(files.cli.includes(".option('--no-supervisor'"), 'tui command must support read-only/manual launch without supervisor');
   assert(files.cli.includes(".option('--no-fullscreen'"), 'tui command must support non-fullscreen rendering for verification');
+  assert(files.cli.includes(".option('--mouse-reporting'") && files.cli.includes('mouseReporting={options.mouseReporting}'), 'CLI must keep mouse tracking opt-in so pane text remains selectable by default');
   assert(files.cli.includes('initialGoal: options.goal'), 'tui --goal must be explicit automation input, not an implicit default goal');
   assert(!files.cli.includes('prodEnv'), 'CLI must not force NODE_ENV=production because that prevents Ink from rendering the TUI');
   assert(!files.cli.includes('withFullScreen'), 'CLI must not use fullscreen-ink as the default renderer because it can enter alternate screen without painting Ink output');
   assert(files.cli.includes('renderInAlternateScreen') && files.cli.includes('?1049h') && files.cli.includes('?1049l'), 'CLI fullscreen mode must manage alternate screen directly around Ink render');
-  assert(files.cli.includes('ENABLE_MOUSE_REPORTING_SEQUENCE') && files.cli.includes('DISABLE_MOUSE_REPORTING_SEQUENCE'), 'CLI fullscreen mode must enable mouse reporting before Ink effects and disable it during cleanup');
-  assert(files.cli.includes('const cleanupRawMode = enableRawModeForTerminalInput();\n  writeTerminalControl(`\\x1b[?1049h'), 'CLI fullscreen mode must enable raw input before alternate-screen scroll setup');
+  assert(files.cli.includes('mouseReporting ? ENABLE_MOUSE_REPORTING_SEQUENCE : DISABLE_MOUSE_REPORTING_SEQUENCE') && files.cli.includes('DISABLE_MOUSE_REPORTING_SEQUENCE'), 'CLI fullscreen mode must only enable mouse reporting when requested and must disable it during cleanup');
+  assert(files.cli.includes('const cleanupRawMode = enableRawModeForTerminalInput();') && files.cli.includes('writeTerminalControl(`\\x1b[?1049h'), 'CLI fullscreen mode must enable raw input before alternate-screen setup');
   assert(files.cli.includes('installTuiInputTrace') && files.inputTrace.includes('traceInkInput') && files.app.includes('traceInkInput') && files.inputTrace.includes('WICI_TUI_INPUT_TRACE') && files.inputTrace.includes('tui-input.jsonl'), 'CLI must support opt-in raw and Ink-level TUI input tracing for terminal mouse diagnosis');
   assert(files.crashHandlers.includes('performance.clearMarks') && files.crashHandlers.includes('performance.clearMeasures'), 'TUI runtime guards must clean Node user-timing entries without switching React/Ink to production mode');
 

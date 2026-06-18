@@ -10,7 +10,7 @@ import type { RunOptions, ToolMode } from '../shared/types.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { readPersistedRuntimeSelection, writePersistedRuntimeSelection } from '../shared/chatSession.js';
 import { runPaths } from '../shared/paths.js';
-import { enableMouseReporting, parseMouseInput } from './input.js';
+import { disableMouseReporting, enableMouseReporting, parseMouseInput } from './input.js';
 import { traceInkInput } from './inputTrace.js';
 import { appendSupervisorError } from './supervisorLog.js';
 import {
@@ -38,11 +38,13 @@ export interface TuiSupervisorOptions {
 export function App({
   target,
   interactive = true,
-  supervisor = { enabled: false }
+  supervisor = { enabled: false },
+  mouseReporting = false
 }: {
   target: string;
   interactive?: boolean;
   supervisor?: TuiSupervisorOptions;
+  mouseReporting?: boolean;
 }) {
   const state = useRunState(target);
   const { stdout } = useStdout();
@@ -147,8 +149,12 @@ export function App({
 
   useEffect(() => {
     if (!interactive) return;
+    if (!mouseReporting) {
+      disableMouseReporting(stdout);
+      return undefined;
+    }
     return enableMouseReporting(stdout);
-  }, [interactive, stdout]);
+  }, [interactive, mouseReporting, stdout]);
 
   useEffect(() => {
     if (!pendingWorkspaceFocusRef.current) return;
@@ -188,7 +194,7 @@ export function App({
       }
       return;
     }
-    const mouse = parseMouseInput(input);
+    const mouse = mouseReporting ? parseMouseInput(input) : null;
     if (mouse && !mouse.released) {
       focus(workspaceFocusId(workspaceTab));
       return;
