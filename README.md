@@ -149,7 +149,7 @@ In an interactive TUI with no existing run and no `--goal`, the top Chat History
 
 The active workspace shows its current runtime selection. Press `Ctrl+R` to open the selector, use left/right to choose `agent` or `effort`, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. `agent` is always one of `claude` or `codex`; model is fixed by that agent: `claude` uses `claude-opus-4-8`, and `codex` uses `gpt-5.5`.
 
-Terminal text selection/copy and touchpad or mouse-wheel scrolling are both enabled by default in the Chat, PLAN, and EXECUTION panes. Thinkless uses terminal alternate-scroll behavior for the default path instead of capturing mouse drag events. Full mouse wheel/click tracking is still available with `--mouse-reporting`, but enabling it lets the TUI capture mouse drag events and may disable native terminal text selection.
+Terminal text selection/copy is the default pointer mode in the Chat, PLAN, and EXECUTION panes. Terminal mouse protocols cannot reliably provide native drag selection and app-level touchpad scrolling at the same time, so Thinkless exposes two explicit modes: `mouse=select` for normal terminal selection, and `mouse=scroll` for TUI mouse-wheel/touchpad scrolling. Press `Ctrl+O` in the TUI to toggle modes, or start in scroll mode with `--mouse-reporting`.
 
 Typed commands remain available for custom values that are not in the selector presets:
 

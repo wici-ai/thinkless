@@ -6,7 +6,7 @@ import { writeSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { App } from './tui/App.js';
-import { DISABLE_MOUSE_REPORTING_SEQUENCE, DISABLE_POINTER_INPUT_SEQUENCE, ENABLE_ALTERNATE_SCROLL_SEQUENCE, ENABLE_MOUSE_REPORTING_SEQUENCE } from './tui/input.js';
+import { DISABLE_POINTER_INPUT_SEQUENCE, ENABLE_MOUSE_REPORTING_SEQUENCE } from './tui/input.js';
 import { installTuiInputTrace } from './tui/inputTrace.js';
 import { runSupervisor } from './supervisor/index.js';
 import { createSampleTarget } from './sample.js';
@@ -209,7 +209,7 @@ function renderTui(options: {
 
 function renderInAlternateScreen(tree: React.ReactElement, cleanupInputTrace: () => void, mouseReporting: boolean): void {
   const cleanupRawMode = enableRawModeForTerminalInput();
-  const pointerSequence = mouseReporting ? `${DISABLE_POINTER_INPUT_SEQUENCE}${ENABLE_MOUSE_REPORTING_SEQUENCE}` : `${DISABLE_MOUSE_REPORTING_SEQUENCE}${ENABLE_ALTERNATE_SCROLL_SEQUENCE}`;
+  const pointerSequence = mouseReporting ? `${DISABLE_POINTER_INPUT_SEQUENCE}${ENABLE_MOUSE_REPORTING_SEQUENCE}` : DISABLE_POINTER_INPUT_SEQUENCE;
   writeTerminalControl(`\x1b[?1049h\x1b[2J\x1b[3J\x1b[H\x1b[?25l${pointerSequence}`);
   const instance = render(tree, { interactive: true });
   writeTerminalControl(pointerSequence);

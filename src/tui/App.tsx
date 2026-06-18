@@ -10,7 +10,7 @@ import type { RunOptions, ToolMode } from '../shared/types.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { readPersistedRuntimeSelection, writePersistedRuntimeSelection } from '../shared/chatSession.js';
 import { runPaths } from '../shared/paths.js';
-import { disableMouseReporting, enableMouseReporting, parseMouseInput } from './input.js';
+import { disablePointerInput, enableMouseReporting, parseMouseInput } from './input.js';
 import { traceInkInput } from './inputTrace.js';
 import { appendSupervisorError } from './supervisorLog.js';
 import {
@@ -67,6 +67,7 @@ export function App({
   const [runtimeHydrated, setRuntimeHydrated] = useState(false);
   const [runtimeSelectorOpen, setRuntimeSelectorOpen] = useState(false);
   const [runtimeField, setRuntimeField] = useState<RuntimeField>('agent');
+  const [mouseReportingEnabled, setMouseReportingEnabled] = useState(mouseReporting);
   const runtimePane = runtimePaneFromWorkspace(workspaceTab);
   const runtimeSignatureRef = useRef<string | null>(null);
 
@@ -149,12 +150,12 @@ export function App({
 
   useEffect(() => {
     if (!interactive) return;
-    if (!mouseReporting) {
-      disableMouseReporting(stdout);
+    if (!mouseReportingEnabled) {
+      disablePointerInput(stdout);
       return undefined;
     }
     return enableMouseReporting(stdout);
-  }, [interactive, mouseReporting, stdout]);
+  }, [interactive, mouseReportingEnabled, stdout]);
 
   useEffect(() => {
     if (!pendingWorkspaceFocusRef.current) return;
@@ -176,6 +177,10 @@ export function App({
 
   useInput((input, key) => {
     traceInkInput('app', input, key as unknown as Record<string, unknown>);
+    if (isMouseModeToggle(input, key)) {
+      setMouseReportingEnabled((current) => !current);
+      return;
+    }
     if (isRuntimeSelectorToggle(input, key)) {
       setRuntimeSelectorOpen((current) => !current);
       return;
@@ -194,7 +199,7 @@ export function App({
       }
       return;
     }
-    const mouse = mouseReporting ? parseMouseInput(input) : null;
+    const mouse = mouseReportingEnabled ? parseMouseInput(input) : null;
     if (mouse && !mouse.released) {
       focus(workspaceFocusId(workspaceTab));
       return;
@@ -220,7 +225,7 @@ export function App({
           <Box height={1} justifyContent="space-between">
             <WorkspaceTabs active={workspaceTab} />
             <Text color={runtimeSelectorOpen ? 'yellow' : 'gray'} bold={runtimeSelectorOpen} wrap="truncate-end">
-              {formatRuntimeSelectorLine(runtimeSelection, runtimePane, runtimeSelectorOpen ? runtimeField : null)}
+              {formatRuntimeSelectorLine(runtimeSelection, runtimePane, runtimeSelectorOpen ? runtimeField : null)} mouse={mouseReportingEnabled ? 'scroll' : 'select'}
             </Text>
           </Box>
           {workspaceTab === 'chat' ? (
@@ -272,6 +277,10 @@ export function App({
 
 function isRuntimeSelectorToggle(input: string, key: { ctrl?: boolean }): boolean {
   return input === '\x12' || (key.ctrl === true && input.toLowerCase() === 'r');
+}
+
+function isMouseModeToggle(input: string, key: { ctrl?: boolean }): boolean {
+  return input === '\x0f' || (key.ctrl === true && input.toLowerCase() === 'o');
 }
 
 function workspaceFocusId(tab: WorkspaceTab): 'chat-history' | 'goal' | 'exec' {

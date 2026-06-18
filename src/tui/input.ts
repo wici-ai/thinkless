@@ -1,11 +1,10 @@
 export const ENABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1000h\x1b[?1006h';
 export const DISABLE_MOUSE_REPORTING_SEQUENCE = '\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l';
-export const ENABLE_ALTERNATE_SCROLL_SEQUENCE = '\x1b[?1007h';
 export const DISABLE_ALTERNATE_SCROLL_SEQUENCE = '\x1b[?1007l';
 export const DISABLE_POINTER_INPUT_SEQUENCE = `${DISABLE_ALTERNATE_SCROLL_SEQUENCE}${DISABLE_MOUSE_REPORTING_SEQUENCE}`;
 
 export function enableMouseReporting(stdout: NodeJS.WriteStream): () => void {
-  stdout.write(`${DISABLE_ALTERNATE_SCROLL_SEQUENCE}${ENABLE_MOUSE_REPORTING_SEQUENCE}`);
+  stdout.write(`${DISABLE_POINTER_INPUT_SEQUENCE}${ENABLE_MOUSE_REPORTING_SEQUENCE}`);
   installMouseCleanup(stdout);
   return () => disableMouseReporting(stdout);
 }
@@ -16,12 +15,6 @@ export function disableMouseReporting(stdout: NodeJS.WriteStream = process.stdou
   } catch {
     // Best-effort terminal cleanup only.
   }
-}
-
-export function enableAlternateScroll(stdout: NodeJS.WriteStream): () => void {
-  stdout.write(`${DISABLE_MOUSE_REPORTING_SEQUENCE}${ENABLE_ALTERNATE_SCROLL_SEQUENCE}`);
-  installMouseCleanup(stdout);
-  return () => disableAlternateScroll(stdout);
 }
 
 export function disableAlternateScroll(stdout: NodeJS.WriteStream = process.stdout): void {
