@@ -41,7 +41,8 @@ async function main(): Promise<void> {
 
   assert(files.app.includes('useInput') && files.app.includes('useFocusManager'), 'App must keep keyboard focus management at the top level');
   assert(files.app.includes('enableMouseReporting'), 'App must enable terminal mouse reporting for pane-local wheel scroll');
-  assert(files.input.includes('disableMouseReporting') && files.input.includes("'SIGINT'") && !files.input.includes('?1002h'), 'TUI mouse mode must avoid motion tracking and install cleanup handlers');
+  assert(files.input.includes('disableMouseReporting') && files.input.includes("'SIGINT'") && files.input.includes('?1002h') && !files.input.includes('?1003h'), 'TUI mouse mode must enable wheel-friendly button tracking, avoid all-motion tracking, and install cleanup handlers');
+  assert(files.input.includes('parseSgrMouseInputs') && files.input.includes('parseUrxvtMouseInputs') && files.input.includes('parseX10MouseInputs'), 'TUI mouse parser must cover common terminal mouse encodings');
   assert(files.app.includes('parseMouseInput') && files.app.includes('workspaceFocusId(workspaceTab)'), 'App must focus the active workspace pane from mouse clicks');
   assert(files.app.includes("focus('chat-input')") && files.app.includes('key.escape'), 'App must route Escape back to the Chat input');
   assert(files.app.includes('<ChatHistoryPane') && files.app.includes('<ChatInputBox') && files.app.includes('<GoalPane') && files.app.includes('<ExecPane'), 'App must render top Chat/Plan/Execution tabs plus the bottom Chat input');
@@ -175,6 +176,7 @@ async function main(): Promise<void> {
   assert(!files.cli.includes('prodEnv'), 'CLI must not force NODE_ENV=production because that prevents Ink from rendering the TUI');
   assert(!files.cli.includes('withFullScreen'), 'CLI must not use fullscreen-ink as the default renderer because it can enter alternate screen without painting Ink output');
   assert(files.cli.includes('renderInAlternateScreen') && files.cli.includes('?1049h') && files.cli.includes('?1049l'), 'CLI fullscreen mode must manage alternate screen directly around Ink render');
+  assert(files.cli.includes('?1007l') && files.cli.includes('?1006l') && files.cli.includes('?1002l'), 'CLI fullscreen cleanup must leave terminal mouse modes disabled');
   assert(files.crashHandlers.includes('performance.clearMarks') && files.crashHandlers.includes('performance.clearMeasures'), 'TUI runtime guards must clean Node user-timing entries without switching React/Ink to production mode');
 
   verifyVisibleEvents();
@@ -234,9 +236,16 @@ function verifyMouseScroll(): void {
   assert(mouseScrollDelta('\x1b[<64;20;10M\x1b[<64;20;9M') === 2, 'touchpad chunks can contain multiple wheel events');
   assert(mouseScrollDelta('\x1b[<68;20;10M') === 1, 'modified wheel up should still scroll');
   assert(mouseScrollDelta('\x1b[<69;20;10M') === -1, 'modified wheel down should still scroll');
+  assert(mouseScrollDelta('\x1b[64;20;10M') === 1, 'URXVT wheel up should scroll');
+  assert(mouseScrollDelta('\x1b[65;20;10M') === -1, 'URXVT wheel down should scroll');
+  assert(mouseScrollDelta(`\x1b[M${String.fromCharCode(96)}${String.fromCharCode(52)}${String.fromCharCode(42)}`) === 1, 'legacy X10 wheel up should scroll');
+  assert(mouseScrollDelta(`\x1b[M${String.fromCharCode(97)}${String.fromCharCode(52)}${String.fromCharCode(42)}`) === -1, 'legacy X10 wheel down should scroll');
   assert(isMouseInput('[<65;31;33M'), 'raw SGR mouse text without ESC should be swallowed');
+  assert(isMouseInput(`\x1b[M${String.fromCharCode(96)}${String.fromCharCode(52)}${String.fromCharCode(42)}`), 'raw X10 mouse text should be swallowed');
   const click = parseMouseInput('\x1b[<0;12;4M');
   assert(click?.code === 0 && click.x === 12 && click.y === 4 && click.released === false, 'mouse click parser should expose coordinates for pane focus');
+  const legacyClick = parseMouseInput(`\x1b[M${String.fromCharCode(32)}${String.fromCharCode(44)}${String.fromCharCode(36)}`);
+  assert(legacyClick?.code === 0 && legacyClick.x === 12 && legacyClick.y === 4, 'legacy mouse parser should expose coordinates for pane focus');
   assert(mouseScrollDelta('k') === 0, 'ordinary keyboard input must not parse as mouse scroll');
   assert(typeof disableMouseReporting === 'function', 'disableMouseReporting must be importable for terminal cleanup');
 }

@@ -204,7 +204,7 @@ function renderInAlternateScreen(tree: React.ReactElement): void {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
-    writeTerminalControl('\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[2J\x1b[3J\x1b[H\x1b[?1049l');
+    writeTerminalControl('\x1b[?1007l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[2J\x1b[3J\x1b[H\x1b[?1049l');
   };
   process.once('exit', cleanup);
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
