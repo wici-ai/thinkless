@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 const INSTALL_SKIP_VALUES = new Set(['0', 'false', 'no']);
 const REQUIRED_COMMANDS = ['brew', 'git', 'node', 'npm', 'gh', 'codex', 'claude'];
 const BREW_INIT = 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null || brew shellenv)"';
+const SUDO_PREFLIGHT = 'sudo -v || { echo "thinkless postinstall: sudo access is required on macOS to install Homebrew and system dependencies. Run from an admin account, or install dependencies manually and rerun with THINKLESS_BOOTSTRAP=0."; exit 1; }';
 const HOMEBREW_INSTALL = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
 const CODEX_INSTALL = 'curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh';
 const CLAUDE_INSTALL = 'curl -fsSL https://claude.ai/install.sh | bash';
@@ -108,6 +109,11 @@ function installStepsForMissing(missing) {
   const needsBrew = missing.includes('brew');
   const needsBrewPackage = missing.some((command) => ['git', 'node', 'npm', 'gh'].includes(command));
   if (needsBrew) {
+    steps.push({
+      id: 'verify-sudo',
+      title: 'Verify macOS sudo access',
+      command: SUDO_PREFLIGHT
+    });
     steps.push({
       id: 'install-homebrew',
       title: 'Install Homebrew',

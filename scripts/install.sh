@@ -19,10 +19,21 @@ load_brew() {
   fi
 }
 
+require_sudo_access() {
+  local reason="$1"
+  if command_exists sudo && sudo -v; then
+    return
+  fi
+  echo "thinkless install: sudo access is required on macOS to ${reason}." >&2
+  echo "Run from an admin account, or install dependencies manually and rerun this installer." >&2
+  exit 1
+}
+
 if [[ "$(uname -s)" == "Darwin" ]]; then
   load_brew
   if ! command_exists brew; then
     echo "thinkless install: installing Homebrew"
+    require_sudo_access "install Homebrew and system dependencies"
     NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     load_brew
   fi
@@ -45,6 +56,12 @@ trap cleanup EXIT
 
 pkg="$temp_dir/thinkless.tgz"
 curl -fsSL "$tarball_url" -o "$pkg"
-npm install -g "$pkg"
+if ! npm install -g "$pkg"; then
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "thinkless install: npm global install failed. Do not rerun npm with sudo; Thinkless install scripts write user config." >&2
+    echo "Install Node.js through Homebrew or configure a user-writable npm global prefix, then rerun this installer." >&2
+  fi
+  exit 1
+fi
 thinkless --version
 echo "thinkless install: complete. Run 'thinkless doctor --deep' after Codex, Claude, and GitHub CLI auth are ready."

@@ -43,6 +43,9 @@ async function main(): Promise<void> {
     for (const command of ['brew', 'git', 'node', 'npm', 'gh', 'codex', 'claude']) {
       assert(plan.missing.includes(command), `plan must inventory missing ${command}: ${JSON.stringify(plan.missing)}`);
     }
+    const stepIds = plan.steps.map((step) => step.id);
+    assert(stepIds.indexOf('verify-sudo') !== -1 && stepIds.indexOf('verify-sudo') < stepIds.indexOf('install-homebrew'), `plan must verify sudo before Homebrew install: ${JSON.stringify(stepIds)}`);
+    assert(plan.steps.some((step) => step.id === 'verify-sudo' && step.command.includes('sudo -v')), 'plan must check sudo access before macOS host mutation');
     assert(plan.steps.some((step) => step.id === 'install-homebrew' && step.command.includes('Homebrew/install/HEAD/install.sh')), 'plan must install missing Homebrew');
     assert(plan.steps.some((step) => step.id === 'install-brew-packages' && step.command.includes('brew install git node gh')), 'plan must use Homebrew to install git, Node.js/npm, and GitHub CLI');
     assert(plan.steps.some((step) => step.id === 'install-codex' && step.command.includes('https://chatgpt.com/codex/install.sh')), 'plan must install Codex CLI from the official installer');
@@ -60,11 +63,15 @@ async function main(): Promise<void> {
   const publicInstaller = await readFile('scripts/install.sh', 'utf8');
   const publicReleaseWorkflow = await readFile('.github/workflows/public-release.yml', 'utf8');
   const oldReleaseRepoName = ['thinkless', 'releases'].join('-');
+  const forbiddenSudoNpm = ['sudo', 'npm'].join(' ');
   assert(postinstall.includes("join(homedir(), '.local', 'bin')") && postinstall.includes('/opt/homebrew/bin'), 'postinstall must check common native installer paths before verification');
+  assert(postinstall.includes('sudo access is required on macOS') && postinstall.includes('sudo -v'), 'postinstall must require sudo access before installing Homebrew on macOS');
   assert(bootstrap.includes('brew install git node gh'), 'zero-npm macOS bootstrap must install Node/npm and GitHub CLI through Homebrew');
+  assert(bootstrap.includes('require_sudo_access') && bootstrap.includes('npm link failed') && !bootstrap.includes(forbiddenSudoNpm), 'zero-npm macOS bootstrap must verify sudo without running npm under elevated privileges');
   assert(bootstrap.includes('git@github.com:wici-ai/thinkless-dev.git'), 'zero-npm macOS bootstrap must clone from the private thinkless-dev source repo by default');
   assert(bootstrap.includes('npm ci') && bootstrap.includes('npm link'), 'zero-npm macOS bootstrap must install and expose the Thinkless command');
   assert(publicInstaller.includes('THINKLESS_TARBALL_URL') && publicInstaller.includes('npm install -g "$pkg"'), 'public installer must install from a release tarball without git history');
+  assert(publicInstaller.includes('require_sudo_access') && publicInstaller.includes('npm global install failed') && !publicInstaller.includes(forbiddenSudoNpm), 'public installer must verify sudo without running npm under elevated privileges');
   assert(publicInstaller.includes('https://github.com/wici-ai/thinkless/releases/latest/download'), 'public installer must default to the public thinkless release repo');
   assert(publicReleaseWorkflow.includes('workflow_dispatch:'), 'public release workflow must be manually triggered');
   assert(!publicReleaseWorkflow.includes('push:') && !publicReleaseWorkflow.includes('pull_request:'), 'public release workflow must not run on pushes or pull requests');

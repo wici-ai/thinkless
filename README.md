@@ -257,7 +257,7 @@ npm run verify:v1-core
 
 ## macOS Bootstrap
 
-On macOS, `npm install` runs `scripts/postinstall.mjs` automatically. The hook checks the host commands Thinkless needs: `brew`, `git`, `node`, `npm`, `gh`, `codex`, and `claude`. Missing `brew`, `codex`, and `claude` are installed with the official macOS installers; missing `git`, GitHub CLI, or Node.js/npm are installed through Homebrew. CI and non-macOS installs skip this bootstrap by default. To bypass host mutation on a Mac, run `THINKLESS_BOOTSTRAP=0 npm install`.
+On macOS, `npm install` runs `scripts/postinstall.mjs` automatically. The hook checks the host commands Thinkless needs: `brew`, `git`, `node`, `npm`, `gh`, `codex`, and `claude`. Missing `brew`, `codex`, and `claude` are installed with the official macOS installers; missing `git`, GitHub CLI, or Node.js/npm are installed through Homebrew. A fresh Mac needs an admin account with usable `sudo` access before Homebrew installation can proceed. Thinkless does not run npm install scripts with `sudo`; use Homebrew Node.js or another user-writable npm global prefix. CI and non-macOS installs skip this bootstrap by default. To bypass host mutation on a Mac, run `THINKLESS_BOOTSTRAP=0 npm install`.
 
 For a brand new Mac with no `npm` yet, run the bootstrap shell script first. From a checkout:
 
@@ -271,7 +271,7 @@ From a clean machine without private source access, use the public release insta
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
 ```
 
-That script installs Homebrew, Node.js/npm, git, and GitHub CLI, then runs `npm ci`, `npm run build`, and `npm link` so the `thinkless` command is available.
+That script verifies macOS `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, and GitHub CLI, then runs `npm ci`, `npm run build`, and `npm link` so the `thinkless` command is available.
 
 If you already have trusted local config files, pass them during install with a private bundle:
 

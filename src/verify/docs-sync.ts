@@ -152,7 +152,10 @@ async function main(): Promise<void> {
       readme.includes('scripts/postinstall.mjs') &&
       readme.includes('THINKLESS_BOOTSTRAP=0') &&
       readme.includes('scripts/bootstrap-macos.sh') &&
-      readme.includes('no `npm` yet'),
+      readme.includes('no `npm` yet') &&
+      readme.includes('usable `sudo` access') &&
+      readme.includes('verifies macOS `sudo` access') &&
+      readme.includes('does not run npm install scripts with `sudo`'),
     'README should document public one-line install, automatic macOS install-time bootstrap, and the no-npm bootstrap path'
   );
   assert(
