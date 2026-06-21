@@ -2,32 +2,375 @@
 title: Install Thinkless
 ---
 
-# Install Thinkless
+<style>
+:root {
+  color-scheme: light;
+  --tl-ink: #111827;
+  --tl-muted: #5f6472;
+  --tl-panel: rgba(255, 255, 255, 0.88);
+  --tl-border: rgba(17, 24, 39, 0.12);
+  --tl-blue: #1f6feb;
+  --tl-teal: #0f8f86;
+  --tl-lime: #84cc16;
+  --tl-shadow: 0 24px 70px rgba(17, 24, 39, 0.14);
+  --tl-code: #0b1020;
+}
 
-Thinkless reduces the thinking effort of AI software development: it sets up the local tools, connects Codex, Claude, and GitHub CLI, and gives you one command for planning and building software with AI.
+body {
+  margin: 0;
+  background:
+    linear-gradient(180deg, #f8fafc 0%, #eef4f2 52%, #f7f7fb 100%);
+  color: var(--tl-ink);
+}
 
-<div>
-  <pre><code id="install-command">curl -fsSL https://wiseide.ai/docs/install.sh | bash</code></pre>
-  <button type="button" onclick="copyInstallCommand()">Copy</button>
-</div>
+.page-header,
+.site-header {
+  display: none;
+}
+
+.main-content {
+  max-width: none;
+  padding: 0;
+}
+
+.thinkless-install {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 64px 22px;
+  box-sizing: border-box;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.install-shell {
+  width: min(1060px, 100%);
+  display: grid;
+  gap: 28px;
+}
+
+.install-hero {
+  text-align: center;
+  display: grid;
+  gap: 18px;
+}
+
+.install-kicker {
+  margin: 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tl-muted);
+  font-size: 0.92rem;
+}
+
+.install-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--tl-code);
+  color: white;
+  font-weight: 700;
+}
+
+.install-title {
+  margin: 0;
+  font-size: clamp(2.5rem, 7vw, 5.7rem);
+  line-height: 0.92;
+  letter-spacing: 0;
+}
+
+.install-copy {
+  max-width: 760px;
+  margin: 0 auto;
+  color: var(--tl-muted);
+  font-size: clamp(1.02rem, 2.1vw, 1.28rem);
+  line-height: 1.55;
+}
+
+.command-panel {
+  width: min(840px, 100%);
+  margin: 8px auto 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-panel);
+  box-shadow: var(--tl-shadow);
+  backdrop-filter: blur(12px);
+}
+
+.command-line {
+  margin: 0;
+  min-width: 0;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--tl-code);
+  color: #e5edf8;
+  padding: 19px 20px;
+  font-size: clamp(0.88rem, 2vw, 1.08rem);
+  line-height: 1.4;
+}
+
+.command-line code {
+  white-space: nowrap;
+  color: inherit;
+  background: transparent;
+}
+
+.copy-command {
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--tl-blue);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  box-shadow: 0 12px 24px rgba(31, 111, 235, 0.26);
+}
+
+.copy-command:hover {
+  transform: translateY(-1px);
+  background: #1559c8;
+}
+
+.copy-command:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.copy-command.copied {
+  background: var(--tl-teal);
+  box-shadow: 0 12px 24px rgba(15, 143, 134, 0.24);
+}
+
+.copy-command svg {
+  width: 22px;
+  height: 22px;
+}
+
+.copy-status {
+  min-height: 22px;
+  text-align: center;
+  color: var(--tl-teal);
+  font-size: 0.92rem;
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.workflow-card {
+  border: 1px solid var(--tl-border);
+  border-radius: 8px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  min-height: 164px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.workflow-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: white;
+}
+
+.workflow-card:nth-child(1) .workflow-icon {
+  background: var(--tl-blue);
+}
+
+.workflow-card:nth-child(2) .workflow-icon {
+  background: var(--tl-teal);
+}
+
+.workflow-card:nth-child(3) .workflow-icon {
+  background: #7c3aed;
+}
+
+.workflow-card h2 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.workflow-card p {
+  margin: 0;
+  color: var(--tl-muted);
+  line-height: 1.5;
+  font-size: 0.94rem;
+}
+
+.workflow-chip {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(11, 16, 32, 0.06);
+  color: #2f3440;
+  font-size: 0.78rem;
+}
+
+.post-install {
+  text-align: center;
+  color: var(--tl-muted);
+  font-size: 0.96rem;
+}
+
+.post-install code {
+  background: rgba(11, 16, 32, 0.08);
+  color: var(--tl-ink);
+  border-radius: 5px;
+  padding: 2px 5px;
+}
+
+@media (max-width: 760px) {
+  .thinkless-install {
+    padding: 44px 16px;
+  }
+
+  .install-title {
+    font-size: clamp(2.25rem, 12vw, 3rem);
+    line-height: 1;
+  }
+
+  .command-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .command-line {
+    overflow-x: visible;
+    padding: 16px;
+    font-size: 0.84rem;
+    text-align: left;
+  }
+
+  .command-line code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .copy-command {
+    width: 100%;
+  }
+
+  .workflow-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-card {
+    min-height: auto;
+  }
+}
+</style>
+
+<main class="thinkless-install">
+  <section class="install-shell" aria-labelledby="install-title">
+    <div class="install-hero">
+      <p class="install-kicker"><span class="install-mark">T</span> Thinkless install</p>
+      <h1 id="install-title" class="install-title">Less thinking effort for AI software work.</h1>
+      <p class="install-copy">Thinkless sets up the local tools, connects Codex, Claude Code, and GitHub CLI, then gives you one command to move from idea to working software.</p>
+      <div class="command-panel" role="group" aria-label="Install command">
+        <pre class="command-line"><code id="install-command">curl -fsSL https://wiseide.ai/docs/install.sh | bash</code></pre>
+        <button class="copy-command" type="button" onclick="copyInstallCommand(this)" aria-label="Copy install command" title="Copy install command">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
+            <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+        </button>
+      </div>
+      <div id="copy-status" class="copy-status" aria-live="polite"></div>
+    </div>
+
+    <div class="workflow-grid" aria-label="Example workflows">
+      <article class="workflow-card">
+        <div class="workflow-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+            <path d="M4 7h16M4 12h10M4 17h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+          </svg>
+        </div>
+        <h2>Claude Code SOPs</h2>
+        <p>Turn a product request into a repeatable plan, keep auth ready, and hand the execution surface back to the terminal.</p>
+        <span class="workflow-chip">plan -> review -> run</span>
+      </article>
+
+      <article class="workflow-card">
+        <div class="workflow-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+            <path d="M8 9 5 12l3 3M16 9l3 3-3 3M14 5l-4 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </div>
+        <h2>Codex execution</h2>
+        <p>Install the Codex CLI, verify it is reachable, and keep the one-command workflow focused on shipping code.</p>
+        <span class="workflow-chip">codex + git + npm</span>
+      </article>
+
+      <article class="workflow-card">
+        <div class="workflow-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+            <path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </div>
+        <h2>Open-model stacks</h2>
+        <p>Use the same local-first setup discipline for open model tools, hosted endpoints, or team-specific AI workflows.</p>
+        <span class="workflow-chip">local tools, fewer decisions</span>
+      </article>
+    </div>
+
+    <p class="post-install">After installation, run <code>thinkless</code>, follow the Codex, Claude, and GitHub CLI auth prompts, then verify with <code>thinkless doctor --deep</code>.</p>
+  </section>
+</main>
 
 <script>
-function copyInstallCommand() {
-  const text = document.getElementById('install-command').textContent.trim();
+function copyInstallCommand(button) {
+  const command = document.getElementById('install-command').textContent.trim();
+  const status = document.getElementById('copy-status');
+  const writeFallback = function () {
+    const textarea = document.createElement('textarea');
+    textarea.value = command;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'absolute';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    textarea.remove();
+  };
+
+  const markCopied = function () {
+    button.classList.add('copied');
+    status.textContent = 'Copied install command';
+    window.clearTimeout(button.dataset.resetTimer);
+    button.dataset.resetTimer = window.setTimeout(function () {
+      button.classList.remove('copied');
+      status.textContent = '';
+    }, 1800);
+  };
+
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(command).then(markCopied, function () {
+      writeFallback();
+      markCopied();
+    });
     return;
   }
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', '');
-  textarea.style.position = 'absolute';
-  textarea.style.left = '-9999px';
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand('copy');
-  textarea.remove();
+
+  writeFallback();
+  markCopied();
 }
 </script>
-
-After installation, run `thinkless`, then follow the Codex, Claude, and GitHub CLI auth prompts. Run `thinkless doctor --deep` to verify the setup.
