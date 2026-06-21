@@ -164,6 +164,8 @@ print_path_activation_note() {
     echo "thinkless bootstrap: PATH updates were written to ~/.zprofile and ~/.zshrc for new zsh sessions."
     echo "thinkless bootstrap: open a new terminal, or update this terminal now with:"
     echo "  export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\""
+    echo "thinkless bootstrap: to launch Thinkless in this terminal now, run:"
+    echo "  export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\" && thinkless"
   fi
 }
 
@@ -217,6 +219,24 @@ codex_auth_command() {
 
 run_auth_onboarding() {
   THINKLESS_AUTH_PENDING=0
+  local codex_cmd
+  codex_cmd="$(codex_auth_command)"
+  echo "thinkless bootstrap: auth onboarding status"
+  if codex_auth_ready; then
+    echo "thinkless bootstrap: Codex auth file/env detected. Reauthenticate or switch accounts with: $codex_cmd"
+  else
+    echo "thinkless bootstrap: Codex auth is not configured; setup command: $codex_cmd"
+  fi
+  if github_auth_ready; then
+    echo "thinkless bootstrap: GitHub CLI auth detected. Reauthenticate or switch accounts with: gh auth login"
+  else
+    echo "thinkless bootstrap: GitHub CLI auth is not configured; setup command: gh auth login"
+  fi
+  if claude_auth_ready; then
+    echo "thinkless bootstrap: Claude auth file/env detected. Reauthenticate or switch accounts with: claude"
+  else
+    echo "thinkless bootstrap: Claude auth is not configured; setup command: claude"
+  fi
   if codex_auth_ready && claude_auth_ready && github_auth_ready; then
     echo "thinkless bootstrap: Codex, Claude, and GitHub CLI auth already look configured"
     return
@@ -228,8 +248,6 @@ run_auth_onboarding() {
   fi
   echo "thinkless bootstrap: starting Codex, Claude, and GitHub CLI auth onboarding"
   if ! codex_auth_ready; then
-    local codex_cmd
-    codex_cmd="$(codex_auth_command)"
     if prompt_yes_no "Sign in to Codex now?"; then
       run_tty "$codex_cmd" || echo "thinkless bootstrap: Codex auth command did not complete successfully; run '$codex_cmd' later." >&2
     fi
