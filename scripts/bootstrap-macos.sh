@@ -10,6 +10,10 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+prepend_common_paths() {
+  export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+}
+
 load_brew() {
   if command_exists brew; then
     return
@@ -86,7 +90,40 @@ persist_zsh_path() {
   done
 }
 
-verify_thinkless_command() {
+install_brew_packages() {
+  local packages=()
+  if ! command_exists git; then
+    packages+=(git)
+  fi
+  if ! command_exists node || ! command_exists npm; then
+    packages+=(node)
+  fi
+  if ! command_exists gh; then
+    packages+=(gh)
+  fi
+  if [[ "${#packages[@]}" -eq 0 ]]; then
+    return
+  fi
+  ensure_xcode_tools
+  brew update
+  brew install "${packages[@]}"
+  prepend_common_paths
+}
+
+install_agent_clis() {
+  if ! command_exists codex; then
+    echo "thinkless bootstrap: installing Codex CLI"
+    curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
+    prepend_common_paths
+  fi
+  if ! command_exists claude; then
+    echo "thinkless bootstrap: installing Claude Code CLI"
+    curl -fsSL https://claude.ai/install.sh | bash
+    prepend_common_paths
+  fi
+}
+
+verify_required_commands() {
   local bin
   if ! bin="$(npm_global_bin)"; then
     echo "thinkless bootstrap: could not determine npm global bin directory." >&2
@@ -94,23 +131,104 @@ verify_thinkless_command() {
   fi
   add_to_current_path "$bin"
   persist_zsh_path "$bin"
+  local clean_check='for cmd in thinkless codex claude gh; do command -v "$cmd" >/dev/null 2>&1 || exit 127; done; thinkless --version >/dev/null && codex --version >/dev/null && claude --version >/dev/null && gh --version >/dev/null'
   if [[ -x /bin/zsh ]]; then
-    if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -lc 'command -v thinkless >/dev/null 2>&1 && thinkless --version'; then
-      echo "thinkless bootstrap: installed, but a clean zsh login shell cannot find thinkless. Open a new terminal or run: export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"" >&2
+    if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -lc "$clean_check"; then
+      echo "thinkless bootstrap: installed, but a clean zsh login shell cannot find thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"" >&2
       exit 1
     fi
-    if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -ic 'command -v thinkless >/dev/null 2>&1 && thinkless --version'; then
-      echo "thinkless bootstrap: installed, but a clean interactive zsh shell cannot find thinkless. Open a new terminal or run: export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"" >&2
+    if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -ic "$clean_check"; then
+      echo "thinkless bootstrap: installed, but a clean interactive zsh shell cannot find thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"" >&2
       exit 1
     fi
-  elif ! command_exists thinkless; then
-    echo "thinkless bootstrap: installed, but thinkless is not on PATH. Add $bin to PATH and retry." >&2
-    exit 1
   else
-    thinkless --version
+    local cmd
+    for cmd in thinkless codex claude gh; do
+      if ! command_exists "$cmd"; then
+        echo "thinkless bootstrap: installed, but $cmd is not on PATH. Add $bin, \$HOME/.local/bin, /opt/homebrew/bin, and /usr/local/bin to PATH and retry." >&2
+        exit 1
+      fi
+    done
+    thinkless --version >/dev/null
+    codex --version >/dev/null
+    claude --version >/dev/null
+    gh --version >/dev/null
+  fi
+  echo "thinkless bootstrap: verified thinkless, codex, claude, and gh on PATH"
+}
+
+auth_onboarding_enabled() {
+  case "${THINKLESS_AUTH_ONBOARDING:-1}" in
+    0|false|FALSE|False|no|NO|No) return 1 ;;
+  esac
+  if [[ -n "${CI:-}" ]]; then
+    return 1
+  fi
+  [[ -r /dev/tty && -w /dev/tty ]]
+}
+
+prompt_yes_no() {
+  local prompt="$1"
+  local answer
+  printf "%s [Y/n] " "$prompt" > /dev/tty
+  IFS= read -r answer < /dev/tty || return 1
+  case "$answer" in
+    ""|y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_tty() {
+  /bin/bash -lc "$1" < /dev/tty > /dev/tty 2>&1
+}
+
+codex_auth_ready() {
+  [[ -f "$HOME/.codex/auth.json" ]] || codex doctor >/dev/null 2>&1
+}
+
+claude_auth_ready() {
+  [[ -f "$HOME/.claude/.credentials.json" ]] || [[ -f "$HOME/.claude.json" ]]
+}
+
+github_auth_ready() {
+  gh auth status >/dev/null 2>&1
+}
+
+codex_auth_command() {
+  if codex login --help >/dev/null 2>&1; then
+    printf '%s\n' 'codex login'
+  else
+    printf '%s\n' 'codex'
   fi
 }
 
+run_auth_onboarding() {
+  if codex_auth_ready && claude_auth_ready && github_auth_ready; then
+    echo "thinkless bootstrap: Codex, Claude, and GitHub CLI auth already look configured"
+    return
+  fi
+  if ! auth_onboarding_enabled; then
+    echo "thinkless bootstrap: auth onboarding skipped. To finish setup, run: codex, gh auth login, claude"
+    return
+  fi
+  echo "thinkless bootstrap: starting Codex, Claude, and GitHub CLI auth onboarding"
+  if ! codex_auth_ready && prompt_yes_no "Sign in to Codex now?"; then
+    local codex_cmd
+    codex_cmd="$(codex_auth_command)"
+    run_tty "$codex_cmd" || echo "thinkless bootstrap: Codex auth command did not complete successfully; run '$codex_cmd' later." >&2
+  fi
+  if ! github_auth_ready && prompt_yes_no "Sign in to GitHub CLI now?"; then
+    run_tty "gh auth login" || echo "thinkless bootstrap: GitHub CLI auth did not complete successfully; run 'gh auth login' later." >&2
+  fi
+  if ! claude_auth_ready; then
+    echo "thinkless bootstrap: Claude opens an interactive session; exit with /exit or Ctrl-D after login." > /dev/tty
+    if prompt_yes_no "Sign in to Claude Code now?"; then
+      run_tty "claude" || echo "thinkless bootstrap: Claude auth command did not complete successfully; run 'claude' later." >&2
+    fi
+  fi
+}
+
+prepend_common_paths
 ensure_xcode_tools
 
 load_brew
@@ -126,8 +244,8 @@ if ! command_exists brew; then
   exit 1
 fi
 
-brew update
-brew install git node gh
+install_brew_packages
+install_agent_clis
 
 repo_url="${THINKLESS_REPO_URL:-git@github.com:wici-ai/thinkless.git}"
 repo_dir="${THINKLESS_DIR:-$HOME/thinkless}"
@@ -147,13 +265,14 @@ else
 fi
 
 cd "$target_dir"
-npm ci
+npm ci --foreground-scripts --ignore-scripts=false
 npm run build
 if ! npm link; then
   echo "thinkless bootstrap: npm link failed. Do not rerun npm with sudo; Thinkless install scripts write user config." >&2
   echo "Install Node.js through Homebrew or configure a user-writable npm global prefix, then rerun this script." >&2
   exit 1
 fi
-verify_thinkless_command
+verify_required_commands
+run_auth_onboarding
 
 echo "thinkless bootstrap: installed. Run 'thinkless doctor --deep' after Codex and Claude are authenticated."

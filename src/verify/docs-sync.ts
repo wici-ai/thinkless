@@ -159,7 +159,10 @@ async function main(): Promise<void> {
       readme.includes('Apple Command Line Tools') &&
       readme.includes('~/.zprofile') &&
       readme.includes('~/.zshrc') &&
-      readme.includes('clean zsh login and interactive shells'),
+      readme.includes('`thinkless`, `codex`, `claude`, and `gh`') &&
+      readme.includes('clean zsh login and interactive shells') &&
+      readme.includes('auth onboarding flow') &&
+      readme.includes('THINKLESS_AUTH_ONBOARDING=0'),
     'README should document public one-line install, automatic macOS install-time bootstrap, and the no-npm bootstrap path'
   );
   assert(
@@ -167,6 +170,8 @@ async function main(): Promise<void> {
       readme.includes('GitHub CLI') &&
       readme.includes('gh auth login') &&
       readme.includes('gh auth status') &&
+      readme.includes('Codex CLI') &&
+      readme.includes('Claude Code CLI') &&
       readme.includes('Codex, Claude, and GitHub CLI commands'),
     'README should document GitHub CLI as a required installed and authenticated host dependency'
   );

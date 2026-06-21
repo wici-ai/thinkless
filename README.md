@@ -271,7 +271,9 @@ From a clean machine, use the public release installer instead:
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
 ```
 
-That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, and GitHub CLI, then installs Thinkless. It adds npm's global bin directory to `~/.zprofile` and `~/.zshrc` when needed and verifies `thinkless --version` from clean zsh login and interactive shells so the command is available after install.
+That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, GitHub CLI, Codex CLI, and Claude Code CLI, then installs Thinkless with npm lifecycle scripts enabled. It adds npm's global bin directory to `~/.zprofile` and `~/.zshrc` when needed and verifies `thinkless`, `codex`, `claude`, and `gh` from clean zsh login and interactive shells so the commands are available after install.
+
+After command verification, the public installer and `scripts/bootstrap-macos.sh` start an auth onboarding flow when a terminal is available. It prompts through `/dev/tty` so `curl | bash` can still run `codex`, `gh auth login`, and `claude` interactively. Set `THINKLESS_AUTH_ONBOARDING=0` to skip the prompts and finish auth later.
 
 If you already have trusted local config files, pass them during install with a private bundle:
 
@@ -293,7 +295,7 @@ Existing user config is not overwritten unless `THINKLESS_BOOTSTRAP_FORCE=1` is 
 If you do not provide copied credentials, authenticate Codex, Claude, and GitHub CLI interactively:
 
 ```bash
-codex login
+codex
 gh auth login
 claude
 codex --version
