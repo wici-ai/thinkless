@@ -69,17 +69,19 @@ persist_zsh_path() {
   if [[ "$(uname -s)" != "Darwin" || ! -d "$bin" ]]; then
     return
   fi
-  local zprofile="$HOME/.zprofile"
-  local line="export PATH=\"$bin:\$PATH\""
-  if [[ -f "$zprofile" ]] && grep -F "$line" "$zprofile" >/dev/null 2>&1; then
-    return
-  fi
-  {
-    echo ""
-    echo "# Added by Thinkless installer"
-    echo "$line"
-  } >> "$zprofile"
-  echo "thinkless install: added $bin to ~/.zprofile for zsh"
+  local line="export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\""
+  local file
+  for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
+    if [[ -f "$file" ]] && grep -F "$line" "$file" >/dev/null 2>&1; then
+      continue
+    fi
+    {
+      echo ""
+      echo "# Added by Thinkless installer"
+      echo "$line"
+    } >> "$file"
+    echo "thinkless install: added $bin to ${file/#$HOME/~} for zsh"
+  done
 }
 
 verify_thinkless_command() {
@@ -91,8 +93,12 @@ verify_thinkless_command() {
   add_to_current_path "$bin"
   persist_zsh_path "$bin"
   if [[ "$(uname -s)" == "Darwin" && -x /bin/zsh ]]; then
-    if ! /bin/zsh -lc 'command -v thinkless >/dev/null 2>&1 && thinkless --version'; then
-      echo "thinkless install: installed, but zsh cannot find thinkless. Open a new terminal or run: export PATH=\"$bin:\$PATH\"" >&2
+    if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -lc 'command -v thinkless >/dev/null 2>&1 && thinkless --version'; then
+      echo "thinkless install: installed, but a clean zsh login shell cannot find thinkless. Open a new terminal or run: export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"" >&2
+      exit 1
+    fi
+    if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -ic 'command -v thinkless >/dev/null 2>&1 && thinkless --version'; then
+      echo "thinkless install: installed, but a clean interactive zsh shell cannot find thinkless. Open a new terminal or run: export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"" >&2
       exit 1
     fi
   elif ! command_exists thinkless; then

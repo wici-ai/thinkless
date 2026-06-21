@@ -87,13 +87,15 @@ async function main(): Promise<void> {
   assert(postinstall.includes('sudo access is required on macOS') && postinstall.includes('sudo -v'), 'postinstall must require sudo access before installing Homebrew on macOS');
   assert(bootstrap.includes('brew install git node gh'), 'zero-npm macOS bootstrap must install Node/npm and GitHub CLI through Homebrew');
   assert(bootstrap.includes('ensure_xcode_tools') && bootstrap.includes('xcode-select --install') && bootstrap.includes('THINKLESS_XCODE_WAIT_SECONDS'), 'zero-npm macOS bootstrap must wait for Apple Command Line Tools instead of requiring a rerun');
-  assert(bootstrap.includes('npm prefix -g') && bootstrap.includes('~/.zprofile') && bootstrap.includes('/bin/zsh -lc'), 'zero-npm macOS bootstrap must expose thinkless to future zsh sessions');
+  assert(bootstrap.includes('npm prefix -g') && bootstrap.includes('$HOME/.zprofile') && bootstrap.includes('$HOME/.zshrc'), 'zero-npm macOS bootstrap must persist the npm global bin path to common zsh startup files');
+  assert(bootstrap.includes('env -i HOME="$HOME"') && bootstrap.includes('/bin/zsh -lc') && bootstrap.includes('/bin/zsh -ic'), 'zero-npm macOS bootstrap must verify thinkless from clean zsh login and interactive shells');
   assert(bootstrap.includes('require_sudo_access') && bootstrap.includes('npm link failed') && !bootstrap.includes(forbiddenSudoNpm), 'zero-npm macOS bootstrap must verify sudo without running npm under elevated privileges');
   assert(bootstrap.includes('git@github.com:wici-ai/thinkless.git'), 'zero-npm macOS bootstrap must clone from the public thinkless source repo by default');
   assert(bootstrap.includes('npm ci') && bootstrap.includes('npm link'), 'zero-npm macOS bootstrap must install and expose the Thinkless command');
   assert(publicInstaller.includes('THINKLESS_TARBALL_URL') && publicInstaller.includes('npm install -g "$pkg"'), 'public installer must install from a release tarball without git history');
   assert(publicInstaller.includes('ensure_xcode_tools') && publicInstaller.includes('xcode-select --install') && publicInstaller.includes('THINKLESS_XCODE_WAIT_SECONDS'), 'public installer must wait for Apple Command Line Tools instead of requiring a rerun');
-  assert(publicInstaller.includes('npm prefix -g') && publicInstaller.includes('~/.zprofile') && publicInstaller.includes('/bin/zsh -lc'), 'public installer must expose thinkless to future zsh sessions');
+  assert(publicInstaller.includes('npm prefix -g') && publicInstaller.includes('$HOME/.zprofile') && publicInstaller.includes('$HOME/.zshrc'), 'public installer must persist the npm global bin path to common zsh startup files');
+  assert(publicInstaller.includes('env -i HOME="$HOME"') && publicInstaller.includes('/bin/zsh -lc') && publicInstaller.includes('/bin/zsh -ic'), 'public installer must verify thinkless from clean zsh login and interactive shells');
   assert(publicInstaller.includes('require_sudo_access') && publicInstaller.includes('npm global install failed') && !publicInstaller.includes(forbiddenSudoNpm), 'public installer must verify sudo without running npm under elevated privileges');
   assert(publicInstaller.includes('https://github.com/wici-ai/thinkless/releases/latest/download'), 'public installer must default to the public thinkless release repo');
   assert(publicReleaseWorkflow.includes('workflow_dispatch:'), 'public release workflow must be manually triggered');
@@ -117,7 +119,7 @@ async function main(): Promise<void> {
   assert(readme.includes('authenticate Codex, Claude, and GitHub CLI') && readme.includes('Codex, Claude, and GitHub CLI commands'), 'README must include GitHub CLI in auth and real-mode health wording');
   assert(readme.includes('~/.codex/config.toml') && readme.includes('~/.codex/auth.json'), 'README must document Codex config/auth destinations');
   assert(readme.includes('~/.claude/settings.json') && readme.includes('~/.claude/.credentials.json'), 'README must document Claude config destinations');
-  assert(readme.includes('Apple Command Line Tools') && readme.includes('~/.zprofile') && readme.includes('fresh zsh login shell'), 'README must document first-run CLT waiting and zsh command exposure');
+  assert(readme.includes('Apple Command Line Tools') && readme.includes('~/.zprofile') && readme.includes('~/.zshrc') && readme.includes('clean zsh login and interactive shells'), 'README must document first-run CLT waiting and zsh command exposure');
 
   console.log(
     JSON.stringify(

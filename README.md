@@ -271,7 +271,7 @@ From a clean machine, use the public release installer instead:
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
 ```
 
-That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, and GitHub CLI, then installs Thinkless. It adds npm's global bin directory to `~/.zprofile` when needed and verifies `thinkless --version` from a fresh zsh login shell so the command is available after install.
+That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, and GitHub CLI, then installs Thinkless. It adds npm's global bin directory to `~/.zprofile` and `~/.zshrc` when needed and verifies `thinkless --version` from clean zsh login and interactive shells so the command is available after install.
 
 If you already have trusted local config files, pass them during install with a private bundle:
 

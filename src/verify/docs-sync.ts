@@ -158,7 +158,8 @@ async function main(): Promise<void> {
       readme.includes('does not run npm install scripts with `sudo`') &&
       readme.includes('Apple Command Line Tools') &&
       readme.includes('~/.zprofile') &&
-      readme.includes('fresh zsh login shell'),
+      readme.includes('~/.zshrc') &&
+      readme.includes('clean zsh login and interactive shells'),
     'README should document public one-line install, automatic macOS install-time bootstrap, and the no-npm bootstrap path'
   );
   assert(
