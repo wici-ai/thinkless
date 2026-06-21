@@ -54,7 +54,7 @@ fi
 brew update
 brew install git node gh
 
-repo_url="${THINKLESS_REPO_URL:-git@github.com:wici-ai/thinkless-dev.git}"
+repo_url="${THINKLESS_REPO_URL:-git@github.com:wici-ai/thinkless.git}"
 repo_dir="${THINKLESS_DIR:-$HOME/thinkless}"
 
 if [[ -f package.json && -f scripts/postinstall.mjs ]]; then

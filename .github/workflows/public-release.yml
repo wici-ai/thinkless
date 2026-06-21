@@ -6,10 +6,9 @@ on:
       version:
         description: Release tag to publish, for example v0.1.4
         required: true
-      public_repo:
-        description: Public release repo, for example wici-ai/thinkless
-        required: true
-        default: wici-ai/thinkless
+
+permissions:
+  contents: write
 
 jobs:
   publish:
@@ -35,16 +34,15 @@ jobs:
           cp release/thinkless-*.tgz release/thinkless.tgz
           cp scripts/install.sh release/install.sh
 
-      - name: Publish to public release repo
+      - name: Publish release assets
         env:
-          GH_TOKEN: ${{ secrets.THINKLESS_PUBLIC_RELEASE_TOKEN }}
-          PUBLIC_REPO: ${{ inputs.public_repo }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         run: |
-          gh release delete "$VERSION" --repo "$PUBLIC_REPO" --yes --cleanup-tag || true
+          gh release delete "$VERSION" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           gh release create "$VERSION" \
             release/thinkless.tgz \
             release/install.sh \
-            --repo "$PUBLIC_REPO" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Thinkless $VERSION" \
-            --notes "Release-only Thinkless installer artifacts built from the private source repository. This release does not expose git history."
+            --notes "Thinkless install release assets built from the selected source tag."

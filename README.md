@@ -240,15 +240,15 @@ Install Thinkless from the public release artifact:
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
 ```
 
-That one-line installer downloads `thinkless.tgz` from the latest public release and installs it globally with npm. The public release contains the built package and installer assets only; it does not expose the private repository commit history. If you need a different release host, set `THINKLESS_RELEASE_BASE` or `THINKLESS_TARBALL_URL` before running the installer.
+That one-line installer downloads `thinkless.tgz` from the latest public release and installs it globally with npm. The release contains the built package and installer assets. If you need a different release host, set `THINKLESS_RELEASE_BASE` or `THINKLESS_TARBALL_URL` before running the installer.
 
-GitHub releases attached to a private repository still require authenticated access. For unauthenticated installs without exposing history, publish the packed artifact to the public release repository `wici-ai/thinkless`, to npm, or to an object-storage bucket. The included `Publish public install release` workflow builds `thinkless.tgz` from the private `wici-ai/thinkless-dev` source checkout with `fetch-depth: 1`, then uploads only `thinkless.tgz` and `install.sh` to the configured public repo using `THINKLESS_PUBLIC_RELEASE_TOKEN`.
+The included `Publish public install release` workflow is manually triggered. It builds `thinkless.tgz` from the selected source tag with `fetch-depth: 1`, then uploads `thinkless.tgz` and `install.sh` to this public repository's GitHub release using the workflow token.
 
-Install from a private source checkout only when you have repository access:
+Install from a source checkout:
 
 ```bash
-git clone git@github.com:wici-ai/thinkless-dev.git
-cd thinkless-dev
+git clone git@github.com:wici-ai/thinkless.git
+cd thinkless
 git checkout <verified-release-tag-or-commit>
 npm install
 npm run build
@@ -265,7 +265,7 @@ For a brand new Mac with no `npm` yet, run the bootstrap shell script first. Fro
 bash scripts/bootstrap-macos.sh
 ```
 
-From a clean machine without private source access, use the public release installer instead:
+From a clean machine, use the public release installer instead:
 
 ```bash
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash

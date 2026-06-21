@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   assert(readme.includes('WICI_PLANNER_EFFORT') && readme.includes('WICI_EXECUTOR_AGENT') && readme.includes('WICI_EXECUTOR_EFFORT'), 'README should document runtime environment overrides');
   assert(readme.includes('npm run verify:release-tag'), 'README should document the guarded release tag verifier');
   assert(readme.includes('planner-*.stdout.jsonl') && readme.includes('.wici/codex-run.jsonl'), 'README should document planner and Codex transcript paths');
-  assert(readme.includes('git clone git@github.com:wici-ai/thinkless-dev.git'), 'README should document a private source checkout deployment path');
+  assert(readme.includes('git clone git@github.com:wici-ai/thinkless.git'), 'README should document a source checkout deployment path');
   assert(readme.includes('git checkout <verified-release-tag-or-commit>'), 'README should document pinning a verified WiCi version');
   assert(readme.includes('npm run build') && readme.includes('npm run verify:v1-core'), 'README deployment should include build and core verification');
   assert(
@@ -143,12 +143,12 @@ async function main(): Promise<void> {
     'README should document automatic Codex/Claude update checks without a pending-update start gate'
   );
   assert(
-    readme.includes('## macOS Bootstrap') &&
+      readme.includes('## macOS Bootstrap') &&
       readme.includes('curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash') &&
       readme.includes('THINKLESS_TARBALL_URL') &&
-      readme.includes('does not expose the private repository commit history') &&
+      readme.includes('workflow is manually triggered') &&
       readme.includes('Publish public install release') &&
-      readme.includes('From a clean machine without private source access') &&
+      readme.includes('From a clean machine') &&
       readme.includes('scripts/postinstall.mjs') &&
       readme.includes('THINKLESS_BOOTSTRAP=0') &&
       readme.includes('scripts/bootstrap-macos.sh') &&
