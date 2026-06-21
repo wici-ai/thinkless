@@ -14,6 +14,7 @@ title: Install Thinkless
   --tl-lime: #84cc16;
   --tl-shadow: 0 24px 70px rgba(17, 24, 39, 0.14);
   --tl-code: #0b1020;
+  --tl-command: #f8fafc;
 }
 
 body {
@@ -45,7 +46,7 @@ body {
 .install-shell {
   width: min(1060px, 100%);
   display: grid;
-  gap: 28px;
+  gap: 22px;
 }
 
 .install-hero {
@@ -109,8 +110,9 @@ body {
   min-width: 0;
   overflow-x: auto;
   border-radius: 6px;
-  background: var(--tl-code);
-  color: #e5edf8;
+  background: var(--tl-command);
+  color: var(--tl-ink);
+  border: 1px solid rgba(17, 24, 39, 0.1);
   padding: 19px 20px;
   font-size: clamp(0.88rem, 2vw, 1.08rem);
   line-height: 1.4;
@@ -162,70 +164,6 @@ body {
   font-size: 0.92rem;
 }
 
-.workflow-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.workflow-card {
-  border: 1px solid var(--tl-border);
-  border-radius: 8px;
-  padding: 18px;
-  background: rgba(255, 255, 255, 0.74);
-  min-height: 164px;
-  display: grid;
-  align-content: start;
-  gap: 12px;
-}
-
-.workflow-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  color: white;
-}
-
-.workflow-card:nth-child(1) .workflow-icon {
-  background: var(--tl-blue);
-}
-
-.workflow-card:nth-child(2) .workflow-icon {
-  background: var(--tl-teal);
-}
-
-.workflow-card:nth-child(3) .workflow-icon {
-  background: #7c3aed;
-}
-
-.workflow-card h2 {
-  margin: 0;
-  font-size: 1rem;
-  letter-spacing: 0;
-}
-
-.workflow-card p {
-  margin: 0;
-  color: var(--tl-muted);
-  line-height: 1.5;
-  font-size: 0.94rem;
-}
-
-.workflow-chip {
-  width: fit-content;
-  max-width: 100%;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(11, 16, 32, 0.06);
-  color: #2f3440;
-  font-size: 0.78rem;
-}
-
 .post-install {
   text-align: center;
   color: var(--tl-muted);
@@ -269,13 +207,6 @@ body {
     width: 100%;
   }
 
-  .workflow-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .workflow-card {
-    min-height: auto;
-  }
 }
 </style>
 
@@ -295,41 +226,6 @@ body {
         </button>
       </div>
       <div id="copy-status" class="copy-status" aria-live="polite"></div>
-    </div>
-
-    <div class="workflow-grid" aria-label="Example workflows">
-      <article class="workflow-card">
-        <div class="workflow-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
-            <path d="M4 7h16M4 12h10M4 17h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-          </svg>
-        </div>
-        <h2>Claude Code SOPs</h2>
-        <p>Turn a product request into a repeatable plan, keep auth ready, and hand the execution surface back to the terminal.</p>
-        <span class="workflow-chip">plan -> review -> run</span>
-      </article>
-
-      <article class="workflow-card">
-        <div class="workflow-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
-            <path d="M8 9 5 12l3 3M16 9l3 3-3 3M14 5l-4 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-          </svg>
-        </div>
-        <h2>Codex execution</h2>
-        <p>Install the Codex CLI, verify it is reachable, and keep the one-command workflow focused on shipping code.</p>
-        <span class="workflow-chip">codex + git + npm</span>
-      </article>
-
-      <article class="workflow-card">
-        <div class="workflow-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
-            <path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
-          </svg>
-        </div>
-        <h2>Open-model stacks</h2>
-        <p>Use the same local-first setup discipline for open model tools, hosted endpoints, or team-specific AI workflows.</p>
-        <span class="workflow-chip">local tools, fewer decisions</span>
-      </article>
     </div>
 
     <p class="post-install">After installation, run <code>thinkless</code>, follow the Codex, Claude, and GitHub CLI auth prompts, then verify with <code>thinkless doctor --deep</code>.</p>
