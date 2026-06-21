@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   assert(readme.includes('WICI_PLANNER_EFFORT') && readme.includes('WICI_EXECUTOR_AGENT') && readme.includes('WICI_EXECUTOR_EFFORT'), 'README should document runtime environment overrides');
   assert(readme.includes('npm run verify:release-tag'), 'README should document the guarded release tag verifier');
   assert(readme.includes('planner-*.stdout.jsonl') && readme.includes('.wici/codex-run.jsonl'), 'README should document planner and Codex transcript paths');
-  assert(readme.includes('git clone https://github.com/wici-ai/WiCi-code.git'), 'README should document a clean checkout deployment path');
+  assert(readme.includes('git clone git@github.com:wici-ai/thinkless-dev.git'), 'README should document a private source checkout deployment path');
   assert(readme.includes('git checkout <verified-release-tag-or-commit>'), 'README should document pinning a verified WiCi version');
   assert(readme.includes('npm run build') && readme.includes('npm run verify:v1-core'), 'README deployment should include build and core verification');
   assert(
@@ -141,6 +141,36 @@ async function main(): Promise<void> {
     readme.includes('automatically checks for Codex/Claude updates at run boundaries') &&
       readme.includes('pending updates are not a WiCi supervisor start gate'),
     'README should document automatic Codex/Claude update checks without a pending-update start gate'
+  );
+  assert(
+    readme.includes('## macOS Bootstrap') &&
+      readme.includes('curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash') &&
+      readme.includes('THINKLESS_TARBALL_URL') &&
+      readme.includes('does not expose the private repository commit history') &&
+      readme.includes('Publish public install release') &&
+      readme.includes('From a clean machine without private source access') &&
+      readme.includes('scripts/postinstall.mjs') &&
+      readme.includes('THINKLESS_BOOTSTRAP=0') &&
+      readme.includes('scripts/bootstrap-macos.sh') &&
+      readme.includes('no `npm` yet'),
+    'README should document public one-line install, automatic macOS install-time bootstrap, and the no-npm bootstrap path'
+  );
+  assert(
+    readme.includes('`brew`, `git`, `node`, `npm`, `gh`, `codex`, and `claude`') &&
+      readme.includes('GitHub CLI') &&
+      readme.includes('gh auth login') &&
+      readme.includes('gh auth status') &&
+      readme.includes('Codex, Claude, and GitHub CLI commands'),
+    'README should document GitHub CLI as a required installed and authenticated host dependency'
+  );
+  assert(
+    readme.includes('THINKLESS_CONFIG_BUNDLE') &&
+      readme.includes('~/.codex/config.toml') &&
+      readme.includes('~/.codex/auth.json') &&
+      readme.includes('~/.claude/settings.json') &&
+      readme.includes('~/.claude/.credentials.json') &&
+      readme.includes('keep them out of the repository'),
+    'README should document user-scoped Codex/Claude config copying without committing secrets'
   );
   assert(
     readme.includes('Codex `doctor` reachability failures are recorded as diagnostics') &&

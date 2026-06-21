@@ -316,6 +316,7 @@ export interface Checkpoint {
     mode: ToolMode;
     codex?: string;
     claude?: string;
+    github?: string;
     wici?: {
       package_version?: string;
       git_commit?: string | null;

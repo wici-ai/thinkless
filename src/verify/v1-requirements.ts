@@ -153,7 +153,13 @@ async function main(): Promise<void> {
   assert(files.executor.includes('Current GOAL.md:') && files.executor.includes('Current PLAN.md:'), 'executor prompt must embed GOAL.md and PLAN.md as Codex goal input');
   assert(files.executor.includes('as one Codex goal') && files.executor.includes('Supervisor receipt focus'), 'executor prompt must feed GOAL.md + PLAN.md as one Codex goal while keeping only a thin receipt focus');
   assert(!files.executor.includes('Execute plan step ${stepId} from PLAN.md.'), 'executor prompt must not reduce fresh V1 execution to a single supervisor-controlled plan step');
-  assert(files.executor.includes('startCodexAppServerTurn') && files.executor.includes("'exec',\n    'resume'"), 'executor must support app-server steering with codex exec resume fallback');
+  assert(
+    files.executor.includes('startCodexAppServerTurn') &&
+      files.executor.includes("'exec'") &&
+      files.executor.includes("'resume'") &&
+      files.executor.includes("'--last'"),
+    'executor must support app-server steering with codex exec resume fallback'
+  );
   assert(files.directNoScripts.includes('executed_without_opt_scripts'), 'direct no-scripts verifier must cover PLAN.md execution without .opt scripts');
   assert(files.existingGoal.includes('continued_without_new_goal') && files.existingGoal.includes('reused_goal_run_id'), 'existing-goal verifier must prove same-target continuation without a new --goal');
 	  assert(files.directNoScripts.includes("!events.some((event) => event.type === 'BASELINE_START')"), 'direct no-scripts verifier must reject baseline gating');

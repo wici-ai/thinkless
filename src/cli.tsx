@@ -20,7 +20,7 @@ import { checkToolHealth, updateToolsBetweenRuns } from './supervisor/selfupdate
 const program = new Command();
 const DEFAULT_DEMO_TARGET = 'fixture/demo-target';
 
-program.name('wici').description('Autonomous long-horizon coding TUI orchestrator').version(readPackageVersionSync());
+program.name('thinkless').description('Autonomous long-horizon coding TUI orchestrator').version(readPackageVersionSync());
 
 program
   .command('sample')
@@ -136,7 +136,7 @@ program
     const config = await loadConfig(options.mode);
     const report = options.update ? await updateToolsBetweenRuns(config) : await checkToolHealth(config, { probeClaude: options.deep });
     console.log(JSON.stringify(report, null, 2));
-    process.exitCode = report.codex.available && report.claude.available && !report.codex.error && !report.claude.error ? 0 : 1;
+    process.exitCode = report.codex.available && report.claude.available && report.github.available && !report.codex.error && !report.claude.error && !report.github.error ? 0 : 1;
   });
 
 program

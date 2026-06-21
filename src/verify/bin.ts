@@ -3,20 +3,23 @@ import { execa } from 'execa';
 import { exists } from '../shared/atomic.js';
 
 async function main(): Promise<void> {
-  const pkg = JSON.parse(await readFile('package.json', 'utf8')) as { version: string; bin: { wici: string } };
+  const pkg = JSON.parse(await readFile('package.json', 'utf8')) as { version: string; bin: Record<string, string> };
   const build = await execa('npm', ['run', 'build'], { all: true, reject: false });
   assert(build.exitCode === 0, `build failed before bin verification:\n${build.all}`);
-  assert(await exists(pkg.bin.wici), `package bin target does not exist after build: ${pkg.bin.wici}`);
+  assert(Object.keys(pkg.bin).length === 1 && Boolean(pkg.bin.thinkless), `package must expose only the thinkless binary: ${JSON.stringify(pkg.bin)}`);
 
-  const version = await execa(process.execPath, [pkg.bin.wici, '--version'], { all: true, reject: false });
-  assert(version.exitCode === 0, `built CLI --version failed:\n${version.all}`);
-  assert((version.stdout || version.all || '').trim() === pkg.version, `built CLI version mismatch: expected ${pkg.version}, got ${version.stdout || version.all}`);
+  for (const [name, bin] of Object.entries(pkg.bin)) {
+    assert(await exists(bin), `package bin target does not exist after build: ${bin}`);
+    const version = await execa(process.execPath, [bin, '--version'], { all: true, reject: false });
+    assert(version.exitCode === 0, `${name} built CLI --version failed:\n${version.all}`);
+    assert((version.stdout || version.all || '').trim() === pkg.version, `${name} built CLI version mismatch: expected ${pkg.version}, got ${version.stdout || version.all}`);
+  }
 
   console.log(
     JSON.stringify(
       {
         ok: true,
-        bin: pkg.bin.wici,
+        bins: pkg.bin,
         version: pkg.version,
         built_cli_version_matches_package: true
       },

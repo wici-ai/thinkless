@@ -17,6 +17,7 @@ export interface ToolHealth {
 export interface ToolHealthReport {
   codex: ToolHealth;
   claude: ToolHealth;
+  github: ToolHealth;
 }
 
 export interface ToolHealthOptions {
@@ -28,16 +29,17 @@ export interface ToolVersionDriftReport {
 }
 
 export async function checkToolHealth(config: WiCiConfig, options: ToolHealthOptions = {}): Promise<ToolHealthReport> {
-  const [codex, claude] = await Promise.all([
+  const [codex, claude, github] = await Promise.all([
     inspectTool(config.tools.executor.command, ['--version'], ['doctor']),
-    inspectClaude(config.tools.planner.command, options.probeClaude === true)
+    inspectClaude(config.tools.planner.command, options.probeClaude === true),
+    inspectTool('gh', ['--version'], [])
   ]);
-  return { codex, claude };
+  return { codex, claude, github };
 }
 
 export function assertRealToolsReady(config: WiCiConfig, report: ToolHealthReport): void {
   if (config.tools.mode !== 'real') return;
-  const failures = [report.codex, report.claude]
+  const failures = [report.codex, report.claude, report.github]
     .filter((tool) => !tool.available || tool.error)
     .map((tool) => `${tool.command}: ${tool.error ?? 'unavailable'}`);
   if (failures.length > 0) {
@@ -50,6 +52,7 @@ export async function toolVersionsFromHealth(config: WiCiConfig, report: ToolHea
     mode: config.tools.mode,
     codex: report?.codex.version,
     claude: report?.claude.version,
+    github: report?.github.version,
     wici: await inspectWiCiVersion(),
     checked_at: new Date().toISOString()
   };
@@ -71,6 +74,7 @@ export function reconcileToolVersionDrift(checkpoint: Checkpoint, current: NonNu
   if (pinned.mode !== current.mode) rejected.push(`mode ${pinned.mode} -> ${current.mode}`);
   if (pinned.codex !== current.codex) accepted.push(`codex ${pinned.codex ?? 'unknown'} -> ${current.codex ?? 'unknown'}`);
   if (pinned.claude !== current.claude) accepted.push(`claude ${pinned.claude ?? 'unknown'} -> ${current.claude ?? 'unknown'}`);
+  if (pinned.github !== current.github) accepted.push(`github ${pinned.github ?? 'unknown'} -> ${current.github ?? 'unknown'}`);
   if (pinned.wici) {
     if (pinned.wici.package_version !== current.wici?.package_version) {
       rejected.push(`wici package ${pinned.wici.package_version ?? 'unknown'} -> ${current.wici?.package_version ?? 'unknown'}`);

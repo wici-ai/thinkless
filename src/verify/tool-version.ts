@@ -21,6 +21,7 @@ async function main(): Promise<void> {
     mode: 'real',
     codex: 'codex-cli 0.139.0',
     claude: '2.1.162 (Claude Code)',
+    github: 'gh version 2.0.0',
     checked_at: '2026-06-14T00:00:00.000Z'
   });
 
@@ -28,17 +29,20 @@ async function main(): Promise<void> {
     mode: 'real',
     codex: 'codex-cli 0.140.0',
     claude: '2.1.178 (Claude Code)',
+    github: 'gh version 2.1.0',
     checked_at: new Date().toISOString()
   });
   assert(
     externalDrift.accepted.includes('codex codex-cli 0.139.0 -> codex-cli 0.140.0') &&
-      externalDrift.accepted.includes('claude 2.1.162 (Claude Code) -> 2.1.178 (Claude Code)'),
-    `expected Codex/Claude drift to be accepted, got ${JSON.stringify(externalDrift)}`
+      externalDrift.accepted.includes('claude 2.1.162 (Claude Code) -> 2.1.178 (Claude Code)') &&
+      externalDrift.accepted.includes('github gh version 2.0.0 -> gh version 2.1.0'),
+    `expected Codex/Claude/GitHub CLI drift to be accepted, got ${JSON.stringify(externalDrift)}`
   );
   assertNoActiveToolVersionDrift(active, {
     mode: 'real',
     codex: 'codex-cli 0.140.0',
     claude: '2.1.178 (Claude Code)',
+    github: 'gh version 2.1.0',
     checked_at: new Date().toISOString()
   });
 
@@ -70,6 +74,7 @@ async function main(): Promise<void> {
     mode: 'real',
     codex: 'codex-cli 0.140.0',
     claude: '2.1.200 (Claude Code)',
+    github: 'gh version 2.1.0',
     checked_at: new Date().toISOString()
   });
 
@@ -78,6 +83,7 @@ async function main(): Promise<void> {
     mode: 'real',
     codex: 'codex-cli 0.140.0',
     claude: '2.1.200 (Claude Code)',
+    github: 'gh version 2.1.0',
     checked_at: new Date().toISOString()
   });
 
@@ -225,6 +231,11 @@ function fakeReport(updatePending: boolean): ToolHealthReport {
       command: 'claude',
       available: true,
       version: '2.1.162 (Claude Code)'
+    },
+    github: {
+      command: 'gh',
+      available: true,
+      version: 'gh version 2.0.0'
     }
   };
 }

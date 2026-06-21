@@ -247,7 +247,7 @@ git -C <target> restore --staged --worktree . && git -C <target> clean -fd   # u
 
 `codex exec --dangerously-bypass-approvals-and-sandbox` removes the execution sandbox, while the planner remains in Claude Code plan mode. Compensate:
 - **Recommend a disposable container/VM** (or a dedicated machine) with only the target repo mounted. **Current deployment decision:** direct-host real mode on the primary machine is acceptable when the target repo is git-backed, the WiCi checkout is pinned/recorded, and rollback commands are documented.
-- Keep **reversibility** as the backbone: every change is git-committed or revertible (`wici rollback --target <repo> --confirm`, internally `reset --hard <best>` + `clean -fd` preserving `.wici/`); no irreversible ops.
+- Keep **reversibility** as the backbone: every change is git-committed or revertible (`thinkless rollback --target <repo> --confirm`, internally `reset --hard <best>` + `clean -fd` preserving `.wici/`); no irreversible ops.
 - Record WiCi's own package version, git commit, and dirty flag in `checkpoint.json` so the orchestrator can be rolled back along with the target repo.
 - **Forbidden-action list** in the planner/executor system prompts (no `git push`, no `rm -rf` outside workspace, no prod credentials); `--disallowedTools 'Bash(git push *)'` on the planner.
 - Eval scripts + tests stay `chmod -w` + SHA-pinned regardless of autonomy.

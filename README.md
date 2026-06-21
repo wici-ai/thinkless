@@ -58,6 +58,7 @@ npm run verify:goal-interrogation
 npm run verify:curriculum
 npm run verify:rollback
 npm run verify:setup-state
+npm run verify:install-bootstrap
 npm run verify:ssh-evidence
 npm run verify:canary-evidence
 npm run verify:release-tag
@@ -89,6 +90,7 @@ npm run verify:ssh-evidence
 npm run verify:canary-evidence
 npm run verify:release-tag
 npm run verify:no-secrets
+npm run verify:install-bootstrap
 npm run verify:limit-artifact
 ```
 
@@ -232,37 +234,88 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 
 ## Deployment
 
-Install WiCi from a clean checkout:
+Install Thinkless from the public release artifact:
 
 ```bash
-git clone https://github.com/wici-ai/WiCi-code.git
-cd WiCi-code
+curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
+```
+
+That one-line installer downloads `thinkless.tgz` from the latest public release and installs it globally with npm. The public release contains the built package and installer assets only; it does not expose the private repository commit history. If you need a different release host, set `THINKLESS_RELEASE_BASE` or `THINKLESS_TARBALL_URL` before running the installer.
+
+GitHub releases attached to a private repository still require authenticated access. For unauthenticated installs without exposing history, publish the packed artifact to the public release repository `wici-ai/thinkless`, to npm, or to an object-storage bucket. The included `Publish public install release` workflow builds `thinkless.tgz` from the private `wici-ai/thinkless-dev` source checkout with `fetch-depth: 1`, then uploads only `thinkless.tgz` and `install.sh` to the configured public repo using `THINKLESS_PUBLIC_RELEASE_TOKEN`.
+
+Install from a private source checkout only when you have repository access:
+
+```bash
+git clone git@github.com:wici-ai/thinkless-dev.git
+cd thinkless-dev
 git checkout <verified-release-tag-or-commit>
 npm install
 npm run build
 npm run verify:v1-core
 ```
 
-Install and authenticate the two agent CLIs on the host:
+## macOS Bootstrap
+
+On macOS, `npm install` runs `scripts/postinstall.mjs` automatically. The hook checks the host commands Thinkless needs: `brew`, `git`, `node`, `npm`, `gh`, `codex`, and `claude`. Missing `brew`, `codex`, and `claude` are installed with the official macOS installers; missing `git`, GitHub CLI, or Node.js/npm are installed through Homebrew. CI and non-macOS installs skip this bootstrap by default. To bypass host mutation on a Mac, run `THINKLESS_BOOTSTRAP=0 npm install`.
+
+For a brand new Mac with no `npm` yet, run the bootstrap shell script first. From a checkout:
 
 ```bash
-claude --version
-codex --version
-npx tsx src/cli.tsx doctor --deep
+bash scripts/bootstrap-macos.sh
 ```
 
-Codex `doctor` reachability failures are recorded as diagnostics, not a hard real-mode start gate. Real mode still requires the Codex/Claude commands to be present and version checks to succeed.
+From a clean machine without private source access, use the public release installer instead:
+
+```bash
+curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
+```
+
+That script installs Homebrew, Node.js/npm, git, and GitHub CLI, then runs `npm ci`, `npm run build`, and `npm link` so the `thinkless` command is available.
+
+If you already have trusted local config files, pass them during install with a private bundle:
+
+```bash
+THINKLESS_CONFIG_BUNDLE=/path/to/private-thinkless-config npm install
+```
+
+Bundle files are copied to user-scoped locations only:
+
+```text
+.codex/config.toml       -> ~/.codex/config.toml
+.codex/auth.json         -> ~/.codex/auth.json
+.claude/settings.json    -> ~/.claude/settings.json
+.claude/.credentials.json -> ~/.claude/.credentials.json
+```
+
+Existing user config is not overwritten unless `THINKLESS_BOOTSTRAP_FORCE=1` is set. `~/.codex/auth.json` and `~/.claude/.credentials.json` are credential files; keep them out of the repository, tickets, logs, and chat. `wici.config.json` remains Thinkless repo configuration only, not a place for provider secrets.
+
+If you do not provide copied credentials, authenticate Codex, Claude, and GitHub CLI interactively:
+
+```bash
+codex login
+gh auth login
+claude
+codex --version
+codex doctor
+gh --version
+gh auth status
+claude --version
+thinkless doctor --deep
+```
+
+Codex `doctor` reachability failures are recorded as diagnostics, not a hard real-mode start gate. Real mode still requires the Codex, Claude, and GitHub CLI commands to be present and version checks to succeed.
 
 Set provider-specific environment variables in the shell or container runtime. Keep credentials out of the repository and out of committed config files.
 
-Before a real run, pin the WiCi version you are using:
+Before a real run, pin the Thinkless version you are using:
 
 ```bash
-git -C /path/to/WiCi-code status --short
-git -C /path/to/WiCi-code rev-parse HEAD
+git -C /path/to/thinkless status --short
+git -C /path/to/thinkless rev-parse HEAD
 ```
 
-The supervisor records the WiCi package version, git commit, and dirty flag in `<target>/.wici/checkpoint.json` under `tool_versions.wici`. Codex/Claude CLI changes are treated as recoverable external tool drift: WiCi auto-updates them at run boundaries when `tools.auto_update` is true, and accepts/logs their version changes if a resumed active checkpoint observes a new CLI version. Active runs still reject WiCi package/git/mode drift; change WiCi commits only between runs or roll back to the checkpointed commit.
+The supervisor records the Thinkless package version, git commit, and dirty flag in `<target>/.wici/checkpoint.json` under `tool_versions.wici`. Codex/Claude/GitHub CLI changes are treated as recoverable external tool drift: Thinkless auto-updates Codex and Claude at run boundaries when `tools.auto_update` is true, and accepts/logs external CLI version changes if a resumed active checkpoint observes a new CLI version. Active runs still reject Thinkless package/git/mode drift; change Thinkless commits only between runs or roll back to the checkpointed commit.
 
 Require real CLIs:
 
@@ -403,11 +456,11 @@ npx tsx src/cli.tsx rollback --target /workspace/target-repo --confirm
 
 The first command is a non-destructive preview. The second command runs `git reset --hard` to `wici/best` when available, otherwise to the recorded best commit, then runs `git clean -fd` while preserving `.wici/`.
 
-To restore the WiCi orchestrator version that started the run:
+To restore the Thinkless orchestrator version that started the run:
 
 ```bash
 WICI_COMMIT="$(jq -r .tool_versions.wici.git_commit .wici/checkpoint.json)"
-git -C /path/to/WiCi-code checkout "$WICI_COMMIT"
+git -C /path/to/thinkless checkout "$WICI_COMMIT"
 ```
 
 ## Legacy Optimizer Path

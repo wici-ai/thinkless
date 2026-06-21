@@ -1,0 +1,50 @@
+name: Publish public install release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release tag to publish, for example v0.1.4
+        required: true
+      public_repo:
+        description: Public release repo, for example wici-ai/thinkless
+        required: true
+        default: wici-ai/thinkless
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ inputs.version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+
+      - name: Pack install artifact
+        run: |
+          mkdir -p release
+          npm pack --pack-destination release
+          cp release/thinkless-*.tgz release/thinkless.tgz
+          cp scripts/install.sh release/install.sh
+
+      - name: Publish to public release repo
+        env:
+          GH_TOKEN: ${{ secrets.THINKLESS_PUBLIC_RELEASE_TOKEN }}
+          PUBLIC_REPO: ${{ inputs.public_repo }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release delete "$VERSION" --repo "$PUBLIC_REPO" --yes --cleanup-tag || true
+          gh release create "$VERSION" \
+            release/thinkless.tgz \
+            release/install.sh \
+            --repo "$PUBLIC_REPO" \
+            --title "Thinkless $VERSION" \
+            --notes "Release-only Thinkless installer artifacts built from the private source repository. This release does not expose git history."

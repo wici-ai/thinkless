@@ -56,7 +56,8 @@ function fakeConfig(mode: WiCiConfig['tools']['mode']): WiCiConfig {
 function fakeReport(claudeError: string): ToolHealthReport {
   return {
     codex: { command: 'codex', available: true, version: 'codex-cli 0.139.0' },
-    claude: { command: 'claude', available: true, version: '2.1.162 (Claude Code)', error: claudeError }
+    claude: { command: 'claude', available: true, version: '2.1.162 (Claude Code)', error: claudeError },
+    github: { command: 'gh', available: true, version: 'gh version 2.0.0' }
   };
 }
 
