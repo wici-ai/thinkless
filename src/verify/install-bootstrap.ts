@@ -44,7 +44,9 @@ async function main(): Promise<void> {
       assert(plan.missing.includes(command), `plan must inventory missing ${command}: ${JSON.stringify(plan.missing)}`);
     }
     const stepIds = plan.steps.map((step) => step.id);
+    assert(stepIds.indexOf('ensure-xcode-tools') !== -1 && stepIds.indexOf('ensure-xcode-tools') < stepIds.indexOf('verify-sudo'), `plan must wait for Apple Command Line Tools before sudo/Homebrew: ${JSON.stringify(stepIds)}`);
     assert(stepIds.indexOf('verify-sudo') !== -1 && stepIds.indexOf('verify-sudo') < stepIds.indexOf('install-homebrew'), `plan must verify sudo before Homebrew install: ${JSON.stringify(stepIds)}`);
+    assert(plan.steps.some((step) => step.id === 'ensure-xcode-tools' && step.command.includes('xcode-select --install') && step.command.includes('THINKLESS_XCODE_WAIT_SECONDS')), 'plan must wait for the Apple Command Line Tools installer instead of exiting');
     assert(plan.steps.some((step) => step.id === 'verify-sudo' && step.command.includes('sudo -v')), 'plan must check sudo access before macOS host mutation');
     assert(plan.steps.some((step) => step.id === 'install-homebrew' && step.command.includes('Homebrew/install/HEAD/install.sh')), 'plan must install missing Homebrew');
     assert(plan.steps.some((step) => step.id === 'install-brew-packages' && step.command.includes('brew install git node gh')), 'plan must use Homebrew to install git, Node.js/npm, and GitHub CLI');
@@ -54,6 +56,19 @@ async function main(): Promise<void> {
     assert(plan.configCopies.some((copy) => copy.id === 'codex-auth' && copy.destination.endsWith(join('.codex', 'auth.json')) && copy.mode === 0o600), 'plan must copy Codex auth.json with private file mode');
     assert(plan.configCopies.some((copy) => copy.id === 'claude-settings' && copy.destination.endsWith(join('.claude', 'settings.json'))), 'plan must copy Claude settings.json to user home');
     assert(plan.configCopies.some((copy) => copy.id === 'claude-credentials' && copy.destination.endsWith(join('.claude', '.credentials.json')) && copy.mode === 0o600), 'plan must copy Claude credentials with private file mode');
+
+    const userToolPlan = await execa(process.execPath, ['scripts/postinstall.mjs', '--plan-json'], {
+      all: true,
+      reject: false,
+      env: {
+        THINKLESS_BOOTSTRAP_TEST_PLATFORM: 'darwin',
+        THINKLESS_BOOTSTRAP_TEST_MISSING: 'codex,claude',
+        THINKLESS_BOOTSTRAP_TEST_HOME: home
+      }
+    });
+    assert(userToolPlan.exitCode === 0, `postinstall user-tool plan failed:\n${userToolPlan.all}`);
+    const userToolStepIds = (JSON.parse(userToolPlan.stdout) as { steps: Array<{ id: string }> }).steps.map((step) => step.id);
+    assert(!userToolStepIds.includes('ensure-xcode-tools') && !userToolStepIds.includes('verify-sudo'), `Codex/Claude-only installs must not require CLT or sudo: ${JSON.stringify(userToolStepIds)}`);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -68,12 +83,17 @@ async function main(): Promise<void> {
   const oldSplitInputName = ['public', 'repo'].join('_');
   const forbiddenSudoNpm = ['sudo', 'npm'].join(' ');
   assert(postinstall.includes("join(homedir(), '.local', 'bin')") && postinstall.includes('/opt/homebrew/bin'), 'postinstall must check common native installer paths before verification');
+  assert(postinstall.includes('xcode-select --install') && postinstall.includes('THINKLESS_XCODE_WAIT_SECONDS'), 'postinstall must wait for Apple Command Line Tools when Homebrew is needed');
   assert(postinstall.includes('sudo access is required on macOS') && postinstall.includes('sudo -v'), 'postinstall must require sudo access before installing Homebrew on macOS');
   assert(bootstrap.includes('brew install git node gh'), 'zero-npm macOS bootstrap must install Node/npm and GitHub CLI through Homebrew');
+  assert(bootstrap.includes('ensure_xcode_tools') && bootstrap.includes('xcode-select --install') && bootstrap.includes('THINKLESS_XCODE_WAIT_SECONDS'), 'zero-npm macOS bootstrap must wait for Apple Command Line Tools instead of requiring a rerun');
+  assert(bootstrap.includes('npm prefix -g') && bootstrap.includes('~/.zprofile') && bootstrap.includes('/bin/zsh -lc'), 'zero-npm macOS bootstrap must expose thinkless to future zsh sessions');
   assert(bootstrap.includes('require_sudo_access') && bootstrap.includes('npm link failed') && !bootstrap.includes(forbiddenSudoNpm), 'zero-npm macOS bootstrap must verify sudo without running npm under elevated privileges');
   assert(bootstrap.includes('git@github.com:wici-ai/thinkless.git'), 'zero-npm macOS bootstrap must clone from the public thinkless source repo by default');
   assert(bootstrap.includes('npm ci') && bootstrap.includes('npm link'), 'zero-npm macOS bootstrap must install and expose the Thinkless command');
   assert(publicInstaller.includes('THINKLESS_TARBALL_URL') && publicInstaller.includes('npm install -g "$pkg"'), 'public installer must install from a release tarball without git history');
+  assert(publicInstaller.includes('ensure_xcode_tools') && publicInstaller.includes('xcode-select --install') && publicInstaller.includes('THINKLESS_XCODE_WAIT_SECONDS'), 'public installer must wait for Apple Command Line Tools instead of requiring a rerun');
+  assert(publicInstaller.includes('npm prefix -g') && publicInstaller.includes('~/.zprofile') && publicInstaller.includes('/bin/zsh -lc'), 'public installer must expose thinkless to future zsh sessions');
   assert(publicInstaller.includes('require_sudo_access') && publicInstaller.includes('npm global install failed') && !publicInstaller.includes(forbiddenSudoNpm), 'public installer must verify sudo without running npm under elevated privileges');
   assert(publicInstaller.includes('https://github.com/wici-ai/thinkless/releases/latest/download'), 'public installer must default to the public thinkless release repo');
   assert(publicReleaseWorkflow.includes('workflow_dispatch:'), 'public release workflow must be manually triggered');
@@ -97,6 +117,7 @@ async function main(): Promise<void> {
   assert(readme.includes('authenticate Codex, Claude, and GitHub CLI') && readme.includes('Codex, Claude, and GitHub CLI commands'), 'README must include GitHub CLI in auth and real-mode health wording');
   assert(readme.includes('~/.codex/config.toml') && readme.includes('~/.codex/auth.json'), 'README must document Codex config/auth destinations');
   assert(readme.includes('~/.claude/settings.json') && readme.includes('~/.claude/.credentials.json'), 'README must document Claude config destinations');
+  assert(readme.includes('Apple Command Line Tools') && readme.includes('~/.zprofile') && readme.includes('fresh zsh login shell'), 'README must document first-run CLT waiting and zsh command exposure');
 
   console.log(
     JSON.stringify(

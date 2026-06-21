@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 const INSTALL_SKIP_VALUES = new Set(['0', 'false', 'no']);
 const REQUIRED_COMMANDS = ['brew', 'git', 'node', 'npm', 'gh', 'codex', 'claude'];
 const BREW_INIT = 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null || brew shellenv)"';
+const XCODE_TOOLS_PREFLIGHT = 'if ! xcode-select -p >/dev/null 2>&1; then echo "thinkless postinstall: Apple Command Line Tools are required. Complete the macOS installer; this installer will continue automatically."; xcode-select --install >/dev/null 2>&1 || true; waited=0; timeout="${THINKLESS_XCODE_WAIT_SECONDS:-1800}"; while ! xcode-select -p >/dev/null 2>&1; do if [ "$waited" -ge "$timeout" ]; then echo "thinkless postinstall: timed out waiting for Apple Command Line Tools. Rerun the installer after they finish installing."; exit 1; fi; sleep 5; waited=$((waited + 5)); done; fi';
 const SUDO_PREFLIGHT = 'sudo -v || { echo "thinkless postinstall: sudo access is required on macOS to install Homebrew and system dependencies. Run from an admin account, or install dependencies manually and rerun with THINKLESS_BOOTSTRAP=0."; exit 1; }';
 const HOMEBREW_INSTALL = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
 const CODEX_INSTALL = 'curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh';
@@ -108,6 +109,13 @@ function installStepsForMissing(missing) {
   const steps = [];
   const needsBrew = missing.includes('brew');
   const needsBrewPackage = missing.some((command) => ['git', 'node', 'npm', 'gh'].includes(command));
+  if (needsBrew || needsBrewPackage) {
+    steps.push({
+      id: 'ensure-xcode-tools',
+      title: 'Install Apple Command Line Tools if prompted',
+      command: XCODE_TOOLS_PREFLIGHT
+    });
+  }
   if (needsBrew) {
     steps.push({
       id: 'verify-sudo',
