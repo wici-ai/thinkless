@@ -176,14 +176,18 @@ auth_onboarding_enabled() {
   if [[ -n "${CI:-}" ]]; then
     return 1
   fi
-  [[ -r /dev/tty && -w /dev/tty ]]
+  [[ -r /dev/tty && -w /dev/tty ]] || return 1
+  true 2>/dev/null < /dev/tty > /dev/tty
 }
 
 prompt_yes_no() {
   local prompt="$1"
   local answer
-  printf "%s [Y/n] " "$prompt" > /dev/tty
-  if ! IFS= read -r answer < /dev/tty 2>/dev/null; then
+  if ! printf "%s [Y/n] " "$prompt" 2>/dev/null > /dev/tty; then
+    echo "thinkless bootstrap: could not write to /dev/tty; auth onboarding requires an interactive terminal." >&2
+    return 2
+  fi
+  if ! IFS= read -r answer 2>/dev/null < /dev/tty; then
     echo "thinkless bootstrap: could not read from /dev/tty; auth onboarding requires an interactive terminal." >&2
     return 2
   fi
