@@ -180,7 +180,8 @@ async function main(): Promise<void> {
   assertNoFileWriteApis('useRunState', files.state);
   assertOnlyChatPaneWritesInbox(files);
 
-  assert(files.cli.includes(".command('tui')"), 'CLI must expose the tui command');
+  assert(files.cli.includes(".command('tui', { isDefault: true })"), 'CLI must expose the tui command as the fresh default command');
+  assert(files.cli.includes(".command('resume')") && files.cli.includes('resumeOnOpen: true'), 'CLI must expose an explicit resume command');
   assert(files.cli.includes(".option('--no-supervisor'"), 'tui command must support read-only/manual launch without supervisor');
   assert(files.cli.includes(".option('--no-fullscreen'"), 'tui command must support non-fullscreen rendering for verification');
   assert(files.cli.includes(".option('--mouse-reporting'") && files.cli.includes('mouseReporting={options.mouseReporting}'), 'CLI must keep mouse tracking opt-in so pane text remains selectable by default');

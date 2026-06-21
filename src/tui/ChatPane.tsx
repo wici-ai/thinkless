@@ -134,8 +134,10 @@ export function ChatInputBox({
   contentWidth = 80,
   inputPaused = false,
   blankRun = false,
+  hasExistingRun = false,
   onPlanningRequested,
   onInjection,
+  onResumeRequested,
   onRuntimeChange,
   onBusyChange,
   onLocalStatus
@@ -152,8 +154,10 @@ export function ChatInputBox({
   contentWidth?: number;
   inputPaused?: boolean;
   blankRun?: boolean;
+  hasExistingRun?: boolean;
   onPlanningRequested?: (text: string, planningContext?: string) => void;
   onInjection?: () => void;
+  onResumeRequested?: () => void;
   onRuntimeChange?: (runtime: RuntimeSelection) => void;
   onBusyChange?: (busy: boolean) => void;
   onLocalStatus?: (text: string | null) => void;
@@ -188,6 +192,16 @@ export function ChatInputBox({
 
     const paths = runPaths(target);
     const latestQuestion = [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered);
+
+    if (text === '/resume' || text.startsWith('/resume ')) {
+      if (hasExistingRun) {
+        onLocalStatus?.('resume: continuing the existing Thinkless run');
+        onResumeRequested?.();
+      } else {
+        onLocalStatus?.(`resume: no existing run in this workspace; exit and run thinkless resume --target ${target}`);
+      }
+      return;
+    }
 
     // Explicit control input: slash commands and answers to an open planner
     // question bypass the conversational agent and go straight to the inbox.
@@ -306,6 +320,7 @@ export function ChatPane({
   blankRun = false,
   onPlanningRequested,
   onInjection,
+  onResumeRequested,
   systemLine
 }: ChatContextProps & {
   target: string;
@@ -316,6 +331,7 @@ export function ChatPane({
   blankRun?: boolean;
   onPlanningRequested?: (text: string, planningContext?: string) => void;
   onInjection?: () => void;
+  onResumeRequested?: () => void;
   systemLine?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
@@ -350,8 +366,10 @@ export function ChatPane({
         contentWidth={contentWidth}
         inputPaused={inputPaused}
         blankRun={blankRun}
+        hasExistingRun={Boolean(goal)}
         onPlanningRequested={onPlanningRequested}
         onInjection={onInjection}
+        onResumeRequested={onResumeRequested}
         onBusyChange={setBusy}
         onLocalStatus={setLocalStatus}
       />

@@ -121,10 +121,13 @@ async function main(): Promise<void> {
     }),
     'real outbox messages must still block blank-run Chat-agent intake'
   );
-  assert(shouldAutoStartExistingRun({ ...blank, goal: goal() }), 'existing goal without a STOP checkpoint should auto-start');
-  assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('STOP') }), 'stopped run should not auto-restart without new chat');
-  assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('FAILED') }), 'failed run should not auto-restart without new chat');
-  assert(shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('PLAN') }), 'active plan state should auto-start on TUI attach');
+  assert(!shouldAutoStartExistingRun({ ...blank, goal: goal() }), 'existing goal must not auto-start from a fresh TUI attach');
+  assert(shouldAutoStartExistingRun({ ...blank, goal: goal() }, true), 'explicit resume should continue an existing goal without a checkpoint');
+  assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('STOP') }), 'stopped run should not auto-restart without explicit resume');
+  assert(shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('STOP') }, true), 'explicit resume should continue a stopped run');
+  assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('FAILED') }, true), 'failed run should not auto-start even through resume');
+  assert(!shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('PLAN') }), 'active plan state should wait for thinkless resume instead of implicit TUI attach');
+  assert(shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('PLAN') }, true), 'explicit resume should reattach an active plan state');
   verifyDegradedBlankRunChatDecision();
   verifyBlankRunPlanningContext();
   await verifyGoalSourceNotRetroactive();

@@ -33,6 +33,7 @@ export interface TuiSupervisorOptions {
   resumeIteration?: number;
   mode?: ToolMode;
   lockMode?: 'auto' | 'manual';
+  resumeOnOpen?: boolean;
 }
 
 export function App({
@@ -144,9 +145,9 @@ export function App({
   }, [launchSupervisor, runtimeHydrated, supervisor.enabled, supervisor.initialGoal]);
 
   useEffect(() => {
-    if (!runtimeHydrated || !supervisor.enabled || supervisor.initialGoal || !shouldAutoStartExistingRun(state)) return;
+    if (!runtimeHydrated || !supervisor.enabled || supervisor.initialGoal || !supervisor.resumeOnOpen || !shouldAutoStartExistingRun(state, true)) return;
     launchSupervisor(undefined);
-  }, [launchSupervisor, runtimeHydrated, state.goal, state.checkpoint?.supervisor_state, supervisor.enabled, supervisor.initialGoal]);
+  }, [launchSupervisor, runtimeHydrated, state.goal, state.checkpoint?.supervisor_state, supervisor.enabled, supervisor.initialGoal, supervisor.resumeOnOpen]);
 
   useEffect(() => {
     if (!interactive) return;
@@ -265,8 +266,10 @@ export function App({
         contentWidth={inputContentWidth}
         inputPaused={runtimeSelectorOpen}
         blankRun={blankRunChat}
+        hasExistingRun={Boolean(state.goal)}
         onPlanningRequested={(goal, planningContext) => launchSupervisor(goal, 'tui_chat', planningContext)}
         onInjection={() => launchSupervisor(undefined)}
+        onResumeRequested={() => launchSupervisor(undefined)}
         onRuntimeChange={setRuntimeSelection}
         onBusyChange={setChatBusy}
         onLocalStatus={setChatLocalStatus}
@@ -330,10 +333,11 @@ function workspaceTabLabel(tab: WorkspaceTab): string {
   return tab;
 }
 
-export function shouldAutoStartExistingRun(state: ReturnType<typeof useRunState>): boolean {
+export function shouldAutoStartExistingRun(state: ReturnType<typeof useRunState>, explicitResume = false): boolean {
   if (!state.goal) return false;
+  if (!explicitResume) return false;
   const supervisorState = state.checkpoint?.supervisor_state;
-  if (supervisorState === 'STOP' || supervisorState === 'FAILED') return false;
+  if (supervisorState === 'FAILED') return false;
   return true;
 }
 

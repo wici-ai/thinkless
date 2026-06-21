@@ -8,6 +8,11 @@ import { runPaths } from '../shared/paths.js';
 const target = resolve('fixture/demo-tui-target');
 
 async function main(): Promise<void> {
+  const bareOutput = await runBareThinkless();
+  const bareUi = stripAnsi(bareOutput);
+  assert(bareUi.includes('Thinkless') && bareUi.includes('CHAT') && bareUi.includes('PLAN') && bareUi.includes('EXECUTION'), `bare thinkless command did not render the TUI:\n${bareUi}`);
+  assert(!/required option|missing required|Usage:/i.test(bareUi), `bare thinkless command should not require a subcommand or --target:\n${bareUi}`);
+
   const output = await runDemo(['--fresh']);
 
   const paths = runPaths(target);
@@ -48,6 +53,7 @@ async function main(): Promise<void> {
         ok: true,
         target,
         demo_created_target: true,
+        bare_command_opens_tui: true,
         chat_first_no_blackboard_writes: true,
         rendered_switchable_workspace: true,
         non_fresh_preserves_chat_session: true,
@@ -59,10 +65,18 @@ async function main(): Promise<void> {
   );
 }
 
+async function runBareThinkless(): Promise<string> {
+  return runCli([]);
+}
+
 async function runDemo(extraArgs: string[]): Promise<string> {
+  return runCli(['demo', '--target', target, ...extraArgs, '--max-iters', '1', '--mode', 'stub', '--no-fullscreen']);
+}
+
+async function runCli(args: string[]): Promise<string> {
   const child = spawn(
     process.execPath,
-    ['--import', 'tsx', 'src/cli.tsx', 'demo', '--target', target, ...extraArgs, '--max-iters', '1', '--mode', 'stub', '--no-fullscreen'],
+    ['--import', 'tsx', 'src/cli.tsx', ...args],
     {
       cwd: resolve('.'),
       env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1', WICI_TUI_RENDER_ONCE_DELAY_MS: '700' },

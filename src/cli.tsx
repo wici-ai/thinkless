@@ -2,8 +2,10 @@
 import React from 'react';
 import { render } from 'ink';
 import { Command } from 'commander';
-import { writeSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, statSync, writeSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { App } from './tui/App.js';
 import { DISABLE_POINTER_INPUT_SEQUENCE, ENABLE_MOUSE_REPORTING_SEQUENCE } from './tui/input.js';
@@ -19,6 +21,9 @@ import { checkToolHealth, updateToolsBetweenRuns } from './supervisor/selfupdate
 
 const program = new Command();
 const DEFAULT_DEMO_TARGET = 'fixture/demo-target';
+const WORKSPACE_ROOT = join(homedir(), 'thinkless-workspaces');
+const TARGET_OPTION_DESCRIPTION = 'target repository';
+const RESUME_TARGET_OPTION_DESCRIPTION = 'target repository to resume (defaults to current Thinkless run, then latest Thinkless workspace)';
 
 program.name('thinkless').description('Autonomous long-horizon coding TUI orchestrator').version(readPackageVersionSync());
 
@@ -35,7 +40,7 @@ program
 program
   .command('run')
   .description('Run the supervisor headlessly')
-  .requiredOption('--target <path>', 'target repository')
+  .requiredOption('--target <path>', TARGET_OPTION_DESCRIPTION)
   .option('--goal <text>', 'initial goal')
   .option('--once', 'run one iteration', false)
   .option('--max-iters <n>', 'max iterations', (value) => Number(value))
@@ -58,9 +63,9 @@ program
   });
 
 program
-  .command('tui')
-  .description('Open the Chat-first TUI')
-  .requiredOption('--target <path>', 'target repository')
+  .command('tui', { isDefault: true })
+  .description('Open a fresh Chat-first TUI workspace')
+  .option('--target <path>', 'fresh target workspace (defaults to a new isolated workspace under ~/thinkless-workspaces)')
   .option('--goal <text>', 'initial goal')
   .option('--max-iters <n>', 'max iterations', (value) => Number(value))
   .option('--resume-iteration <n>', 'load checkpoint snapshot for iteration N before running', parseNonNegativeInteger)
@@ -69,18 +74,23 @@ program
   .option('--no-supervisor', 'do not start the supervisor loop')
   .option('--no-fullscreen', 'render without fullscreen mode')
   .option('--mouse-reporting', 'enable mouse wheel/click tracking; disables native terminal text selection', false)
-  .action((options: { target: string; goal?: string; maxIters?: number; resumeIteration?: number; mode: ToolMode; lockMode?: 'auto' | 'manual'; supervisor: boolean; fullscreen: boolean; mouseReporting: boolean }) => {
-    renderTui({
-      target: resolve(options.target),
-      goal: options.goal,
-      maxIters: options.maxIters,
-      resumeIteration: options.resumeIteration,
-      mode: options.mode,
-      lockMode: options.lockMode,
-      supervisor: options.supervisor,
-      fullscreen: options.fullscreen,
-      mouseReporting: options.mouseReporting
-    });
+  .action((options: TuiCommandOptions) => {
+    launchTui({ ...options, target: resolveFreshTargetOption(options.target), resumeOnOpen: false });
+  });
+
+program
+  .command('resume')
+  .description('Resume an existing Thinkless run in the Chat-first TUI')
+  .option('--target <path>', RESUME_TARGET_OPTION_DESCRIPTION)
+  .option('--max-iters <n>', 'max iterations', (value) => Number(value))
+  .option('--resume-iteration <n>', 'load checkpoint snapshot for iteration N before running', parseNonNegativeInteger)
+  .option('--mode <mode>', 'tool mode: real, auto, or stub', 'auto')
+  .option('--lock-mode <mode>', 'eval lock mode: auto or manual')
+  .option('--no-supervisor', 'do not start the supervisor loop')
+  .option('--no-fullscreen', 'render without fullscreen mode')
+  .option('--mouse-reporting', 'enable mouse wheel/click tracking; disables native terminal text selection', false)
+  .action((options: TuiCommandOptions) => {
+    launchTui({ ...options, target: resolveResumeTargetOption(options.target), resumeOnOpen: true });
   });
 
 program
@@ -103,6 +113,7 @@ program
       mode: options.mode,
       lockMode: options.lockMode,
       supervisor: true,
+      resumeOnOpen: false,
       fullscreen: options.fullscreen,
       mouseReporting: options.mouseReporting
     });
@@ -155,12 +166,99 @@ program.parseAsync(process.argv).catch((error: unknown) => {
   process.exitCode = 1;
 });
 
+interface TuiCommandOptions {
+  target?: string;
+  goal?: string;
+  maxIters?: number;
+  resumeIteration?: number;
+  mode: ToolMode;
+  lockMode?: 'auto' | 'manual';
+  supervisor: boolean;
+  fullscreen: boolean;
+  mouseReporting: boolean;
+  resumeOnOpen?: boolean;
+}
+
 function parseNonNegativeInteger(value: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(`Expected a non-negative integer, got ${value}`);
   }
   return parsed;
+}
+
+function launchTui(options: TuiCommandOptions): void {
+  renderTui({
+    target: options.target ? resolve(options.target) : resolveFreshTargetOption(undefined),
+    goal: options.goal,
+    maxIters: options.maxIters,
+    resumeIteration: options.resumeIteration,
+    mode: options.mode,
+    lockMode: options.lockMode,
+    supervisor: options.supervisor,
+    resumeOnOpen: options.resumeOnOpen ?? false,
+    fullscreen: options.fullscreen,
+    mouseReporting: options.mouseReporting
+  });
+}
+
+function resolveFreshTargetOption(target?: string): string {
+  if (target?.trim()) return resolve(target);
+  return defaultFreshTarget();
+}
+
+function resolveResumeTargetOption(target?: string): string {
+  if (target?.trim()) return resolve(target);
+  return defaultResumeTarget();
+}
+
+function defaultFreshTarget(): string {
+  const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[:]/g, '-');
+  const source = basename(gitTopLevelSync() ?? process.cwd()) || 'workspace';
+  const slug = source.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return resolve(WORKSPACE_ROOT, `${stamp}-${slug}-${suffix}`);
+}
+
+function defaultResumeTarget(): string {
+  const current = defaultCurrentTarget();
+  if (hasThinklessRun(current)) return current;
+  return latestThinklessWorkspace() ?? current;
+}
+
+function defaultCurrentTarget(): string {
+  return resolve(gitTopLevelSync() ?? process.cwd());
+}
+
+function latestThinklessWorkspace(): string | null {
+  try {
+    const candidates = readdirSync(WORKSPACE_ROOT, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => resolve(WORKSPACE_ROOT, entry.name))
+      .filter(hasThinklessRun)
+      .map((target) => ({ target, mtimeMs: statSync(target).mtimeMs }))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return candidates[0]?.target ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function hasThinklessRun(target: string): boolean {
+  const paths = runPaths(resolve(target));
+  return existsSync(paths.goal) || existsSync(paths.checkpoint);
+}
+
+function gitTopLevelSync(): string | null {
+  try {
+    const output = execFileSync('git', ['-C', process.cwd(), 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    return output.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function renderTui(options: {
@@ -171,6 +269,7 @@ function renderTui(options: {
   mode?: ToolMode;
   lockMode?: 'auto' | 'manual';
   supervisor: boolean;
+  resumeOnOpen?: boolean;
   fullscreen: boolean;
   mouseReporting: boolean;
 }): void {
@@ -187,7 +286,8 @@ function renderTui(options: {
         maxIters: options.maxIters,
         resumeIteration: options.resumeIteration,
         mode: options.mode,
-        lockMode: options.lockMode
+        lockMode: options.lockMode,
+        resumeOnOpen: options.resumeOnOpen ?? false
       }}
       mouseReporting={options.mouseReporting}
     />

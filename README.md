@@ -125,6 +125,16 @@ Open or resume the local demo target in the Chat-first TUI:
 npm run dev
 ```
 
+After installing the `thinkless` binary, start a fresh Chat-first TUI workspace with:
+
+```bash
+thinkless
+```
+
+Bare `thinkless` does not attach to the current repository's old `GOAL.md` / `PLAN.md`. It starts from an empty workspace under `~/thinkless-workspaces`, so typing the first concrete goal creates a new `GOAL.md`, `PLAN.md`, `.opt/`, and `.wici/` there. Pass `--target /path/to/new-workspace` only when you want to choose the fresh workspace path yourself.
+
+To continue an existing run, use `thinkless resume` or type `/resume` while viewing that run in the TUI.
+
 Use `npx tsx src/cli.tsx demo --fresh` when you intentionally want to reset the demo target.
 
 Run headlessly over a target:
@@ -352,18 +362,20 @@ npx tsx src/cli.tsx tui \
 
 ## Resume Or Re-Run
 
-To continue an existing goal, point WiCi at the same target without a new `--goal`. WiCi reads the existing `GOAL.md`, `PLAN.md`, `.wici/checkpoint.json`, `events.jsonl`, and `ledger.jsonl`, then resumes from the recorded state:
+To continue an existing goal, use the explicit resume command without a new `--goal`. WiCi reads the existing `GOAL.md`, `PLAN.md`, `.wici/checkpoint.json`, `events.jsonl`, and `ledger.jsonl`, then resumes from the recorded state:
+
+```bash
+thinkless resume --target /workspace/target-repo --mode real
+```
+
+Without `--target`, `thinkless resume` first checks the current git repository for an existing Thinkless run, then falls back to the latest run under `~/thinkless-workspaces`.
+
+If you are already viewing a run in the TUI, type `/resume` in the bottom Chat input to continue it. If the current TUI is a fresh empty workspace, `/resume` prints the resume command to use instead of treating the message as a goal.
+
+Headless continuation remains available, but it is intentionally explicit about the target:
 
 ```bash
 npx tsx src/cli.tsx run \
-  --target /workspace/target-repo \
-  --mode real
-```
-
-Use the same target in the TUI to inspect the blackboard and continue steering through Chat:
-
-```bash
-npx tsx src/cli.tsx tui \
   --target /workspace/target-repo \
   --mode real
 ```
