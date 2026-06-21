@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     readFile('PLAN.md', 'utf8'),
     readFile('Simplified_PLAN.md', 'utf8'),
     readFile('docs/v1-completion-audit.md', 'utf8'),
-    readFile('docs/docs/index.md', 'utf8'),
+    readFile('docs/index.md', 'utf8'),
     readFile('src/supervisor/index.ts', 'utf8'),
     readFile('src/supervisor/planner.ts', 'utf8'),
     readFile('prompts/planner.md', 'utf8'),

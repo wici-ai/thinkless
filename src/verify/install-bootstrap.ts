@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   const bootstrap = await readFile('scripts/bootstrap-macos.sh', 'utf8');
   const postinstall = await readFile('scripts/postinstall.mjs', 'utf8');
   const publicInstaller = await readFile('scripts/install.sh', 'utf8');
-  const docsInstaller = await readFile('docs/docs/install.sh', 'utf8');
+  const docsInstaller = await readFile('docs/install.sh', 'utf8');
   const publicReleaseWorkflow = await readFile('.github/workflows/public-release.yml', 'utf8');
   const oldReleaseRepoName = ['thinkless', 'releases'].join('-');
   const oldDevRepoName = ['thinkless', 'dev'].join('-');
