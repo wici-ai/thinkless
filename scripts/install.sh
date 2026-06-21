@@ -155,6 +155,16 @@ verify_required_commands() {
   echo "thinkless install: verified thinkless, codex, claude, and gh on PATH"
 }
 
+print_path_activation_note() {
+  local bin
+  bin="$(npm_global_bin 2>/dev/null || true)"
+  if [[ "$(uname -s)" == "Darwin" && -n "$bin" ]]; then
+    echo "thinkless install: PATH updates were written to ~/.zprofile and ~/.zshrc for new zsh sessions."
+    echo "thinkless install: open a new terminal, or update this terminal now with:"
+    echo "  export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\""
+  fi
+}
+
 auth_onboarding_enabled() {
   case "${THINKLESS_AUTH_ONBOARDING:-1}" in
     0|false|FALSE|False|no|NO|No) return 1 ;;
@@ -169,7 +179,10 @@ prompt_yes_no() {
   local prompt="$1"
   local answer
   printf "%s [Y/n] " "$prompt" > /dev/tty
-  IFS= read -r answer < /dev/tty || return 1
+  if ! IFS= read -r answer < /dev/tty 2>/dev/null; then
+    echo "thinkless install: could not read from /dev/tty; auth onboarding requires an interactive terminal." >&2
+    return 2
+  fi
   case "$answer" in
     ""|y|Y|yes|YES|Yes) return 0 ;;
     *) return 1 ;;
@@ -181,11 +194,11 @@ run_tty() {
 }
 
 codex_auth_ready() {
-  [[ -f "$HOME/.codex/auth.json" ]] || codex doctor >/dev/null 2>&1
+  [[ -f "$HOME/.codex/auth.json" || -n "${OPENAI_API_KEY:-}" ]]
 }
 
 claude_auth_ready() {
-  [[ -f "$HOME/.claude/.credentials.json" ]] || [[ -f "$HOME/.claude.json" ]]
+  [[ -f "$HOME/.claude/.credentials.json" || -f "$HOME/.claude.json" || -n "${ANTHROPIC_API_KEY:-}" ]]
 }
 
 github_auth_ready() {
@@ -201,28 +214,44 @@ codex_auth_command() {
 }
 
 run_auth_onboarding() {
+  THINKLESS_AUTH_PENDING=0
   if codex_auth_ready && claude_auth_ready && github_auth_ready; then
     echo "thinkless install: Codex, Claude, and GitHub CLI auth already look configured"
     return
   fi
   if ! auth_onboarding_enabled; then
     echo "thinkless install: auth onboarding skipped. To finish setup, run: codex, gh auth login, claude"
+    THINKLESS_AUTH_PENDING=1
     return
   fi
   echo "thinkless install: starting Codex, Claude, and GitHub CLI auth onboarding"
-  if ! codex_auth_ready && prompt_yes_no "Sign in to Codex now?"; then
+  if ! codex_auth_ready; then
     local codex_cmd
     codex_cmd="$(codex_auth_command)"
-    run_tty "$codex_cmd" || echo "thinkless install: Codex auth command did not complete successfully; run '$codex_cmd' later." >&2
+    if prompt_yes_no "Sign in to Codex now?"; then
+      run_tty "$codex_cmd" || echo "thinkless install: Codex auth command did not complete successfully; run '$codex_cmd' later." >&2
+    fi
   fi
-  if ! github_auth_ready && prompt_yes_no "Sign in to GitHub CLI now?"; then
-    run_tty "gh auth login" || echo "thinkless install: GitHub CLI auth did not complete successfully; run 'gh auth login' later." >&2
+  if ! github_auth_ready; then
+    if prompt_yes_no "Sign in to GitHub CLI now?"; then
+      run_tty "gh auth login" || echo "thinkless install: GitHub CLI auth did not complete successfully; run 'gh auth login' later." >&2
+    fi
   fi
   if ! claude_auth_ready; then
     echo "thinkless install: Claude opens an interactive session; exit with /exit or Ctrl-D after login." > /dev/tty
     if prompt_yes_no "Sign in to Claude Code now?"; then
       run_tty "claude" || echo "thinkless install: Claude auth command did not complete successfully; run 'claude' later." >&2
     fi
+  fi
+  local pending=()
+  codex_auth_ready || pending+=("Codex")
+  github_auth_ready || pending+=("GitHub CLI")
+  claude_auth_ready || pending+=("Claude")
+  if [[ "${#pending[@]}" -gt 0 ]]; then
+    THINKLESS_AUTH_PENDING=1
+    echo "thinkless install: auth still pending for: ${pending[*]}. Finish setup with: codex, gh auth login, claude"
+  else
+    echo "thinkless install: Codex, Claude, and GitHub CLI auth are ready"
   fi
 }
 
@@ -265,5 +294,10 @@ if ! npm install -g --foreground-scripts --ignore-scripts=false "$pkg"; then
   exit 1
 fi
 verify_required_commands
+print_path_activation_note
 run_auth_onboarding
-echo "thinkless install: complete. Run 'thinkless doctor --deep' after Codex, Claude, and GitHub CLI auth are ready."
+if [[ "${THINKLESS_AUTH_PENDING:-0}" == "1" ]]; then
+  echo "thinkless install: installed; auth is pending. Run 'thinkless doctor --deep' after Codex, Claude, and GitHub CLI auth are ready."
+else
+  echo "thinkless install: complete. Run 'thinkless doctor --deep' to verify the full setup."
+fi

@@ -161,8 +161,10 @@ async function main(): Promise<void> {
       readme.includes('~/.zshrc') &&
       readme.includes('`thinkless`, `codex`, `claude`, and `gh`') &&
       readme.includes('clean zsh login and interactive shells') &&
+      readme.includes('open a new terminal') &&
       readme.includes('auth onboarding flow') &&
-      readme.includes('THINKLESS_AUTH_ONBOARDING=0'),
+      readme.includes('THINKLESS_AUTH_ONBOARDING=0') &&
+      readme.includes('auth is pending'),
     'README should document public one-line install, automatic macOS install-time bootstrap, and the no-npm bootstrap path'
   );
   assert(
