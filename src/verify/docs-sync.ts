@@ -8,6 +8,7 @@ async function main(): Promise<void> {
     plan,
     simplifiedPlan,
     completionAudit,
+    installPage,
     supervisorIndex,
     plannerSource,
     plannerPrompt,
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
     readFile('PLAN.md', 'utf8'),
     readFile('Simplified_PLAN.md', 'utf8'),
     readFile('docs/v1-completion-audit.md', 'utf8'),
+    readFile('docs/index.md', 'utf8'),
     readFile('src/supervisor/index.ts', 'utf8'),
     readFile('src/supervisor/planner.ts', 'utf8'),
     readFile('prompts/planner.md', 'utf8'),
@@ -192,6 +194,13 @@ async function main(): Promise<void> {
     readme.includes('Codex `doctor` reachability failures are recorded as diagnostics') &&
       readme.includes('not a hard real-mode start gate'),
     'README should document advisory Codex doctor diagnostics'
+  );
+  assert(
+    installPage.includes('curl -fsSL https://wiseide.ai/docs/install.sh | bash') &&
+      installPage.includes('navigator.clipboard.writeText') &&
+      installPage.includes('thinking effort') &&
+      installPage.includes('thinkless doctor --deep'),
+    'docs install page should expose the public one-line installer, copy button, purpose, and verification command'
   );
   assert(
     readme.includes('Do not pass the canary as `--goal`; the release proof is the Chat-first path.'),

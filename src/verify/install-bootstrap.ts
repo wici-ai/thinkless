@@ -76,6 +76,7 @@ async function main(): Promise<void> {
   const bootstrap = await readFile('scripts/bootstrap-macos.sh', 'utf8');
   const postinstall = await readFile('scripts/postinstall.mjs', 'utf8');
   const publicInstaller = await readFile('scripts/install.sh', 'utf8');
+  const docsInstaller = await readFile('docs/install.sh', 'utf8');
   const publicReleaseWorkflow = await readFile('.github/workflows/public-release.yml', 'utf8');
   const oldReleaseRepoName = ['thinkless', 'releases'].join('-');
   const oldDevRepoName = ['thinkless', 'dev'].join('-');
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
   assert(publicInstaller.includes('auth onboarding status') && publicInstaller.includes('setup command: gh auth login') && publicInstaller.includes('auth onboarding skipped') && publicInstaller.includes('THINKLESS_AUTH_PENDING=1') && publicInstaller.includes('auth is pending') && publicInstaller.includes('OPENAI_API_KEY') && publicInstaller.includes('ANTHROPIC_API_KEY'), 'public installer must distinguish installed commands from pending auth and print setup commands');
   assert(publicInstaller.includes('require_sudo_access') && publicInstaller.includes('npm global install failed') && !publicInstaller.includes(forbiddenSudoNpm), 'public installer must verify sudo without running npm under elevated privileges');
   assert(publicInstaller.includes('https://github.com/wici-ai/thinkless/releases/latest/download'), 'public installer must default to the public thinkless release repo');
+  assert(docsInstaller === publicInstaller, 'GitHub Pages docs/install.sh must stay identical to the public installer script');
   assert(publicReleaseWorkflow.includes('workflow_dispatch:'), 'public release workflow must be manually triggered');
   assert(!publicReleaseWorkflow.includes('push:') && !publicReleaseWorkflow.includes('pull_request:'), 'public release workflow must not run on pushes or pull requests');
   assert(publicReleaseWorkflow.includes('permissions:') && publicReleaseWorkflow.includes('contents: write'), 'public release workflow must be able to publish releases in this repo');
