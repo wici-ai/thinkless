@@ -196,7 +196,7 @@ async function main(): Promise<void> {
     'README should document advisory Codex doctor diagnostics'
   );
   assert(
-    installPage.includes('curl -fsSL https://wiseide.ai/docs/install.sh | bash') &&
+    installPage.includes('curl -fsSL https://wici.ai/thinkless/install.sh | bash') &&
       installPage.includes('navigator.clipboard.writeText') &&
       installPage.includes('thinking effort') &&
       installPage.includes('thinkless doctor --deep'),
