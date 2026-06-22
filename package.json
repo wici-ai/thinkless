@@ -101,7 +101,8 @@
     "verify:install-clean-env": "tsx src/verify/install-clean-env.ts",
     "verify:docs-sync": "tsx src/verify/docs-sync.ts",
     "verify:limit-artifact": "tsx src/verify/limit-artifact.ts",
-    "verify:no-secrets": "tsx src/verify/no-secrets.ts"
+    "verify:no-secrets": "tsx src/verify/no-secrets.ts",
+    "verify:tui-resume-cross-target": "tsx src/verify/tui-resume-cross-target.ts"
   },
   "dependencies": {
     "@inkjs/ui": "^2.0.0",

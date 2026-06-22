@@ -43,6 +43,7 @@ npm run verify:tui-chat-intake
 npm run verify:resume-selector
 npm run verify:tui-resume-selector-pty
 npm run verify:tui-resume-selector-built
+npm run verify:tui-resume-cross-target
 npm run verify:resume-rerunnable
 npm run verify:tui-chat-pty
 npm run verify:tui-real-fake-chat
@@ -405,7 +406,7 @@ Without `--target`, `thinkless resume` first checks the current git repository f
 
 If you are already in the TUI, type `/resume` in the bottom Chat input to open an in-TUI selector. The selector lists the current target, numbered `.thinklessN` sessions, compatible legacy `.wici` runs, and recent Thinkless workspaces. Use up/down to choose a run, Enter to launch a runnable candidate, or Escape to cancel. Each row shows whether the candidate is runnable or blocked, the supervisor state, the selected session directory when relevant, and a short reason. A candidate is runnable only when Thinkless can restore the selected full context or intentionally rerun an interrupted planner/executor path from durable `GOAL.md`, `PLAN.md`, checkpoint, ledger, and session state. Blocked read-only states, such as chat-only history or a pending planner clarification without a stored planner session, are visible but cannot be launched as resume.
 
-`npm run verify:resume-selector` covers catalog discovery and preflight labels, `npm run verify:tui-resume-selector-pty` covers the real PTY `/resume` selector flow, `npm run verify:tui-resume-selector-built` covers the same Chat `/resume` selector through the built CLI entrypoint, and `npm run verify:resume-rerunnable` covers blocked planner and executor rerun/fallback events (`RESUME_CONTEXT_VALIDATED`, `RESUME_CONTEXT_BLOCKED`, and `EXECUTOR_RESUME_FALLBACK`).
+`npm run verify:resume-selector` covers catalog discovery and preflight labels, `npm run verify:tui-resume-selector-pty` covers the real PTY `/resume` selector flow, `npm run verify:tui-resume-selector-built` covers the same Chat `/resume` selector through the built CLI entrypoint, `npm run verify:tui-resume-cross-target` covers selecting a historical workspace run without leaking current-target events, and `npm run verify:resume-rerunnable` covers blocked planner and executor rerun/fallback events (`RESUME_CONTEXT_VALIDATED`, `RESUME_CONTEXT_BLOCKED`, and `EXECUTOR_RESUME_FALLBACK`).
 
 Headless continuation remains available, but it is intentionally explicit about the target:
 
