@@ -872,18 +872,12 @@ async function runDirectPlanExecution(
     const plan = await readPlan(paths);
     const step = nextExecutableStep(plan);
     if (!step) {
-      checkpoint = {
-        ...checkpoint,
-        supervisor_state: 'STOP',
-        next_step: null,
-        ledger_seq: await lineCount(paths.ledger),
-        events_seq: events.seq,
-        plan_hash: await hashFile(paths.plan)
-      };
-      await saveCheckpoint(paths, checkpoint);
-      await writeOutbox(paths, { kind: 'info', text: 'PLAN.md has no pending executable steps.' });
-      await events.emit('STOP', 'PLAN.md has no pending executable steps.');
-      return { state: 'STOP', reason: 'PLAN.md complete', iter: checkpoint.iter };
+      const continuation = await continueDirectExhaustedPlan(paths, goal, checkpoint, config, events, plan);
+      goal = continuation.goal;
+      checkpoint = continuation.checkpoint;
+      if (continuation.stop) return continuation.stop;
+      if (continuation.continued) continue;
+      throw new Error('Planner continuation returned without a next executable step or stop decision');
     }
 
     const nextIter = checkpoint.iter + 1;
@@ -1128,6 +1122,134 @@ async function runDirectPlanExecution(
   return { state: 'STOP', reason, iter: checkpoint.iter };
 }
 
+async function continueDirectExhaustedPlan(
+  paths: ReturnType<typeof runPaths>,
+  goal: GoalFile,
+  checkpoint: Checkpoint,
+  config: WiCiConfig,
+  events: EventWriter,
+  plan: string
+): Promise<{ goal: GoalFile; checkpoint: Checkpoint; continued: boolean; stop?: SupervisorResult }> {
+  await events.emit('PLAN_EXHAUSTED', 'PLAN.md has no pending executable steps; asking planner for the next concrete step.', {
+    iter: checkpoint.iter,
+    mode: 'direct'
+  });
+  checkpoint = {
+    ...checkpoint,
+    supervisor_state: 'PLAN',
+    next_step: null,
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq,
+    plan_hash: await hashFile(paths.plan)
+  };
+  await saveCheckpoint(paths, checkpoint);
+
+  const steerText = await buildDirectPlanContinuationSteerText(paths, goal, plan);
+  const diff = await runPlanDiff(
+    paths,
+    goal,
+    checkpoint.sessions.planner,
+    steerText,
+    config,
+    (progress) => emitPlannerUsage(events, progress, { phase: 'direct_plan_continuation' }),
+    (retry) => emitPlannerRetry(events, retry, { phase: 'direct_plan_continuation' })
+  );
+  const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
+  if (waitingForPlanner) {
+    return { goal, checkpoint, continued: false, stop: { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter } };
+  }
+  if (!diff.ok) {
+    const reason = `Planner could not derive a next executable step after PLAN.md was exhausted: ${diff.error ?? 'unknown planner failure'}`;
+    checkpoint = {
+      ...checkpoint,
+      supervisor_state: 'FAILED',
+      sessions: {
+        ...checkpoint.sessions,
+        planner: diff.sessionId ?? checkpoint.sessions.planner
+      },
+      ledger_seq: await lineCount(paths.ledger),
+      events_seq: events.seq,
+      plan_hash: await hashFile(paths.plan)
+    };
+    await saveCheckpoint(paths, checkpoint);
+    await writeOutbox(paths, { kind: 'info', text: reason });
+    await events.emit('FAILED', reason, { mode: 'direct' }, 'warn');
+    return { goal, checkpoint, continued: false, stop: { state: 'FAILED', reason, iter: checkpoint.iter } };
+  }
+
+  const updatedPlan = await readPlan(paths);
+  const nextStep = nextExecutableStep(updatedPlan);
+  checkpoint = {
+    ...checkpoint,
+    sessions: {
+      ...checkpoint.sessions,
+      planner: diff.sessionId ?? checkpoint.sessions.planner
+    },
+    supervisor_state: nextStep ? 'EXECUTE' : 'FAILED',
+    next_step: nextStep?.id ?? null,
+    plan_hash: await hashFile(paths.plan),
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq
+  };
+  await saveCheckpoint(paths, checkpoint);
+  if (await hasChanges(paths)) {
+    const commit = await commitAll(paths, `chore: extend WiCi direct plan after exhaustion iter ${checkpoint.iter}`);
+    await events.emit('GIT_COMMIT', `Created exhausted-plan continuation checkpoint ${commit.slice(0, 7)}`, {
+      commit,
+      iter: checkpoint.iter,
+      mode: 'direct_plan_continuation'
+    });
+    await tagBest(paths);
+  }
+  if (!nextStep) {
+    const reason = 'Planner continuation completed but PLAN.md still has no pending executable step; treating this as concrete blocked evidence.';
+    await writeOutbox(paths, { kind: 'info', text: reason });
+    await events.emit('FAILED', reason, { mode: 'direct' }, 'warn');
+    return { goal, checkpoint, continued: false, stop: { state: 'FAILED', reason, iter: checkpoint.iter } };
+  }
+
+  await events.emit('PLAN_CONTINUATION_APPLIED', `Planner added or activated ${nextStep.id} after PLAN.md was exhausted`, {
+    step: nextStep,
+    mode: 'direct'
+  });
+  return { goal, checkpoint, continued: true };
+}
+
+async function buildDirectPlanContinuationSteerText(paths: ReturnType<typeof runPaths>, goal: GoalFile, plan: string): Promise<string> {
+  const ledger = await readLedger(paths);
+  const recentLedger = ledger.slice(-5).map((entry) => ({
+    iter: entry.iter,
+    step_id: entry.step_id,
+    status: entry.status,
+    step_done: entry.guards.step_done,
+    tests_pass: entry.guards.tests_pass,
+    reflection: entry.reflection
+  }));
+  const contextText = await readContextForPrompt(paths);
+  return [
+    'The direct executor exhausted the current PLAN.md: there are no pending or active executable steps, but the user has not explicitly stopped the run.',
+    'Do not mark the overall run complete solely because the current plan is exhausted.',
+    'Read GOAL.md, PLAN.md, the recent ledger/context below, and derive the next concrete high-value executable step that advances the active goal.',
+    'Append or update PLAN.md with that next step and leave it pending. Keep prior completed steps intact.',
+    'Only produce no executable step if the goal is concretely blocked and PLAN.md should explain the blocker.',
+    '',
+    `Active requirement summary: ${requirementText(goal) || 'see GOAL.md'}`,
+    '',
+    `Current PLAN.md:\n${plan}`,
+    '',
+    `Recent ledger rows:\n${JSON.stringify(recentLedger, null, 2)}`,
+    '',
+    `Context:\n${contextText}`
+  ].join('\n');
+}
+
+function requirementText(goal: GoalFile): string {
+  return goal.requirements
+    .filter((req) => req.status === 'active')
+    .map((req) => req.text)
+    .join(' ');
+}
+
 async function applyDirectPendingInjections(
   paths: ReturnType<typeof runPaths>,
   goal: GoalFile,
@@ -1237,14 +1359,35 @@ async function runDirectExecutorWithHotReload(input: {
   let goal = input.goal;
   let checkpoint = input.checkpoint;
   let steerText = input.steerText;
+  let lastExecutorSessionWriteAt = 0;
   const controller = await startExecutorStep(input.paths, goal, input.stepId, input.iter, input.config, checkpoint, steerText, input.contextText, {
     onProgress: async (progress) => {
+      const now = Date.now();
       await input.events.emit('EXECUTE_PROGRESS', formatExecutorProgress(progress), {
         iter: input.iter,
         step_id: input.stepId,
         mode: 'direct',
         progress
       });
+      if (checkpoint.sessions.executorApp && now - lastExecutorSessionWriteAt > 5_000) {
+        lastExecutorSessionWriteAt = now;
+        checkpoint = {
+          ...checkpoint,
+          updated_at: new Date(now).toISOString(),
+          sessions: {
+            ...checkpoint.sessions,
+            executorApp: {
+              ...checkpoint.sessions.executorApp,
+              workspace: input.paths.target,
+              lastActivityAt: new Date(now).toISOString(),
+              updatedAt: new Date(now).toISOString(),
+              phase: 'running',
+              lastEventType: progress.eventType
+            }
+          }
+        };
+        await saveCheckpoint(input.paths, checkpoint);
+      }
     },
     shouldPreempt: () => hasPendingChatInput(input.paths, checkpoint)
   });
@@ -1252,12 +1395,16 @@ async function runDirectExecutorWithHotReload(input: {
   if (controller.backend === 'app-server' && controller.threadId) {
     checkpoint = {
       ...checkpoint,
+      updated_at: new Date().toISOString(),
       sessions: {
         ...checkpoint.sessions,
         executorApp: {
           threadId: controller.threadId,
           activeTurnId: controller.turnId,
-          updatedAt: new Date().toISOString()
+          workspace: input.paths.target,
+          updatedAt: new Date().toISOString(),
+          lastActivityAt: new Date().toISOString(),
+          phase: 'running'
         }
       }
     };
@@ -1283,7 +1430,10 @@ async function runDirectExecutorWithHotReload(input: {
       const executorApp = controller.threadId
         ? {
             threadId: controller.threadId,
-            updatedAt: new Date().toISOString()
+            workspace: input.paths.target,
+            lastActivityAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            phase: 'idle' as const
           }
         : undefined;
       return { goal, checkpoint, steerText, result: outcome.result, executorApp };

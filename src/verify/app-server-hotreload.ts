@@ -31,6 +31,7 @@ async function main(): Promise<void> {
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
         WICI_FAKE_TARGET: target,
+        WICI_FAKE_STATE_DIR: paths.wici,
         WICI_CODEX_EXECUTOR_BACKEND: 'app-server'
       },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -167,7 +168,7 @@ if (args[0] !== 'app-server') {
 }
 
 const target = process.env.WICI_FAKE_TARGET;
-const wici = join(target, '.wici');
+const wici = process.env.WICI_FAKE_STATE_DIR ?? join(target, '.thinkless');
 mkdirSync(join(wici, 'artifacts'), { recursive: true });
 const log = join(wici, 'fake-app-server-rpc.jsonl');
 const rl = createInterface({ input: process.stdin });

@@ -6,6 +6,7 @@ import { atomicWriteFile, atomicWriteJson, exists, makeReadOnly, makeWritable } 
 import { commandExists } from '../shared/commands.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { EvalSha256, GoalFile, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
+import { runtimeAgentFromCommand } from '../shared/runtime.js';
 import { applyPlanDiff } from './plan.js';
 import { type PlannerBenchmark, writeBenchmarkManifest } from './benchmark.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
@@ -89,15 +90,21 @@ export async function runInitialPlanner(
   resume?: PlannerClarificationResume
 ): Promise<PlannerInvocationResult> {
   const available = await commandExists(config.tools.planner.command);
-  if (config.tools.mode === 'real' && !available) {
-    throw new Error(`Planner command not found in real mode: ${config.tools.planner.command}`);
-  }
-
-  if (config.tools.mode !== 'stub' && available) {
+  const plannerAgent = runtimeAgentFromCommand(config.tools.planner.command, 'codex');
+  if (config.tools.mode !== 'stub') {
+    const systemPrompt = await readFile(promptPath('planner'), 'utf8');
+    const safetyText = formatSafetyForPrompt(config);
+    const goalText = await readPlannerGoalText(paths, goal);
+    if (plannerAgent === 'codex' && available) {
+      try {
+        const result = await runCodexInitialPlanner(paths, goalText, config, systemPrompt, safetyText, resume);
+        if (result) return result;
+      } catch (error) {
+        if (config.tools.mode === 'real') throw error;
+      }
+    }
     try {
-      const systemPrompt = await readFile(promptPath('planner'), 'utf8');
-      const safetyText = formatSafetyForPrompt(config);
-      const goalText = await readPlannerGoalText(paths, goal);
+      if (!available) throw new Error(`Planner command not found: ${config.tools.planner.command}`);
       const args =
         resume?.sessionId
           ? buildInitialPlannerResumeArgs({
@@ -140,6 +147,10 @@ export async function runInitialPlanner(
       await materializePlannerOutput(paths, response.output);
       return { ok: true, sessionId: response.output.session_id, stdout: result.all ?? result.stdout };
     } catch (error) {
+      const fallback = plannerAgent === 'claude'
+        ? await runCodexInitialPlanner(paths, goalText, config, systemPrompt, safetyText, resume, error)
+        : null;
+      if (fallback) return fallback;
       if (config.tools.mode === 'real') throw error;
     }
   }
@@ -158,19 +169,24 @@ export async function runPlanDiff(
   onRetry?: (retry: PlannerRetryProgress) => Promise<void>
 ): Promise<PlannerInvocationResult> {
   const available = await commandExists(config.tools.planner.command);
-  if (config.tools.mode === 'real' && !available) {
-    throw new Error(`Planner command not found in real mode: ${config.tools.planner.command}`);
-  }
-  if (config.tools.mode === 'real' && (!plannerSessionId || plannerSessionId === 'stub-planner')) {
-    throw new Error('Planner resume session is required in real mode for plan diffs');
-  }
+  const plannerAgent = runtimeAgentFromCommand(config.tools.planner.command, 'codex');
 
-  if (config.tools.mode !== 'stub' && plannerSessionId && plannerSessionId !== 'stub-planner' && available) {
+  if (config.tools.mode !== 'stub') {
+    const systemPrompt = await readFile(promptPath('planner-diff'), 'utf8');
+    const plan = await readFile(paths.plan, 'utf8');
+    const safetyText = formatSafetyForPrompt(config);
+    const goalText = await readPlannerGoalText(paths, goal);
+    if (plannerAgent === 'codex' && available) {
+      try {
+        const result = await runCodexPlanDiff(paths, goalText, plan, newText, plannerSessionId, config, systemPrompt, safetyText);
+        if (result) return result;
+      } catch (error) {
+        if (config.tools.mode === 'real') throw error;
+      }
+    }
     try {
-      const systemPrompt = await readFile(promptPath('planner-diff'), 'utf8');
-      const plan = await readFile(paths.plan, 'utf8');
-      const safetyText = formatSafetyForPrompt(config);
-      const goalText = await readPlannerGoalText(paths, goal);
+      if (!plannerSessionId || plannerSessionId === 'stub-planner') throw new Error('Planner resume session is required for Claude plan diffs');
+      if (!available) throw new Error(`Planner command not found: ${config.tools.planner.command}`);
       const result = await runPlannerProcess(
         config.tools.planner.command,
         buildPlanDiffArgs({
@@ -199,6 +215,10 @@ export async function runPlanDiff(
       await materializePlannerOutput(paths, response.output);
       return { ok: true, sessionId: plannerSessionId, stdout: result.all ?? result.stdout };
     } catch (error) {
+      const fallback = plannerAgent === 'claude'
+        ? await runCodexPlanDiff(paths, goalText, plan, newText, undefined, config, systemPrompt, safetyText, error)
+        : null;
+      if (fallback) return fallback;
       if (config.tools.mode === 'real') throw error;
     }
   }
@@ -268,6 +288,57 @@ function plannerModelArgs(model: string | undefined): string[] {
   return ['--model', normalized];
 }
 
+export function buildCodexPlannerArgs(input: {
+  target: string;
+  prompt: string;
+  outputLastMessage: string;
+  model?: string;
+  effort?: string;
+  resumeSessionId?: string;
+}): string[] {
+  if (input.resumeSessionId) {
+    return [
+      'exec',
+      'resume',
+      ...codexModelArgs(input.model),
+      ...codexEffortArgs(input.effort),
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--json',
+      '--output-last-message',
+      input.outputLastMessage,
+      '--skip-git-repo-check',
+      input.resumeSessionId,
+      input.prompt
+    ];
+  }
+  return [
+    'exec',
+    ...codexModelArgs(input.model),
+    ...codexEffortArgs(input.effort),
+    '--sandbox',
+    'danger-full-access',
+    '--json',
+    '--output-last-message',
+    input.outputLastMessage,
+    '-C',
+    input.target,
+    '--skip-git-repo-check',
+    input.prompt
+  ];
+}
+
+function codexModelArgs(model: string | undefined): string[] {
+  const normalized = model?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['--model', normalized];
+}
+
+function codexEffortArgs(effort: string | undefined): string[] {
+  const normalized = effort?.trim();
+  if (!normalized || normalized === 'default') return [];
+  return ['-c', `model_reasoning_effort=${JSON.stringify(normalized)}`];
+}
+
 export function buildPlanDiffArgs(input: {
   newText: string;
   currentPlan: string;
@@ -303,6 +374,201 @@ function appendClarificationAnswer(goalText: string, resume: PlannerClarificatio
 async function persistPlannerRaw(paths: RunPaths, label: string, result: { stdout: string; all: string }): Promise<void> {
   await atomicWriteFile(join(paths.artifacts, `planner-${label}.stdout.jsonl`), result.stdout);
   await atomicWriteFile(join(paths.artifacts, `planner-${label}.all.log`), result.all);
+}
+
+async function readTextIfExists(path: string): Promise<string> {
+  return (await exists(path)) ? readFile(path, 'utf8') : '';
+}
+
+async function runCodexInitialPlanner(
+  paths: RunPaths,
+  goalText: string,
+  config: WiCiConfig,
+  systemPrompt: string,
+  safetyText: string,
+  resume?: PlannerClarificationResume,
+  previousError?: unknown
+): Promise<PlannerInvocationResult | null> {
+  const command = 'codex';
+  if (!(await commandExists(command))) return null;
+  const label = resume ? 'initial-resume-codex' : 'initial-codex';
+  const prompt = buildCodexInitialPlannerPrompt({ goalText, systemPrompt, safetyText, resume, previousError });
+  const resumeSessionId = previousError ? undefined : resume?.sessionId;
+  return runCodexPlannerProcess(paths, command, label, prompt, {
+    model: codexPlannerModel(config),
+    effort: codexPlannerEffort(config),
+    sessionId: resumeSessionId && resumeSessionId !== 'stub-planner' ? resumeSessionId : undefined
+  });
+}
+
+async function runCodexPlanDiff(
+  paths: RunPaths,
+  goalText: string,
+  currentPlan: string,
+  newText: string,
+  plannerSessionId: string | undefined,
+  config: WiCiConfig,
+  systemPrompt: string,
+  safetyText: string,
+  previousError?: unknown
+): Promise<PlannerInvocationResult | null> {
+  const command = 'codex';
+  if (!(await commandExists(command))) return null;
+  const prompt = buildCodexPlanDiffPrompt({ goalText, currentPlan, newText, systemPrompt, safetyText, previousError });
+  return runCodexPlannerProcess(paths, command, `diff-codex-${Date.now()}`, prompt, {
+    model: codexPlannerModel(config),
+    effort: codexPlannerEffort(config),
+    sessionId: plannerSessionId && plannerSessionId !== 'stub-planner' ? plannerSessionId : undefined
+  });
+}
+
+async function runCodexPlannerProcess(
+  paths: RunPaths,
+  command: string,
+  label: string,
+  prompt: string,
+  runtime: { model?: string; effort?: string; sessionId?: string }
+): Promise<PlannerInvocationResult | null> {
+  const outputLastMessage = join(paths.artifacts, `${label}.last-message.md`);
+  const result = await runClaudeStreamProcess(
+    command,
+    buildCodexPlannerArgs({
+      target: paths.target,
+      prompt,
+      outputLastMessage,
+      model: runtime.model,
+      effort: runtime.effort,
+      resumeSessionId: runtime.sessionId
+    }),
+    {
+      cwd: paths.target,
+      idleTimeoutMs: PLANNER_IDLE_TIMEOUT_MS,
+      hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS
+    }
+  );
+  await persistPlannerRaw(paths, label, result);
+  if (result.timeoutReason || result.exitCode !== 0) {
+    if (result.timeoutReason) throw new Error(`Codex planner timed out (${result.timeoutReason})`);
+    throw new Error(`Codex planner exited with code ${result.exitCode ?? `signal ${result.signal}`}`);
+  }
+  const finalMessage = (await readTextIfExists(outputLastMessage)) || codexPlannerTextFromJsonLines(result.stdout);
+  const response = parseCodexPlannerResponse(finalMessage, extractCodexSessionId(result.stdout) ?? runtime.sessionId);
+  if (!response) throw new Error('Codex planner output did not contain markdown planner artifacts');
+  if (response.kind === 'question') {
+    return {
+      ok: false,
+      sessionId: response.question.session_id,
+      stdout: result.all ?? result.stdout,
+      error: 'Planner requested clarification',
+      needsInput: response.question
+    };
+  }
+  await materializePlannerOutput(paths, response.output);
+  return { ok: true, sessionId: response.output.session_id, stdout: result.all ?? result.stdout };
+}
+
+function buildCodexInitialPlannerPrompt(input: {
+  goalText: string;
+  systemPrompt: string;
+  safetyText: string;
+  resume?: PlannerClarificationResume;
+  previousError?: unknown;
+}): string {
+  const goalText = input.resume ? appendClarificationAnswer(input.goalText, input.resume) : input.goalText;
+  return [
+    appendSafety(input.systemPrompt, input.safetyText),
+    '',
+    'Run as the Thinkless planner through Codex. Return markdown planner artifacts exactly as the planner prompt requests.',
+    input.previousError ? `\nClaude planner was unavailable or failed; continue with Codex fallback. Failure: ${errorMessage(input.previousError)}` : '',
+    '',
+    `Plan for goal:\n${goalText}`
+  ].join('\n');
+}
+
+function buildCodexPlanDiffPrompt(input: {
+  goalText: string;
+  currentPlan: string;
+  newText: string;
+  systemPrompt: string;
+  safetyText: string;
+  previousError?: unknown;
+}): string {
+  return [
+    appendSafety(input.systemPrompt, input.safetyText),
+    '',
+    'Run as the Thinkless planner-diff agent through Codex. Return markdown planner artifacts exactly as the planner-diff prompt requests.',
+    input.previousError ? `\nClaude planner diff was unavailable or failed; continue with Codex fallback. Failure: ${errorMessage(input.previousError)}` : '',
+    '',
+    `New requirement: ${input.newText}`,
+    `\nCurrent GOAL.md:\n${input.goalText}`,
+    `\nCurrent PLAN.md:\n${input.currentPlan}`
+  ].join('\n');
+}
+
+function codexPlannerModel(config: WiCiConfig): string {
+  return config.tools.planner.model?.trim() || 'gpt-5.5';
+}
+
+function codexPlannerEffort(config: WiCiConfig): string {
+  return config.tools.planner.effort?.trim() || 'xhigh';
+}
+
+function parseCodexPlannerResponse(text: string, sessionId?: string): PlannerResponse | null {
+  const question = plannerMarkdownQuestionFromText(text, sessionId);
+  if (question) return { kind: 'question', question };
+  const output = plannerMarkdownOutputFromText(text, sessionId);
+  return output ? { kind: 'plan', output } : null;
+}
+
+function codexPlannerTextFromJsonLines(raw: string): string {
+  const lines = raw.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of [...lines].reverse()) {
+    const record = parseJsonRecord(line);
+    if (!record) continue;
+    const item = recordValue(recordValue(record.params)?.item) ?? recordValue(record.item) ?? record;
+    const text = stringValue(item.text) ?? stringValue(item.message) ?? stringValue(record.message);
+    if (text) return text;
+  }
+  return raw;
+}
+
+function extractCodexSessionId(raw: string): string | undefined {
+  for (const line of raw.split(/\r?\n/)) {
+    const record = parseJsonRecord(line.trim());
+    if (!record) continue;
+    const direct =
+      stringValue(record.session_id) ??
+      stringValue(record.sessionId) ??
+      stringValue(record.thread_id) ??
+      stringValue(record.threadId) ??
+      stringValue(record.conversation_id);
+    if (direct) return direct;
+    const params = recordValue(record.params);
+    const fromParams = stringValue(params?.threadId) ?? stringValue(params?.thread_id) ?? stringValue(recordValue(params?.thread)?.id);
+    if (fromParams) return fromParams;
+  }
+  return undefined;
+}
+
+function parseJsonRecord(line: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function runPlannerProcess(

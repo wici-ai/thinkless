@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { atomicWriteFile, atomicWriteJson, exists } from '../shared/atomic.js';
 import { commandExists, resolveCommandForSpawn } from '../shared/commands.js';
 import { schemaPath, type RunPaths } from '../shared/paths.js';
@@ -156,6 +156,9 @@ export async function startExecutorStep(
         checkpoint,
         prompt,
         artifactId,
+        idleTimeoutMs: options.idleTimeoutMs,
+        hardTimeoutMs: options.hardTimeoutMs,
+        heartbeatMs: options.heartbeatMs,
         onRawNotification: async (_line, usage, method) => {
           const now = Date.now();
           await options.onProgress?.({
@@ -222,6 +225,7 @@ async function buildExecutorPrompt(
 ): Promise<string> {
   const goalMarkdown = await readTextIfExists(paths.goalDoc);
   const planMarkdown = await readTextIfExists(paths.plan);
+  const stateDirName = basename(paths.wici);
   if (resume) {
     return [
       'Continue the existing Codex session for this WiCi run.',
@@ -236,7 +240,7 @@ async function buildExecutorPrompt(
       '',
       safetyText,
       memoryText ? memoryText : '',
-      `Write result JSON to .wici/artifacts/${artifactId}.json with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
+      `Write result JSON to ${stateDirName}/artifacts/${artifactId}.json with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
     ]
       .filter((item) => item !== '')
       .join('\n');
@@ -261,7 +265,7 @@ async function buildExecutorPrompt(
     '',
     safetyText,
     memoryText ? memoryText : '',
-    `Write result JSON to .wici/artifacts/${artifactId}.json with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
+    `Write result JSON to ${stateDirName}/artifacts/${artifactId}.json with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
   ]
     .filter((item) => item !== '')
     .join('\n');

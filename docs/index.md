@@ -217,7 +217,7 @@ body {
       <h1 id="install-title" class="install-title">Less thinking effort for AI software work.</h1>
       <p class="install-copy">Thinkless sets up the local tools, connects Codex, Claude Code, and GitHub CLI, then gives you one command to move from idea to working software.</p>
       <div class="command-panel" role="group" aria-label="Install command">
-        <pre class="command-line"><code id="install-command">curl -fsSL https://wici.ai/thinkless/install.sh | bash</code></pre>
+        <pre class="command-line"><code id="install-command">curl -fsSL https://wiseide.ai/docs/install.sh | bash</code></pre>
         <button class="copy-command" type="button" onclick="copyInstallCommand(this)" aria-label="Copy install command" title="Copy install command">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>

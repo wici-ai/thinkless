@@ -3,7 +3,7 @@ import React from 'react';
 import { render } from 'ink';
 import { Command } from 'commander';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync, writeSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -17,7 +17,7 @@ import { loadConfig } from './shared/config.js';
 import { runPaths, TOOL_ROOT } from './shared/paths.js';
 import { installCrashHandlers } from './shared/crashHandlers.js';
 import { previewRollback, rollbackTarget } from './supervisor/rollback.js';
-import { checkToolHealth, updateToolsBetweenRuns } from './supervisor/selfupdate.js';
+import { checkToolHealth, runThinklessStartupSelfUpdate, updateToolsBetweenRuns, type ThinklessSelfUpdateResult } from './supervisor/selfupdate.js';
 
 const program = new Command();
 const DEFAULT_DEMO_TARGET = 'fixture/demo-target';
@@ -65,7 +65,7 @@ program
 program
   .command('tui', { isDefault: true })
   .description('Open a fresh Chat-first TUI workspace')
-  .option('--target <path>', 'fresh target workspace (defaults to a new isolated workspace under ~/thinkless-workspaces)')
+  .option('--target <path>', 'target workspace (defaults to the current git repository, or a new isolated workspace outside git)')
   .option('--goal <text>', 'initial goal')
   .option('--max-iters <n>', 'max iterations', (value) => Number(value))
   .option('--resume-iteration <n>', 'load checkpoint snapshot for iteration N before running', parseNonNegativeInteger)
@@ -161,6 +161,8 @@ program
     console.log(JSON.stringify(result, null, 2));
   });
 
+await maybeRunThinklessStartupSelfUpdate();
+
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.stack ?? error.message : String(error));
   process.exitCode = 1;
@@ -187,6 +189,17 @@ function parseNonNegativeInteger(value: string): number {
   return parsed;
 }
 
+async function maybeRunThinklessStartupSelfUpdate(): Promise<void> {
+  const result: ThinklessSelfUpdateResult = await runThinklessStartupSelfUpdate().catch((error: unknown): ThinklessSelfUpdateResult => ({
+    checked: true,
+    action: 'failed-open',
+    error: error instanceof Error ? error.message : String(error)
+  }));
+  if (process.env.THINKLESS_SELF_UPDATE_VERBOSE !== '1') return;
+  const detail = result.error ? `: ${result.error}` : result.message ? `: ${result.message}` : '';
+  console.error(`thinkless self-update: ${result.action}${detail}`);
+}
+
 function launchTui(options: TuiCommandOptions): void {
   renderTui({
     target: options.target ? resolve(options.target) : resolveFreshTargetOption(undefined),
@@ -204,6 +217,8 @@ function launchTui(options: TuiCommandOptions): void {
 
 function resolveFreshTargetOption(target?: string): string {
   if (target?.trim()) return resolve(target);
+  const currentRepo = gitTopLevelSync();
+  if (currentRepo) return resolve(currentRepo);
   return defaultFreshTarget();
 }
 
@@ -223,6 +238,7 @@ function defaultFreshTarget(): string {
 function defaultResumeTarget(): string {
   const current = defaultCurrentTarget();
   if (hasThinklessRun(current)) return current;
+  if (migrateCompatibleWorkspaceRun(current)) return current;
   return latestThinklessWorkspace() ?? current;
 }
 
@@ -247,6 +263,74 @@ function latestThinklessWorkspace(): string | null {
 function hasThinklessRun(target: string): boolean {
   const paths = runPaths(resolve(target));
   return existsSync(paths.goal) || existsSync(paths.checkpoint);
+}
+
+function migrateCompatibleWorkspaceRun(current: string): string | null {
+  const source = latestWorkspaceForProject(current);
+  if (!source) return null;
+  const sourcePaths = runPaths(source);
+  const targetPaths = runPaths(current);
+  if (existsSync(targetPaths.goal) || existsSync(targetPaths.checkpoint)) return null;
+  mkdirSync(targetPaths.stateDir, { recursive: true });
+  cpSync(sourcePaths.wici, targetPaths.stateDir, { recursive: true, force: true });
+  copyIfPresent(join(source, 'GOAL.md'), join(current, 'GOAL.md'));
+  writeFileSync(
+    join(current, 'PLAN.md'),
+    [
+      '# Thinkless Execution Plan',
+      '',
+      `Goal: resume the migrated Thinkless run for ${basename(current)}`,
+      '',
+      '- [ ] S1 Replan and continue against the real target repository <!-- status:pending migrated-from-fixture:true -->',
+      `  - Finding: a legacy isolated workspace at ${source} contained Thinkless state for this project, but its completed PLAN.md came from synthetic fixture work and must not be treated as product completion.`,
+      '  - Action: inspect the real repository, replace fixture-only validation or implementation assumptions, and continue from the current GOAL.md against this workspace.',
+      '  - Validation: use the project-appropriate checks selected after inspecting the real repository.'
+    ].join('\n') + '\n'
+  );
+  copyIfPresent(join(source, 'ledger.jsonl'), join(current, 'ledger.jsonl'));
+  copyIfPresent(join(source, 'baseline.json'), join(current, 'baseline.json'));
+  resetMigratedCheckpoint(targetPaths.checkpoint, current, source);
+  return source;
+}
+
+function latestWorkspaceForProject(current: string): string | null {
+  const slug = basename(current).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!slug) return null;
+  try {
+    const candidates = readdirSync(WORKSPACE_ROOT, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.toLowerCase().includes(slug))
+      .map((entry) => resolve(WORKSPACE_ROOT, entry.name))
+      .filter(hasThinklessRun)
+      .map((target) => ({ target, mtimeMs: statSync(target).mtimeMs }))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return candidates[0]?.target ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function copyIfPresent(source: string, target: string): void {
+  if (!existsSync(source) || existsSync(target)) return;
+  copyFileSync(source, target);
+}
+
+function resetMigratedCheckpoint(checkpointPath: string, current: string, source: string): void {
+  if (!existsSync(checkpointPath)) return;
+  try {
+    const checkpoint = JSON.parse(readFileSync(checkpointPath, 'utf8')) as Record<string, unknown>;
+    const sessions = checkpoint.sessions && typeof checkpoint.sessions === 'object' ? checkpoint.sessions as Record<string, unknown> : {};
+    checkpoint.supervisor_state = 'PLAN';
+    checkpoint.next_step = null;
+    checkpoint.updated_at = new Date().toISOString();
+    checkpoint.sessions = {
+      ...sessions,
+      migratedFromWorkspace: source,
+      targetWorkspace: current
+    };
+    writeFileSync(checkpointPath, `${JSON.stringify(checkpoint, null, 2)}\n`);
+  } catch {
+    return;
+  }
 }
 
 function gitTopLevelSync(): string | null {

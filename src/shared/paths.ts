@@ -5,6 +5,8 @@ import { existsSync } from 'node:fs';
 import { atomicWriteFile, ensureDir, exists } from './atomic.js';
 
 const thisFile = fileURLToPath(import.meta.url);
+const THINKLESS_STATE_DIR = '.thinkless';
+const LEGACY_STATE_DIR = '.wici';
 
 export const SRC_ROOT = resolve(dirname(thisFile), '..');
 const candidateToolRoot = resolve(SRC_ROOT, '..');
@@ -12,6 +14,8 @@ export const TOOL_ROOT = existsSync(join(candidateToolRoot, 'package.json')) ? c
 
 export interface RunPaths {
   target: string;
+  stateDir: string;
+  legacyStateDir: string;
   wici: string;
   inbox: string;
   inboxDone: string;
@@ -53,29 +57,32 @@ export interface RunPaths {
 
 export function runPaths(target: string): RunPaths {
   const root = resolve(target);
-  const wici = join(root, '.wici');
+  const stateDir = resolveStateDir(root);
+  const legacyStateDir = join(root, LEGACY_STATE_DIR);
   const opt = join(root, '.opt');
   return {
     target: root,
-    wici,
-    inbox: join(wici, 'inbox'),
-    inboxDone: join(wici, 'inbox', 'done'),
-    urgentSentinel: join(wici, 'inbox', 'URGENT'),
-    outbox: join(wici, 'outbox'),
-    artifacts: join(wici, 'artifacts'),
-    checkpoints: join(wici, 'checkpoints'),
-    skills: join(wici, 'skills'),
-    curriculum: join(wici, 'curriculum.jsonl'),
-    events: join(wici, 'events.jsonl'),
-    supervisorLog: join(wici, 'supervisor.log'),
-    codexRun: join(wici, 'codex-run.jsonl'),
-    chat: join(wici, 'chat.jsonl'),
-    chatSession: join(wici, 'chat-session.json'),
-    runtimeSelection: join(wici, 'runtime-selection.json'),
-    goal: join(wici, 'goal.json'),
+    stateDir,
+    legacyStateDir,
+    wici: stateDir,
+    inbox: join(stateDir, 'inbox'),
+    inboxDone: join(stateDir, 'inbox', 'done'),
+    urgentSentinel: join(stateDir, 'inbox', 'URGENT'),
+    outbox: join(stateDir, 'outbox'),
+    artifacts: join(stateDir, 'artifacts'),
+    checkpoints: join(stateDir, 'checkpoints'),
+    skills: join(stateDir, 'skills'),
+    curriculum: join(stateDir, 'curriculum.jsonl'),
+    events: join(stateDir, 'events.jsonl'),
+    supervisorLog: join(stateDir, 'supervisor.log'),
+    codexRun: join(stateDir, 'codex-run.jsonl'),
+    chat: join(stateDir, 'chat.jsonl'),
+    chatSession: join(stateDir, 'chat-session.json'),
+    runtimeSelection: join(stateDir, 'runtime-selection.json'),
+    goal: join(stateDir, 'goal.json'),
     goalDoc: join(root, 'GOAL.md'),
-    checkpoint: join(wici, 'checkpoint.json'),
-    lock: join(wici, '.lock'),
+    checkpoint: join(stateDir, 'checkpoint.json'),
+    lock: join(stateDir, '.lock'),
     plan: join(root, 'PLAN.md'),
     acceptanceSpec: join(root, 'acceptance.spec.json'),
     opt,
@@ -88,13 +95,21 @@ export function runPaths(target: string): RunPaths {
     selftestBadPatch: join(opt, 'selftest-bad.patch'),
     baseline: join(root, 'baseline.json'),
     ledger: join(root, 'ledger.jsonl'),
-    lessons: join(wici, 'lessons.jsonl'),
-    skillsIndex: join(wici, 'skills.json'),
-    context: join(wici, 'context.md'),
-    goalInterrogations: join(wici, 'goal-interrogations.jsonl'),
-    archive: join(wici, 'archive.json'),
+    lessons: join(stateDir, 'lessons.jsonl'),
+    skillsIndex: join(stateDir, 'skills.json'),
+    context: join(stateDir, 'context.md'),
+    goalInterrogations: join(stateDir, 'goal-interrogations.jsonl'),
+    archive: join(stateDir, 'archive.json'),
     config: join(TOOL_ROOT, 'wici.config.json')
   };
+}
+
+function resolveStateDir(root: string): string {
+  const thinkless = join(root, THINKLESS_STATE_DIR);
+  if (existsSync(thinkless)) return thinkless;
+  const legacy = join(root, LEGACY_STATE_DIR);
+  if (existsSync(legacy)) return legacy;
+  return thinkless;
 }
 
 export async function ensureRunDirs(paths: RunPaths): Promise<void> {
@@ -115,14 +130,16 @@ export async function ensureTargetGitignore(paths: RunPaths): Promise<void> {
   if (!(await exists(gitDir))) return;
 
   const gitignore = join(paths.target, '.gitignore');
-  const line = '.wici/';
+  const lines = ['.thinkless/', '.wici/'];
   if (await exists(gitignore)) {
     const current = await readFile(gitignore, 'utf8');
-    if (current.split('\n').includes(line)) return;
+    const currentLines = new Set(current.split('\n'));
+    const missing = lines.filter((line) => !currentLines.has(line));
+    if (missing.length === 0) return;
     const suffix = current.endsWith('\n') || current.length === 0 ? '' : '\n';
-    await atomicWriteFile(gitignore, `${current}${suffix}${line}\n`);
+    await atomicWriteFile(gitignore, `${current}${suffix}${missing.join('\n')}\n`);
   } else {
-    await atomicWriteFile(gitignore, `${line}\n`);
+    await atomicWriteFile(gitignore, `${lines.join('\n')}\n`);
   }
 }
 
