@@ -203,7 +203,7 @@ async function maybeRunThinklessStartupSelfUpdate(): Promise<void> {
 
 function launchTui(options: TuiCommandOptions): void {
   const resolvedTarget = options.target ? resolve(options.target) : resolveFreshTargetOption(undefined);
-  const sessionDir = options.sessionDir ?? join(resolvedTarget, '.thinkless');
+  const sessionDir = options.sessionDir;
   if (sessionDir) process.env[THINKLESS_SESSION_DIR_ENV] = sessionDir;
   else delete process.env[THINKLESS_SESSION_DIR_ENV];
   renderTui({
