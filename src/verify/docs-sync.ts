@@ -42,6 +42,16 @@ async function main(): Promise<void> {
     .filter((name) => name.startsWith('verify:'))
     .sort();
   const readmeVerifyScripts = [...new Set([...readme.matchAll(/npm run (verify:[a-z0-9:-]+)/g)].map((match) => match[1]))].sort();
+  const releaseResumeVerifiers = [
+    'verify:resume-selector',
+    'verify:tui-resume-selector-pty',
+    'verify:tui-resume-selector-built',
+    'verify:tui-resume-legacy-candidate',
+    'verify:tui-resume-current-candidate',
+    'verify:tui-resume-interrupted-blocked',
+    'verify:tui-resume-cross-target',
+    'verify:resume-rerunnable'
+  ];
 
   const missingFromReadme = packageVerifyScripts.filter((script) => !readmeVerifyScripts.includes(script));
   const extraInReadme = readmeVerifyScripts.filter((script) => !packageVerifyScripts.includes(script));
@@ -455,6 +465,11 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:v1-core']?.includes('verify:resume-selector'), 'fresh V1 core gate must include resume catalog coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:tui-resume-selector-pty'), 'fresh V1 core gate must include PTY resume selector coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:resume-rerunnable'), 'fresh V1 core gate must include runnable resume preflight coverage');
+  for (const verifier of releaseResumeVerifiers) {
+    assert(pkg.scripts['verify:v1-core']?.includes(verifier), `fresh V1 core gate must include release resume verifier ${verifier}`);
+    assert(readme.includes(`npm run ${verifier}`), `README must document release resume verifier ${verifier}`);
+    assert(completionAudit.includes(verifier), `completion audit must document release resume verifier ${verifier}`);
+  }
   assert(pkg.scripts['verify:v1-core']?.includes('verify:app-server-hotreload'), 'fresh V1 core gate must include Codex app-server steering after hot reload');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:hotreload-resume'), 'fresh V1 core gate must include Codex exec resume fallback after hot reload');
   assert(pkg.scripts['release:preflight'] === 'npm run verify:v1-core && npm run verify:tag-gate', 'package should expose a release preflight that runs core V1 checks before tag gate');

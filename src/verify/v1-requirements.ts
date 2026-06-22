@@ -48,6 +48,16 @@ async function main(): Promise<void> {
   };
   const schemas = await readdir('schemas');
   const pkg = JSON.parse(files.packageJson) as { scripts: Record<string, string> };
+  const releaseResumeVerifiers = [
+    'verify:resume-selector',
+    'verify:tui-resume-selector-pty',
+    'verify:tui-resume-selector-built',
+    'verify:tui-resume-legacy-candidate',
+    'verify:tui-resume-current-candidate',
+    'verify:tui-resume-interrupted-blocked',
+    'verify:tui-resume-cross-target',
+    'verify:resume-rerunnable'
+  ];
 
   assert(files.simplified.includes('WiCi V1 是一个本地 TUI'), 'Simplified_PLAN must define the local TUI product boundary');
   assert(files.simplified.includes('Codex 负责按 `PLAN.md` 执行'), 'Simplified_PLAN must keep Codex as PLAN.md executor');
@@ -266,6 +276,10 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:v1-core']?.includes('verify:ssh-evidence'), 'verify:v1-core must include shared SSH evidence checks');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:release-tag'), 'verify:v1-core must include guarded release tag checks');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:no-secrets'), 'verify:v1-core must include committed secret scans');
+  for (const verifier of releaseResumeVerifiers) {
+    assert(pkg.scripts['verify:v1-core']?.includes(verifier), `verify:v1-core must include release resume verifier ${verifier}`);
+    assert(files.readme.includes(`npm run ${verifier}`), `README must document release resume verifier ${verifier}`);
+  }
   assert(pkg.scripts['release:preflight'] === 'npm run verify:v1-core && npm run verify:tag-gate', 'release preflight must bind V1 core verification to the real canary tag gate');
   assert(pkg.scripts['release:tag']?.includes('src/release/tag.ts'), 'package scripts must expose the guarded release tag command');
   assert(files.releaseTag.includes("['run', 'release:preflight']") && files.releaseTag.includes("['tag', '-a', tag"), 'release tag command must run preflight before creating an annotated tag');
