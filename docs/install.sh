@@ -134,6 +134,15 @@ escape_double_quoted() {
   printf '%s' "$value"
 }
 
+npm_global_root() {
+  local root
+  root="$(npm root -g 2>/dev/null || true)"
+  if [[ -z "$root" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$root"
+}
+
 persist_zsh_path() {
   if [[ "$(uname -s)" != "Darwin" || "$#" -eq 0 ]]; then
     return
@@ -236,6 +245,35 @@ verify_required_commands() {
     gh --version >/dev/null
   fi
   echo "thinkless install: verified node, npm, thinkless, codex, claude, and gh on PATH"
+}
+
+install_thinkless_launcher() {
+  local bin root cli launcher temp quoted_cli
+  if ! bin="$(npm_global_bin)" || ! root="$(npm_global_root)"; then
+    echo "thinkless install: could not determine npm global install paths." >&2
+    exit 1
+  fi
+  cli="$root/thinkless/dist/src/cli.js"
+  launcher="$bin/thinkless"
+  if [[ ! -f "$cli" ]]; then
+    echo "thinkless install: installed Thinkless CLI was not found at $cli." >&2
+    exit 1
+  fi
+  mkdir -p "$bin"
+  printf -v quoted_cli '%q' "$cli"
+  temp="$launcher.tmp.$$"
+  rm -f "$launcher"
+  cat > "$temp" <<EOF
+#!/usr/bin/env bash
+set -e
+THINKLESS_CLI=$quoted_cli
+if [[ "\$#" -eq 0 ]]; then
+  exec node "\$THINKLESS_CLI" tui
+fi
+exec node "\$THINKLESS_CLI" "\$@"
+EOF
+  chmod +x "$temp"
+  mv "$temp" "$launcher"
 }
 
 print_path_activation_note() {
@@ -405,11 +443,12 @@ if ! npm install -g --foreground-scripts --ignore-scripts=false "$pkg"; then
   fi
   exit 1
 fi
+install_thinkless_launcher
 verify_required_commands
 print_path_activation_note
 run_auth_onboarding
 if [[ "${THINKLESS_AUTH_PENDING:-0}" == "1" ]]; then
-  echo "thinkless install: installed; auth is pending. Run 'thinkless doctor --deep' after Codex, Claude, and GitHub CLI auth are ready."
+  echo "thinkless install: installed; auth is pending. Finish Codex, Claude, and GitHub CLI auth, then run 'thinkless'."
 else
-  echo "thinkless install: complete. Run 'thinkless doctor --deep' to verify the full setup."
+  echo "thinkless install: complete. Run 'thinkless' to start."
 fi
