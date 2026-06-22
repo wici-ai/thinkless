@@ -59,10 +59,10 @@ export interface RunPaths {
   config: string;
 }
 
-export function runPaths(target: string): RunPaths {
+export function runPaths(target: string, sessionDir?: string): RunPaths {
   const root = resolve(target);
-  const stateDir = resolveStateDir(root);
-  const fileRoot = sessionFileRoot(root, stateDir);
+  const stateDir = resolveStateDir(root, sessionDir);
+  const fileRoot = sessionFileRoot(root, stateDir, sessionDir);
   const legacyStateDir = join(root, LEGACY_STATE_DIR);
   const opt = join(fileRoot, '.opt');
   return {
@@ -110,8 +110,8 @@ export function runPaths(target: string): RunPaths {
   };
 }
 
-function resolveStateDir(root: string): string {
-  const sessionOverride = sessionDirOverride(root);
+function resolveStateDir(root: string, explicitSessionDir?: string): string {
+  const sessionOverride = explicitSessionDir ? resolve(root, explicitSessionDir) : sessionDirOverride(root);
   if (sessionOverride) return sessionOverride;
   const numbered = latestNumberedSessionDir(root);
   if (numbered) return numbered;
@@ -167,8 +167,8 @@ function sessionDirOverride(root: string): string | null {
   return raw ? resolve(root, raw) : null;
 }
 
-function sessionFileRoot(root: string, stateDir: string): string {
-  if (sessionDirOverride(root)) return stateDir;
+function sessionFileRoot(root: string, stateDir: string, explicitSessionDir?: string): string {
+  if (explicitSessionDir || sessionDirOverride(root)) return stateDir;
   return isNumberedSessionDirName(basename(stateDir)) ? stateDir : root;
 }
 

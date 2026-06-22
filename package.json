@@ -33,6 +33,7 @@
     "verify:v1-requirements": "tsx src/verify/v1-requirements.ts",
     "verify:tui-structure": "tsx src/verify/tui-structure.ts",
     "verify:tui-chat-intake": "tsx src/verify/tui-chat-intake.ts",
+    "verify:resume-selector": "tsx src/verify/resume-selector.ts",
     "verify:tui-chat-pty": "tsx src/verify/tui-chat-pty.ts",
     "verify:tui-real-fake-chat": "tsx src/verify/tui-real-fake-chat.ts",
     "verify:tui-planner-clarification-pty": "tsx src/verify/tui-planner-clarification-pty.ts",
