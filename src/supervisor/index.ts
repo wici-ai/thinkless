@@ -77,7 +77,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
   const config = await loadConfig(options.mode);
   applyRuntimeSelection(config, options.runtime);
   if (options.lockMode) config.evaluation.lock_mode = options.lockMode;
-  const paths = runPaths(options.target);
+  const paths = runPaths(options.target, options.sessionDir);
   await ensureRunDirs(paths);
   const releaseLock = await acquireLock(paths.lock);
   const events = new EventWriter(paths.events);

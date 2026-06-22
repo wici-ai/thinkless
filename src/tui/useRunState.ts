@@ -43,8 +43,8 @@ function emptyRunState(target: string): RunState {
   };
 }
 
-export function useRunState(target: string): RunState {
-  const paths = useMemo(() => runPaths(target), [target]);
+export function useRunState(target: string, sessionDir?: string): RunState {
+  const paths = useMemo(() => runPaths(target, sessionDir), [target, sessionDir]);
   const [state, setState] = useState<RunState>(() => emptyRunState(paths.target));
   // Keep the last committed signature so we only re-render when blackboard
   // content actually changed; an unconditional setState on every poll/watch
@@ -55,9 +55,11 @@ export function useRunState(target: string): RunState {
     let alive = true;
     let timer: NodeJS.Timeout | null = null;
     let poller: NodeJS.Timeout | null = null;
+    lastSignatureRef.current = stateSignature(emptyRunState(paths.target));
+    setState(emptyRunState(paths.target));
 
     const load = async () => {
-      const next = await readState(paths.target).catch(() => null);
+      const next = await readState(paths.target, sessionDir).catch(() => null);
       if (!alive || !next) return;
       const signature = stateSignature(next);
       if (signature === lastSignatureRef.current) return;
@@ -91,7 +93,7 @@ export function useRunState(target: string): RunState {
       if (poller) clearInterval(poller);
       void watcher.close();
     };
-  }, [paths.target, paths.events, paths.codexRun, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone, paths.chat]);
+  }, [paths.target, paths.stateDir, paths.events, paths.codexRun, paths.goal, paths.goalDoc, paths.checkpoint, paths.baseline, paths.ledger, paths.plan, paths.outbox, paths.inbox, paths.inboxDone, paths.chat]);
 
   return state;
 }
@@ -123,8 +125,8 @@ export function stateSignature(state: RunState): string {
   ].join('|');
 }
 
-async function readState(target: string): Promise<RunState> {
-  const paths = runPaths(target);
+async function readState(target: string, sessionDir?: string): Promise<RunState> {
+  const paths = runPaths(target, sessionDir);
   const [goal, checkpoint, baseline, ledger, goalDoc, plan, events, codexTranscript, outbox, injections, chat] = await Promise.all([
     readJsonMaybe<GoalFile>(paths.goal),
     readJsonMaybe<Checkpoint>(paths.checkpoint),

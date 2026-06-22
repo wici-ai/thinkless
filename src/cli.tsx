@@ -202,9 +202,13 @@ async function maybeRunThinklessStartupSelfUpdate(): Promise<void> {
 }
 
 function launchTui(options: TuiCommandOptions): void {
-  if (options.sessionDir) process.env[THINKLESS_SESSION_DIR_ENV] = options.sessionDir;
+  const resolvedTarget = options.target ? resolve(options.target) : resolveFreshTargetOption(undefined);
+  const sessionDir = options.sessionDir ?? join(resolvedTarget, '.thinkless');
+  if (sessionDir) process.env[THINKLESS_SESSION_DIR_ENV] = sessionDir;
+  else delete process.env[THINKLESS_SESSION_DIR_ENV];
   renderTui({
-    target: options.target ? resolve(options.target) : resolveFreshTargetOption(undefined),
+    target: resolvedTarget,
+    sessionDir,
     goal: options.goal,
     maxIters: options.maxIters,
     resumeIteration: options.resumeIteration,
@@ -375,6 +379,7 @@ function gitTopLevelSync(): string | null {
 
 function renderTui(options: {
   target: string;
+  sessionDir?: string;
   goal?: string;
   maxIters?: number;
   resumeIteration?: number;
@@ -391,6 +396,7 @@ function renderTui(options: {
   const tree = (
     <App
       target={options.target}
+      sessionDir={options.sessionDir}
       interactive={interactive}
       supervisor={{
         enabled: options.supervisor,

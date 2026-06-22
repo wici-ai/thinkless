@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   assert(files.app.includes('readPersistedRuntimeSelection') && files.app.includes('writePersistedRuntimeSelection') && files.app.includes('runtimeHydrated'), 'App must restore persisted runtime before resuming Chat/supervisor sessions');
   assert(files.app.includes('<WorkspaceTabs active={workspaceTab} />') && files.app.includes('wrap="truncate-end"') && files.app.includes('height={1} justifyContent="space-between"'), 'App must render aligned one-line workspace tabs and a truncating runtime selector');
   assert(files.app.includes('const workspaceViewportHeight = Math.max(4, height - 9)') && files.app.includes('const chatViewportHeight = Math.max(4, height - 10)'), 'App must reserve rows for the tab line, pane footer, and bottom Chat input');
-  assert(files.app.includes('isRuntimeSelectorToggle') && files.app.includes('cycleRuntimeValue') && files.app.includes('inputPaused={runtimeSelectorOpen}'), 'App must let users choose runtime fields from the TUI without typing into Chat');
+  assert(files.app.includes('isRuntimeSelectorToggle') && files.app.includes('cycleRuntimeValue') && files.app.includes('inputPaused={runtimeSelectorOpen || resumeSelectorOpen}'), 'App must let users choose runtime fields from the TUI without typing into Chat');
   assert(files.app.includes('onRuntimeChange={setRuntimeSelection}'), 'App must still support typed runtime commands for custom values');
   assert(files.app.includes('runtime: runtimeSelection'), 'App must pass TUI runtime settings into supervisor launches');
   assert(files.app.includes('appendSupervisorError') && files.app.includes('Supervisor error:'), 'App must persist supervisor crashes without flooding the Chat transcript');

@@ -164,7 +164,15 @@ export function isNumberedSessionDirName(name: string): boolean {
 
 function sessionDirOverride(root: string): string | null {
   const raw = process.env[THINKLESS_SESSION_DIR_ENV]?.trim();
-  return raw ? resolve(root, raw) : null;
+  if (!raw) return null;
+  const resolved = resolve(root, raw);
+  return isPathInside(resolved, root) ? resolved : null;
+}
+
+function isPathInside(path: string, root: string): boolean {
+  const normalizedRoot = resolve(root);
+  const normalizedPath = resolve(path);
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
 }
 
 function sessionFileRoot(root: string, stateDir: string, explicitSessionDir?: string): string {

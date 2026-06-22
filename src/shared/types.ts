@@ -431,6 +431,7 @@ export interface WiCiConfig {
 
 export interface RunOptions {
   target: string;
+  sessionDir?: string;
   goal?: string;
   goalSource?: Checkpoint['goal_source'];
   once?: boolean;

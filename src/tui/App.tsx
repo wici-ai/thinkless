@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useInput, useStdout, useFocusManager } from 'ink';
+import { Box, Text, useInput, useStdout, useFocusManager, useFocus } from 'ink';
 import { basename } from 'node:path';
 import { Header } from './Header.js';
 import { ChatHistoryPane, ChatInputBox } from './ChatPane.js';
@@ -14,6 +14,7 @@ import { runPaths } from '../shared/paths.js';
 import { disablePointerInput, enableMouseReporting, parseMouseInput } from './input.js';
 import { traceInkInput } from './inputTrace.js';
 import { appendSupervisorError } from './supervisorLog.js';
+import { discoverResumeCandidates, type ResumeCandidate } from '../shared/resume.js';
 import {
   cycleRuntimeValue,
   defaultRuntimeSelection,
@@ -39,16 +40,20 @@ export interface TuiSupervisorOptions {
 
 export function App({
   target,
+  sessionDir,
   interactive = true,
   supervisor = { enabled: false },
   mouseReporting = false
 }: {
   target: string;
+  sessionDir?: string;
   interactive?: boolean;
   supervisor?: TuiSupervisorOptions;
   mouseReporting?: boolean;
 }) {
-  const state = useRunState(target);
+  const [activeTarget, setActiveTarget] = useState(target);
+  const [activeSessionDir, setActiveSessionDir] = useState<string | undefined>(sessionDir);
+  const state = useRunState(activeTarget, activeSessionDir);
   const { stdout } = useStdout();
   const { focus, focusNext, focusPrevious } = useFocusManager();
   const height = stdout.rows || 32;
@@ -68,6 +73,9 @@ export function App({
   const [runtimeSelection, setRuntimeSelection] = useState(defaultRuntimeSelection);
   const [runtimeHydrated, setRuntimeHydrated] = useState(false);
   const [runtimeSelectorOpen, setRuntimeSelectorOpen] = useState(false);
+  const [resumeSelectorOpen, setResumeSelectorOpen] = useState(false);
+  const [resumeCandidates, setResumeCandidates] = useState<ResumeCandidate[]>([]);
+  const [resumeIndex, setResumeIndex] = useState(0);
   const [runtimeField, setRuntimeField] = useState<RuntimeField>('agent');
   const [mouseReportingEnabled, setMouseReportingEnabled] = useState(mouseReporting);
   const runtimePane = runtimePaneFromWorkspace(workspaceTab);
@@ -75,7 +83,7 @@ export function App({
 
   useEffect(() => {
     let alive = true;
-    const paths = runPaths(target);
+    const paths = runPaths(activeTarget, activeSessionDir);
     setRuntimeHydrated(false);
     void readPersistedRuntimeSelection(paths).then((persisted) => {
       if (!alive) return;
@@ -92,20 +100,20 @@ export function App({
     return () => {
       alive = false;
     };
-  }, [target]);
+  }, [activeTarget, activeSessionDir]);
 
   useEffect(() => {
     if (!runtimeHydrated) return;
     const signature = JSON.stringify(runtimeSelection);
     if (signature === runtimeSignatureRef.current) return;
     runtimeSignatureRef.current = signature;
-    void writePersistedRuntimeSelection(runPaths(target), runtimeSelection).catch((error: unknown) => {
+    void writePersistedRuntimeSelection(runPaths(activeTarget, activeSessionDir), runtimeSelection).catch((error: unknown) => {
       setChatLocalStatus(`runtime save failed: ${error instanceof Error ? error.message : String(error)}`);
     });
-  }, [runtimeHydrated, runtimeSelection, target]);
+  }, [activeSessionDir, activeTarget, runtimeHydrated, runtimeSelection]);
 
   const launchSupervisor = useCallback(
-    (goal?: string, goalSource?: RunOptions['goalSource'], planningContext?: string) => {
+    (goal?: string, goalSource?: RunOptions['goalSource'], planningContext?: string, resumeTarget = activeTarget, resumeSessionDir = activeSessionDir) => {
       if (!supervisor.enabled) return;
       if (startedRef.current) {
         pendingSupervisorLaunchRef.current = { goal, goalSource, planningContext };
@@ -115,7 +123,8 @@ export function App({
       setStarted(true);
       setStartError(null);
       const options: RunOptions = {
-        target,
+        target: resumeTarget,
+        sessionDir: resumeSessionDir,
         goal,
         goalSource,
         maxIters: supervisor.maxIters,
@@ -128,7 +137,7 @@ export function App({
       void runSupervisor(options).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
         setStartError(`Supervisor error: ${message}`);
-        void appendSupervisorError(target, error);
+        void appendSupervisorError(resumeTarget, error);
       }).finally(() => {
         startedRef.current = false;
         setStarted(false);
@@ -137,18 +146,45 @@ export function App({
         if (pending) setTimeout(() => launchSupervisor(pending.goal, pending.goalSource, pending.planningContext), 0);
       });
     },
-    [runtimeSelection, target, supervisor.enabled, supervisor.lockMode, supervisor.maxIters, supervisor.mode, supervisor.resumeIteration]
+    [activeSessionDir, activeTarget, runtimeSelection, supervisor.enabled, supervisor.lockMode, supervisor.maxIters, supervisor.mode, supervisor.resumeIteration]
   );
 
   useEffect(() => {
-    if (!runtimeHydrated || !supervisor.enabled || !supervisor.initialGoal) return;
+    if (!runtimeHydrated || !supervisor.enabled || activeTarget !== target || activeSessionDir || !supervisor.initialGoal) return;
     launchSupervisor(supervisor.initialGoal, 'tui_goal_option');
-  }, [launchSupervisor, runtimeHydrated, supervisor.enabled, supervisor.initialGoal]);
+  }, [activeSessionDir, activeTarget, launchSupervisor, runtimeHydrated, supervisor.enabled, supervisor.initialGoal, target]);
 
   useEffect(() => {
     if (!runtimeHydrated || !supervisor.enabled || supervisor.initialGoal || !supervisor.resumeOnOpen || !shouldAutoStartExistingRun(state, true)) return;
     launchSupervisor(undefined);
   }, [launchSupervisor, runtimeHydrated, state.goal, state.checkpoint?.supervisor_state, supervisor.enabled, supervisor.initialGoal, supervisor.resumeOnOpen]);
+
+  const openResumeSelector = useCallback(() => {
+    setResumeSelectorOpen(true);
+    setResumeIndex(0);
+    setChatLocalStatus('resume: loading candidates');
+    void discoverResumeCandidates({ currentTarget: activeTarget }).then((candidates) => {
+      setResumeCandidates(candidates);
+      setResumeIndex(Math.max(0, candidates.findIndex((candidate) => candidate.runnable)));
+      setChatLocalStatus(candidates.length > 0 ? 'resume: select a run' : 'resume: no candidates found');
+    }).catch((error: unknown) => {
+      setResumeCandidates([]);
+      setChatLocalStatus(`resume scan failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, [activeTarget]);
+
+  const selectResumeCandidate = useCallback((candidate: ResumeCandidate) => {
+    if (!candidate.runnable) {
+      setChatLocalStatus(`resume blocked: ${candidate.reason}`);
+      return;
+    }
+    setResumeSelectorOpen(false);
+    setActiveTarget(candidate.target);
+    setActiveSessionDir(candidate.sessionDir);
+    setWorkspaceTab('execution');
+    setChatLocalStatus(`resume: ${candidate.label}`);
+    launchSupervisor(undefined, undefined, undefined, candidate.target, candidate.sessionDir);
+  }, [launchSupervisor]);
 
   useEffect(() => {
     if (!interactive) return;
@@ -164,6 +200,10 @@ export function App({
     pendingWorkspaceFocusRef.current = false;
     focus(workspaceFocusId(workspaceTab));
   }, [focus, workspaceTab]);
+
+  useEffect(() => {
+    if (resumeSelectorOpen) focus('resume-selector');
+  }, [focus, resumeSelectorOpen]);
 
   const selectWorkspaceTab = useCallback(
     (tab: WorkspaceTab, shouldFocus = true) => {
@@ -181,6 +221,23 @@ export function App({
     traceInkInput('app', input, key as unknown as Record<string, unknown>);
     if (isMouseModeToggle(input, key)) {
       setMouseReportingEnabled((current) => !current);
+      return;
+    }
+    if (resumeSelectorOpen) {
+      if (key.upArrow) {
+        setResumeIndex((current) => Math.max(0, current - 1));
+      } else if (key.downArrow) {
+        setResumeIndex((current) => Math.min(Math.max(0, resumeCandidates.length - 1), current + 1));
+      } else if (key.return || input.includes('\r') || input.includes('\n')) {
+        const candidate = resumeCandidates[resumeIndex];
+        if (candidate) selectResumeCandidate(candidate);
+      } else if (key.escape || input === '\x1b') {
+        setResumeSelectorOpen(false);
+        setChatLocalStatus('resume: cancelled');
+      } else if (input && !key.leftArrow && !key.rightArrow && !key.tab && !key.ctrl && !key.meta) {
+        const candidate = resumeCandidates[resumeIndex];
+        if (candidate) selectResumeCandidate(candidate);
+      }
       return;
     }
     if (isRuntimeSelectorToggle(input, key)) {
@@ -241,7 +298,7 @@ export function App({
               chat={state.chat}
               contentWidth={workspaceContentWidth}
               viewportHeight={chatViewportHeight}
-              active={workspaceTab === 'chat' && !runtimeSelectorOpen}
+              active={workspaceTab === 'chat' && !runtimeSelectorOpen && !resumeSelectorOpen}
               showTitle={false}
               systemLine={startError}
               localStatus={chatLocalStatus}
@@ -249,14 +306,28 @@ export function App({
               busy={chatBusy}
             />
           ) : workspaceTab === 'plan' ? (
-            <GoalPane state={visibleState} contentWidth={workspaceContentWidth} viewportHeight={workspaceViewportHeight} showTitle={false} active={interactive && !runtimeSelectorOpen} />
+            <GoalPane state={visibleState} contentWidth={workspaceContentWidth} viewportHeight={workspaceViewportHeight} showTitle={false} active={interactive && !runtimeSelectorOpen && !resumeSelectorOpen} />
           ) : (
-            <ExecPane state={state} contentWidth={workspaceContentWidth} viewportHeight={workspaceViewportHeight} showTitle={false} active={interactive && !runtimeSelectorOpen} />
+            <ExecPane state={state} contentWidth={workspaceContentWidth} viewportHeight={workspaceViewportHeight} showTitle={false} active={interactive && !runtimeSelectorOpen && !resumeSelectorOpen} />
           )}
+          {resumeSelectorOpen ? (
+            <ResumeSelector
+              candidates={resumeCandidates}
+              selectedIndex={resumeIndex}
+              contentWidth={workspaceContentWidth}
+              onMove={setResumeIndex}
+              onSelect={selectResumeCandidate}
+              onCancel={() => {
+                setResumeSelectorOpen(false);
+                setChatLocalStatus('resume: cancelled');
+              }}
+            />
+          ) : null}
         </Box>
       </Box>
       <ChatInputBox
-        target={target}
+        target={activeTarget}
+        sessionDir={activeSessionDir}
         interactive={interactive}
         outbox={state.outbox}
         goalDoc={visibleState.goalDoc}
@@ -266,12 +337,12 @@ export function App({
         mode={supervisor.mode}
         runtime={runtimeSelection}
         contentWidth={inputContentWidth}
-        inputPaused={runtimeSelectorOpen}
+        inputPaused={runtimeSelectorOpen || resumeSelectorOpen}
         blankRun={blankRunChat}
         hasExistingRun={Boolean(state.goal)}
         onPlanningRequested={(goal, planningContext) => launchSupervisor(goal, 'tui_chat', planningContext)}
         onInjection={() => launchSupervisor(undefined)}
-        onResumeRequested={() => launchSupervisor(undefined)}
+        onResumeRequested={openResumeSelector}
         onRuntimeChange={setRuntimeSelection}
         onBusyChange={setChatBusy}
         onLocalStatus={setChatLocalStatus}
@@ -319,6 +390,63 @@ function WorkspaceTabs({ active }: { active: WorkspaceTab }) {
           {index < WORKSPACE_TABS.length - 1 ? <Text color="gray">  </Text> : null}
         </React.Fragment>
       ))}
+    </Box>
+  );
+}
+
+function ResumeSelector({
+  candidates,
+  selectedIndex,
+  contentWidth,
+  onMove,
+  onSelect,
+  onCancel
+}: {
+  candidates: ResumeCandidate[];
+  selectedIndex: number;
+  contentWidth: number;
+  onMove: (updater: (current: number) => number) => void;
+  onSelect: (candidate: ResumeCandidate) => void;
+  onCancel: () => void;
+}) {
+  const { isFocused } = useFocus({ id: 'resume-selector', isActive: true });
+  useInput((input, key) => {
+    traceInkInput('resume-selector', input, key as unknown as Record<string, unknown>);
+    if (key.upArrow) {
+      onMove((current) => Math.max(0, current - 1));
+    } else if (key.downArrow) {
+      onMove((current) => Math.min(Math.max(0, candidates.length - 1), current + 1));
+    } else if (key.return || input.includes('\r') || input.includes('\n')) {
+      const candidate = candidates[selectedIndex];
+      if (candidate) onSelect(candidate);
+    } else if (key.escape || input === '\x1b') {
+      onCancel();
+    } else if (input && !key.leftArrow && !key.rightArrow && !key.tab && !key.ctrl && !key.meta) {
+      const candidate = candidates[selectedIndex];
+      if (candidate) onSelect(candidate);
+    }
+  }, { isActive: isFocused });
+  const visible = candidates.slice(0, 8);
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
+      <Text color="yellow" bold>
+        RESUME
+      </Text>
+      {visible.length === 0 ? (
+        <Text color="gray">Scanning for resumable Thinkless runs...</Text>
+      ) : (
+        visible.map((candidate, index) => {
+          const selected = index === selectedIndex;
+          const marker = selected ? '>' : ' ';
+          const status = candidate.runnable ? 'runnable' : 'blocked';
+          const text = `${marker} ${candidate.label} [${status}] ${candidate.supervisorState} ${candidate.goalSummary} - ${candidate.reason}`;
+          return (
+            <Text key={candidate.id} color={selected ? 'yellow' : candidate.runnable ? 'white' : 'gray'} bold={selected}>
+              {text.length > contentWidth ? `${text.slice(0, Math.max(0, contentWidth - 3))}...` : text}
+            </Text>
+          );
+        })
+      )}
     </Box>
   );
 }

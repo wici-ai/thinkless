@@ -124,6 +124,7 @@ export function ChatHistoryPane({
 
 export function ChatInputBox({
   target,
+  sessionDir,
   interactive = true,
   outbox = [],
   goalDoc = '',
@@ -144,6 +145,7 @@ export function ChatInputBox({
   onLocalStatus
 }: {
   target: string;
+  sessionDir?: string;
   interactive?: boolean;
   outbox?: OutboxMessage[];
   goalDoc?: string;
@@ -217,16 +219,12 @@ export function ChatInputBox({
       return;
     }
 
-    const paths = runPaths(target);
+    const paths = runPaths(target, sessionDir);
     const latestQuestion = [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered);
 
     if (text === '/resume' || text.startsWith('/resume ')) {
-      if (hasExistingRun) {
-        onLocalStatus?.('resume: continuing the existing Thinkless run');
-        onResumeRequested?.();
-      } else {
-        onLocalStatus?.(`resume: no existing run in this workspace; exit and run thinkless resume --target ${target}`);
-      }
+      onLocalStatus?.(hasExistingRun ? 'resume: opening selector' : 'resume: scanning for runs');
+      onResumeRequested?.();
       return;
     }
 
@@ -329,6 +327,7 @@ export function ChatInputBox({
 
 export function ChatPane({
   target,
+  sessionDir,
   interactive = true,
   outbox = [],
   injections = [],
@@ -351,6 +350,7 @@ export function ChatPane({
   systemLine
 }: ChatContextProps & {
   target: string;
+  sessionDir?: string;
   interactive?: boolean;
   contentWidth?: number;
   viewportHeight?: number;
@@ -382,6 +382,7 @@ export function ChatPane({
       />
       <ChatInputBox
         target={target}
+        sessionDir={sessionDir}
         interactive={interactive}
         outbox={outbox}
         goalDoc={goalDoc}
