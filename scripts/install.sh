@@ -287,10 +287,27 @@ thinkless_default_target() {
   printf '%s\n' "\$HOME/thinkless-workspaces/\${stamp}-\${slug}-\${suffix}"
 }
 
+thinkless_next_session_dir() {
+  local target index candidate
+  target="\$1"
+  mkdir -p "\$target"
+  index=1
+  while [[ "\$index" -lt 10000 ]]; do
+    candidate="\$target/.thinkless\${index}"
+    if mkdir "\$candidate" 2>/dev/null; then
+      printf '%s\n' "\$candidate"
+      return
+    fi
+    index="\$((index + 1))"
+  done
+  echo "thinkless: could not allocate a session directory under \$target" >&2
+  exit 1
+}
+
 if [[ "\$#" -eq 0 ]]; then
   target="\$(thinkless_default_target)"
-  mkdir -p "\$target"
-  exec node "\$THINKLESS_CLI" tui --target "\$target"
+  session_dir="\$(thinkless_next_session_dir "\$target")"
+  THINKLESS_SESSION_DIR="\$session_dir" exec node "\$THINKLESS_CLI" tui --target "\$target"
 fi
 exec node "\$THINKLESS_CLI" "\$@"
 EOF

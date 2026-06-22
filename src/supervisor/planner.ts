@@ -808,7 +808,7 @@ async function materializePlannerOutput(paths: RunPaths, output: PlannerOutput):
   if (!output.planMarkdown) {
     throw new Error('Planner output missing PLAN.md artifact');
   }
-  await atomicWriteFile(paths.plan, ensureExecutableChecklist(output.planMarkdown));
+  await atomicWriteFile(paths.plan, normalizePlannerPlanPaths(paths, ensureExecutableChecklist(output.planMarkdown)));
   if (output.assumptionsMarkdown) await atomicWriteFile(paths.assumptions, ensureTrailingNewline(output.assumptionsMarkdown));
   if (output.measureSh) await atomicWriteFile(paths.measure, ensureScript(output.measureSh), 0o755);
   if (output.checksSh) await atomicWriteFile(paths.checks, ensureScript(output.checksSh), 0o755);
@@ -835,16 +835,18 @@ async function materializeStubPlan(paths: RunPaths, goal: GoalFile): Promise<voi
         : goal.metric
   };
   const metricName = primaryMetricName(selectedGoal);
+  const checksCommand = shellWorkspacePath(paths, paths.checks);
+  const measureCommand = shellWorkspacePath(paths, paths.measure);
   const plan = `# WiCi Execution Plan
 
 Goal: ${requirementText(goal) || 'Execute the requested goal and validate it.'}
 
 - [ ] S1 Replace avoidable quadratic hot-path work with a linear implementation
   - Action: inspect the fixture hot path and remove nested scans or redundant recomputation.
-  - Validation: ./.opt/checks.sh && ./.opt/measure.sh
+  - Validation: ${checksCommand} && ${measureCommand}
 - [ ] S2 Re-run measurement and commit only if ${metricName} improves beyond the configured noise gate
   - Action: validate the optimized path against the planner-selected fixture runtime check.
-  - Validation: ./.opt/checks.sh && ./.opt/measure.sh
+  - Validation: ${checksCommand} && ${measureCommand}
 `;
 
   const checks = `#!/usr/bin/env bash
@@ -862,14 +864,14 @@ node measure.mjs
   await atomicWriteFile(paths.checks, checksExecutable(checks), 0o755);
   const manifest = await writeBenchmarkManifest(paths, selectedGoal, {
     tool: 'node',
-    command: './.opt/measure.sh',
+    command: measureCommand,
     metric: selectedGoal.metric.name,
     direction: selectedGoal.metric.direction,
     target: selectedGoal.metric.target ?? null,
     unit: selectedGoal.metric.unit,
     min_reps: 5,
     warmup_discarded: 2,
-    reason: `Fixture target uses a deterministic Node workload through .opt/measure.sh; it emits WiCi ${metricName} samples for the planner-selected validation.`
+    reason: `Fixture target uses a deterministic Node workload through ${workspaceRelativePath(paths, paths.measure)}; it emits WiCi ${metricName} samples for the planner-selected validation.`
   });
   await saveGoalFiles(paths, {
     ...selectedGoal,
@@ -887,6 +889,24 @@ node measure.mjs
 function ensureScript(script: string): string {
   const text = ensureTrailingNewline(script);
   return text.startsWith('#!') ? text : `#!/usr/bin/env bash\nset -euo pipefail\n${text}`;
+}
+
+function normalizePlannerPlanPaths(paths: RunPaths, planMarkdown: string): string {
+  const optPath = workspaceRelativePath(paths, paths.opt);
+  if (optPath === '.opt') return planMarkdown;
+  return planMarkdown
+    .replace(/(^|[\s(`])\.\/\.opt\//g, `$1./${optPath}/`)
+    .replace(/(^|[\s(`])\.opt\//g, `$1${optPath}/`);
+}
+
+function shellWorkspacePath(paths: RunPaths, path: string): string {
+  const rel = workspaceRelativePath(paths, path);
+  return rel.startsWith('/') ? rel : `./${rel}`;
+}
+
+function workspaceRelativePath(paths: RunPaths, path: string): string {
+  const rel = relative(paths.target, path) || '.';
+  return rel.startsWith('..') ? path : rel;
 }
 
 function checksExecutable(script: string): string {

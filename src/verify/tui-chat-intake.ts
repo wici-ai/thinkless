@@ -66,8 +66,12 @@ async function main(): Promise<void> {
     'read-only TUI must not launch planning from chat'
   );
   assert(
-    !shouldUseChatAgentForBlankRun({ supervisorEnabled: true, supervisorStarted: false, state: { ...blank, goalDoc: '# GOAL\n' } }),
-    'existing run blackboard must not use blank-run chat planning'
+    shouldUseChatAgentForBlankRun({ supervisorEnabled: true, supervisorStarted: false, state: { ...blank, plan: '# Historical project PLAN.md\n' } }),
+    'a repository PLAN.md without Thinkless goal/checkpoint must not block blank-run Chat-agent intake'
+  );
+  assert(
+    shouldUseChatAgentForBlankRun({ supervisorEnabled: true, supervisorStarted: false, state: { ...blank, goalDoc: '# Historical project GOAL.md\n' } }),
+    'a repository GOAL.md without Thinkless goal/checkpoint must not block blank-run Chat-agent intake'
   );
   assert(
     shouldUseChatAgentForBlankRun({

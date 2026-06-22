@@ -66,6 +66,9 @@ async function main(): Promise<void> {
     const version = await runCleanShell(home, workspace, 'thinkless --version');
     assert(version.exitCode === 0, `clean shell could not run thinkless --version:\n${version.all}`);
 
+    const initRepo = await execa('git', ['-C', workspace, 'init'], { all: true, reject: false, timeout: 30_000 });
+    assert(initRepo.exitCode === 0, `could not init clean-shell workspace git repo:\n${initRepo.all}`);
+
     const bare = await runCleanShell(
       home,
       workspace,
@@ -75,6 +78,16 @@ async function main(): Promise<void> {
     assert(bare.exitCode === 0, `bare thinkless failed in clean shell with ${bare.exitCode}:\n${ui}`);
     assert(ui.includes('CHAT agent=claude') && ui.includes('effort=high'), `bare thinkless did not load default chat runtime params:\n${ui}`);
     assert(ui.includes('Current goal: none'), `bare thinkless did not render the fresh default TUI state:\n${ui}`);
+    assert(existsSync(join(workspace, '.thinkless1')), 'bare thinkless did not allocate .thinkless1/ in the current git root');
+    assert(!existsSync(join(workspace, '.thinkless')), 'bare thinkless should not allocate the default .thinkless/ directory');
+
+    const bareAgain = await runCleanShell(
+      home,
+      workspace,
+      'THINKLESS_SELF_UPDATE=0 WICI_TUI_RENDER_ONCE=1 WICI_TUI_RENDER_ONCE_DELAY_MS=0 FORCE_COLOR=0 TERM=xterm-256color thinkless'
+    );
+    assert(bareAgain.exitCode === 0, `second bare thinkless failed in clean shell with ${bareAgain.exitCode}:\n${stripAnsi(bareAgain.all ?? '')}`);
+    assert(existsSync(join(workspace, '.thinkless2')), 'second bare thinkless did not allocate .thinkless2/ in the current git root');
 
     console.log(
       JSON.stringify(
@@ -83,6 +96,7 @@ async function main(): Promise<void> {
           clean_home_install: true,
           first_install_exposes_thinkless: true,
           bare_thinkless_loads_defaults: true,
+          bare_thinkless_allocates_numbered_sessions: true,
           fake_cli_bin_discovered: fakeBin
         },
         null,

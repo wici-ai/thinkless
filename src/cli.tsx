@@ -5,7 +5,7 @@ import { Command } from 'commander';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { App } from './tui/App.js';
 import { DISABLE_POINTER_INPUT_SEQUENCE, ENABLE_MOUSE_REPORTING_SEQUENCE } from './tui/input.js';
@@ -14,7 +14,7 @@ import { runSupervisor } from './supervisor/index.js';
 import { createSampleTarget } from './sample.js';
 import type { ToolMode } from './shared/types.js';
 import { loadConfig } from './shared/config.js';
-import { runPaths, TOOL_ROOT } from './shared/paths.js';
+import { allocateNumberedSessionDir, isNumberedSessionDirName, latestNumberedSessionDir, runPaths, THINKLESS_SESSION_DIR_ENV, TOOL_ROOT } from './shared/paths.js';
 import { installCrashHandlers } from './shared/crashHandlers.js';
 import { previewRollback, rollbackTarget } from './supervisor/rollback.js';
 import { checkToolHealth, runThinklessStartupSelfUpdate, updateToolsBetweenRuns, type ThinklessSelfUpdateResult } from './supervisor/selfupdate.js';
@@ -75,7 +75,7 @@ program
   .option('--no-fullscreen', 'render without fullscreen mode')
   .option('--mouse-reporting', 'enable mouse wheel/click tracking; disables native terminal text selection', false)
   .action((options: TuiCommandOptions) => {
-    launchTui({ ...options, target: resolveFreshTargetOption(options.target), resumeOnOpen: false });
+    launchTui({ ...options, ...resolveFreshLaunchOption(options.target), resumeOnOpen: false });
   });
 
 program
@@ -90,7 +90,7 @@ program
   .option('--no-fullscreen', 'render without fullscreen mode')
   .option('--mouse-reporting', 'enable mouse wheel/click tracking; disables native terminal text selection', false)
   .action((options: TuiCommandOptions) => {
-    launchTui({ ...options, target: resolveResumeTargetOption(options.target), resumeOnOpen: true });
+    launchTui({ ...options, ...resolveResumeLaunchOption(options.target), resumeOnOpen: true });
   });
 
 program
@@ -179,6 +179,7 @@ interface TuiCommandOptions {
   fullscreen: boolean;
   mouseReporting: boolean;
   resumeOnOpen?: boolean;
+  sessionDir?: string;
 }
 
 function parseNonNegativeInteger(value: string): number {
@@ -201,6 +202,7 @@ async function maybeRunThinklessStartupSelfUpdate(): Promise<void> {
 }
 
 function launchTui(options: TuiCommandOptions): void {
+  if (options.sessionDir) process.env[THINKLESS_SESSION_DIR_ENV] = options.sessionDir;
   renderTui({
     target: options.target ? resolve(options.target) : resolveFreshTargetOption(undefined),
     goal: options.goal,
@@ -215,11 +217,29 @@ function launchTui(options: TuiCommandOptions): void {
   });
 }
 
+function resolveFreshLaunchOption(target?: string): { target: string; sessionDir?: string } {
+  if (target?.trim()) return { target: resolve(target) };
+  const resolvedTarget = resolveFreshTargetOption(undefined);
+  return {
+    target: resolvedTarget,
+    sessionDir: allocateNumberedSessionDir(resolvedTarget)
+  };
+}
+
 function resolveFreshTargetOption(target?: string): string {
   if (target?.trim()) return resolve(target);
   const currentRepo = gitTopLevelSync();
   if (currentRepo) return resolve(currentRepo);
   return defaultFreshTarget();
+}
+
+function resolveResumeLaunchOption(target?: string): { target: string; sessionDir?: string } {
+  const resolvedTarget = resolveResumeTargetOption(target);
+  const normalized = normalizeTargetAndSession(resolvedTarget);
+  return {
+    target: normalized.target,
+    sessionDir: normalized.sessionDir ?? latestNumberedSessionDir(normalized.target) ?? undefined
+  };
 }
 
 function resolveResumeTargetOption(target?: string): string {
@@ -262,7 +282,15 @@ function latestThinklessWorkspace(): string | null {
 
 function hasThinklessRun(target: string): boolean {
   const paths = runPaths(resolve(target));
-  return existsSync(paths.goal) || existsSync(paths.checkpoint);
+  return existsSync(paths.goal) || existsSync(paths.checkpoint) || existsSync(paths.chat);
+}
+
+function normalizeTargetAndSession(target: string): { target: string; sessionDir?: string } {
+  const resolved = resolve(target);
+  if (isNumberedSessionDirName(basename(resolved))) {
+    return { target: dirname(resolved), sessionDir: resolved };
+  }
+  return { target: resolved };
 }
 
 function migrateCompatibleWorkspaceRun(current: string): string | null {

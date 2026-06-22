@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   assert(ledger[0].cost.tokens_input !== undefined, `ledger row missing token usage: ${JSON.stringify(ledger[0])}`);
 
   const prompt = await readFile(`${paths.artifacts}/iter-1.prompt.txt`, 'utf8');
-  assert(prompt.includes('Treat existing .opt scripts as planner-provided validation artifacts'), 'executor prompt should treat .opt scripts as optional artifacts');
+  assert(prompt.includes('Treat existing scripts under .opt as planner-provided validation artifacts'), 'executor prompt should treat .opt scripts as optional artifacts');
   assert(prompt.includes('Current GOAL.md:'), 'executor prompt missing GOAL.md');
   assert(prompt.includes('Current PLAN.md:'), 'executor prompt missing PLAN.md');
 

@@ -1,12 +1,15 @@
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { atomicWriteFile, ensureDir, exists } from './atomic.js';
 
 const thisFile = fileURLToPath(import.meta.url);
 const THINKLESS_STATE_DIR = '.thinkless';
 const LEGACY_STATE_DIR = '.wici';
+const NUMBERED_SESSION_RE = /^\.thinkless([1-9]\d*)$/;
+
+export const THINKLESS_SESSION_DIR_ENV = 'THINKLESS_SESSION_DIR';
 
 export const SRC_ROOT = resolve(dirname(thisFile), '..');
 const candidateToolRoot = resolve(SRC_ROOT, '..');
@@ -59,8 +62,9 @@ export interface RunPaths {
 export function runPaths(target: string): RunPaths {
   const root = resolve(target);
   const stateDir = resolveStateDir(root);
+  const fileRoot = sessionFileRoot(root, stateDir);
   const legacyStateDir = join(root, LEGACY_STATE_DIR);
-  const opt = join(root, '.opt');
+  const opt = join(fileRoot, '.opt');
   return {
     target: root,
     stateDir,
@@ -81,12 +85,12 @@ export function runPaths(target: string): RunPaths {
     chatSession: join(stateDir, 'chat-session.json'),
     runtimeSelection: join(stateDir, 'runtime-selection.json'),
     goal: join(stateDir, 'goal.json'),
-    goalDoc: join(root, 'GOAL.md'),
+    goalDoc: join(fileRoot, 'GOAL.md'),
     checkpoint: join(stateDir, 'checkpoint.json'),
     lock: join(stateDir, '.lock'),
-    plan: join(root, 'PLAN.md'),
-    assumptions: join(root, 'ASSUMPTIONS.md'),
-    acceptanceSpec: join(root, 'acceptance.spec.json'),
+    plan: join(fileRoot, 'PLAN.md'),
+    assumptions: join(fileRoot, 'ASSUMPTIONS.md'),
+    acceptanceSpec: join(fileRoot, 'acceptance.spec.json'),
     opt,
     measure: join(opt, 'measure.sh'),
     checks: join(opt, 'checks.sh'),
@@ -95,8 +99,8 @@ export function runPaths(target: string): RunPaths {
     validate: join(opt, 'validate.sh'),
     selftestGoodPatch: join(opt, 'selftest-good.patch'),
     selftestBadPatch: join(opt, 'selftest-bad.patch'),
-    baseline: join(root, 'baseline.json'),
-    ledger: join(root, 'ledger.jsonl'),
+    baseline: join(fileRoot, 'baseline.json'),
+    ledger: join(fileRoot, 'ledger.jsonl'),
     lessons: join(stateDir, 'lessons.jsonl'),
     skillsIndex: join(stateDir, 'skills.json'),
     context: join(stateDir, 'context.md'),
@@ -107,11 +111,73 @@ export function runPaths(target: string): RunPaths {
 }
 
 function resolveStateDir(root: string): string {
+  const sessionOverride = sessionDirOverride(root);
+  if (sessionOverride) return sessionOverride;
+  const numbered = latestNumberedSessionDir(root);
+  if (numbered) return numbered;
   const thinkless = join(root, THINKLESS_STATE_DIR);
   if (existsSync(thinkless)) return thinkless;
   const legacy = join(root, LEGACY_STATE_DIR);
-  if (existsSync(legacy)) return legacy;
+  if (hasRunState(legacy)) return legacy;
   return thinkless;
+}
+
+export function allocateNumberedSessionDir(target: string): string {
+  const root = resolve(target);
+  mkdirSync(root, { recursive: true });
+  for (let index = 1; index < 10_000; index += 1) {
+    const candidate = join(root, `.thinkless${index}`);
+    try {
+      mkdirSync(candidate);
+      return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
+      throw error;
+    }
+  }
+  throw new Error(`Could not allocate a Thinkless session directory under ${root}`);
+}
+
+export function latestNumberedSessionDir(target: string): string | null {
+  const root = resolve(target);
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const candidates = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const match = NUMBERED_SESSION_RE.exec(entry.name);
+      return match ? { dir: join(root, entry.name), index: Number(match[1]) } : null;
+    })
+    .filter((entry): entry is { dir: string; index: number } => Boolean(entry))
+    .filter((entry) => hasSessionState(entry.dir))
+    .sort((a, b) => b.index - a.index);
+  return candidates[0]?.dir ?? null;
+}
+
+export function isNumberedSessionDirName(name: string): boolean {
+  return NUMBERED_SESSION_RE.test(name);
+}
+
+function sessionDirOverride(root: string): string | null {
+  const raw = process.env[THINKLESS_SESSION_DIR_ENV]?.trim();
+  return raw ? resolve(root, raw) : null;
+}
+
+function sessionFileRoot(root: string, stateDir: string): string {
+  if (sessionDirOverride(root)) return stateDir;
+  return isNumberedSessionDirName(basename(stateDir)) ? stateDir : root;
+}
+
+function hasRunState(stateDir: string): boolean {
+  return existsSync(join(stateDir, 'goal.json')) || existsSync(join(stateDir, 'checkpoint.json'));
+}
+
+function hasSessionState(stateDir: string): boolean {
+  return hasRunState(stateDir) || existsSync(join(stateDir, 'chat.jsonl')) || existsSync(join(stateDir, 'events.jsonl')) || existsSync(join(stateDir, 'runtime-selection.json'));
 }
 
 export async function ensureRunDirs(paths: RunPaths): Promise<void> {
@@ -132,7 +198,7 @@ export async function ensureTargetGitignore(paths: RunPaths): Promise<void> {
   if (!(await exists(gitDir))) return;
 
   const gitignore = join(paths.target, '.gitignore');
-  const lines = ['.thinkless/', '.wici/'];
+  const lines = ['.thinkless/', '.thinkless*/', '.wici/'];
   if (await exists(gitignore)) {
     const current = await readFile(gitignore, 'utf8');
     const currentLines = new Set(current.split('\n'));

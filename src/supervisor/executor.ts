@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { isAbsolute, join, relative } from 'node:path';
 import { atomicWriteFile, atomicWriteJson, exists } from '../shared/atomic.js';
 import { commandExists, resolveCommandForSpawn } from '../shared/commands.js';
 import { schemaPath, type RunPaths } from '../shared/paths.js';
@@ -225,50 +225,59 @@ async function buildExecutorPrompt(
 ): Promise<string> {
   const goalMarkdown = await readTextIfExists(paths.goalDoc);
   const planMarkdown = await readTextIfExists(paths.plan);
-  const stateDirName = basename(paths.wici);
+  const goalPath = workspaceRelativePath(paths, paths.goalDoc);
+  const planPath = workspaceRelativePath(paths, paths.plan);
+  const optPath = workspaceRelativePath(paths, paths.opt);
+  const resultPath = workspaceRelativePath(paths, join(paths.artifacts, `${artifactId}.json`));
   if (resume) {
     return [
       'Continue the existing Codex session for this WiCi run.',
-      `Supervisor receipt focus: ${stepId}. Use this as orientation only; satisfy the current GOAL.md and PLAN.md as a whole.`,
-      'GOAL.md and PLAN.md have already been updated on disk. Re-read them from the workspace before acting.',
+      `Supervisor receipt focus: ${stepId}. Use this as orientation only; satisfy the current ${goalPath} and ${planPath} as a whole.`,
+      `${goalPath} and ${planPath} have already been updated on disk. Re-read them from the workspace before acting.`,
       steerText ? `New requirement or steering delta to apply now:\n${steerText}` : '',
       'Do not restart the task from scratch. Continue from the existing workspace and remote state; preserve completed useful work.',
-      'If the updated GOAL.md/PLAN.md changes validation, update only the necessary local files/scripts and run the new checks.',
+      `If the updated ${goalPath}/${planPath} changes validation, update only the necessary local files/scripts and run the new checks.`,
       `Use the target repository as the only workspace.`,
       `For long-running installs, builds, SSH tasks, model downloads, and benchmarks, prefer commands that stream progress or write logs you can tail so the TUI remains observable.`,
-      `Treat existing .opt scripts as planner-provided validation artifacts; follow PLAN.md if it explicitly asks you to run or adjust them.`,
+      `Treat existing scripts under ${optPath} as planner-provided validation artifacts; follow ${planPath} if it explicitly asks you to run or adjust them.`,
       '',
       safetyText,
       memoryText ? memoryText : '',
-      `Write result JSON to ${stateDirName}/artifacts/${artifactId}.json with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
+      `Write result JSON to ${resultPath} with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
     ]
       .filter((item) => item !== '')
       .join('\n');
   }
   return [
-    iter === 1 ? 'Execute the current GOAL.md and PLAN.md as one Codex goal.' : 'Continue executing the current GOAL.md and PLAN.md as one Codex goal.',
-    `Supervisor receipt focus: ${stepId}. Use this as orientation for progress reporting; do not ignore other PLAN.md work needed to satisfy the goal.`,
+    iter === 1 ? `Execute the current ${goalPath} and ${planPath} as one Codex goal.` : `Continue executing the current ${goalPath} and ${planPath} as one Codex goal.`,
+    `Supervisor receipt focus: ${stepId}. Use this as orientation for progress reporting; do not ignore other ${planPath} work needed to satisfy the goal.`,
     steerText ? `NOTE new requirement or steering input: ${steerText}` : '',
     `Use the target repository as the only workspace.`,
-    `Treat GOAL.md and PLAN.md below as the execution goal input. Re-read the files from disk if you need exact current contents.`,
-    `You may edit PLAN.md, GOAL.md, and planner-provided .opt scripts when execution teaches you the plan is wrong, incomplete, or needs a better strategy. Keep the user's requirement intact and record the reasoning in the files you change.`,
+    `Treat ${goalPath} and ${planPath} below as the execution goal input. Re-read the files from disk if you need exact current contents.`,
+    `You may edit ${planPath}, ${goalPath}, and planner-provided scripts under ${optPath} when execution teaches you the plan is wrong, incomplete, or needs a better strategy. Keep the user's requirement intact and record the reasoning in the files you change.`,
     `Do not stop at the first failing command. Diagnose the failure, inspect logs/state, update the plan if needed, and continue with the best next attempt until the goal is actually satisfied or you have concrete evidence that it cannot be satisfied.`,
     `When the task depends on unfamiliar tools, models, services, runtimes, or deployment practices, research the relevant documentation or tutorials yourself using the native tools available to Codex; do not require the user to include research/debugging instructions in Chat.`,
     `For long-running installs, builds, SSH tasks, model downloads, and benchmarks, prefer commands that stream progress or write logs you can tail so the TUI remains observable.`,
-    `Treat existing .opt scripts as planner-provided validation artifacts; follow PLAN.md if it explicitly asks you to run or adjust them.`,
+    `Treat existing scripts under ${optPath} as planner-provided validation artifacts; follow ${planPath} if it explicitly asks you to run or adjust them.`,
     '',
-    'Current GOAL.md:',
+    `Current ${goalPath}:`,
     fencedMarkdown(goalMarkdown || '(missing GOAL.md; inspect the workspace before proceeding)'),
     '',
-    'Current PLAN.md:',
+    `Current ${planPath}:`,
     fencedMarkdown(planMarkdown || '(missing PLAN.md; stop and report this as a WiCi setup error)'),
     '',
     safetyText,
     memoryText ? memoryText : '',
-    `Write result JSON to ${stateDirName}/artifacts/${artifactId}.json with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
+    `Write result JSON to ${resultPath} with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
   ]
     .filter((item) => item !== '')
     .join('\n');
+}
+
+function workspaceRelativePath(paths: RunPaths, path: string): string {
+  const rel = relative(paths.target, path) || '.';
+  if (rel.startsWith('..') || isAbsolute(rel)) return path;
+  return rel;
 }
 
 async function readTextIfExists(path: string): Promise<string> {

@@ -151,10 +151,10 @@ async function main(): Promise<void> {
   assert(!files.supervisor.includes('assertNoPendingToolUpdatesForLongRun'), 'fresh V1 supervisor must not block long runs on pending tool updates');
   assert(!files.selfupdate.includes('Refusing to start long run because tool update is pending'), 'selfupdate must not contain the old pending-update start gate');
   assert(!files.context.includes('locked eval scripts'), 'direct context must not tell Codex eval scripts are locked by default');
-  assert(files.executor.includes('Treat existing .opt scripts as planner-provided validation artifacts'), 'executor prompt must treat .opt scripts as planner artifacts');
-  assert(files.executor.includes('You may edit PLAN.md') && files.executor.includes('Do not stop at the first failing command'), 'executor prompt must authorize recovery/debug/plan updates');
+  assert(files.executor.includes('Treat existing scripts under') && files.executor.includes('planner-provided validation artifacts'), 'executor prompt must treat .opt scripts as planner artifacts');
+  assert(files.executor.includes('You may edit ${planPath}') && files.executor.includes('Do not stop at the first failing command'), 'executor prompt must authorize recovery/debug/plan updates');
   assert(files.executor.includes('research the relevant documentation or tutorials yourself'), 'executor prompt must make research/debugging a Codex responsibility, not a Chat input requirement');
-  assert(files.executor.includes('Current GOAL.md:') && files.executor.includes('Current PLAN.md:'), 'executor prompt must embed GOAL.md and PLAN.md as Codex goal input');
+  assert(files.executor.includes('Current ${goalPath}:') && files.executor.includes('Current ${planPath}:'), 'executor prompt must embed GOAL.md and PLAN.md as Codex goal input');
   assert(files.executor.includes('as one Codex goal') && files.executor.includes('Supervisor receipt focus'), 'executor prompt must feed GOAL.md + PLAN.md as one Codex goal while keeping only a thin receipt focus');
   assert(!files.executor.includes('Execute plan step ${stepId} from PLAN.md.'), 'executor prompt must not reduce fresh V1 execution to a single supervisor-controlled plan step');
   assert(

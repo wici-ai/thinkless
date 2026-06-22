@@ -218,6 +218,7 @@ export function App({
     supervisorStarted: started,
     state
   });
+  const visibleState = blankRunChat ? { ...state, goalDoc: '', plan: '' } : state;
 
   return (
     <Box flexDirection="column" height={height}>
@@ -248,7 +249,7 @@ export function App({
               busy={chatBusy}
             />
           ) : workspaceTab === 'plan' ? (
-            <GoalPane state={state} contentWidth={workspaceContentWidth} viewportHeight={workspaceViewportHeight} showTitle={false} active={interactive && !runtimeSelectorOpen} />
+            <GoalPane state={visibleState} contentWidth={workspaceContentWidth} viewportHeight={workspaceViewportHeight} showTitle={false} active={interactive && !runtimeSelectorOpen} />
           ) : (
             <ExecPane state={state} contentWidth={workspaceContentWidth} viewportHeight={workspaceViewportHeight} showTitle={false} active={interactive && !runtimeSelectorOpen} />
           )}
@@ -258,8 +259,8 @@ export function App({
         target={target}
         interactive={interactive}
         outbox={state.outbox}
-        goalDoc={state.goalDoc}
-        plan={state.plan}
+        goalDoc={visibleState.goalDoc}
+        plan={visibleState.plan}
         events={state.events}
         chat={state.chat}
         mode={supervisor.mode}
@@ -407,7 +408,7 @@ export function shouldUseChatAgentForBlankRun(input: {
 }
 
 function hasRunBlackboard(state: ReturnType<typeof useRunState>): boolean {
-  if (state.goal || state.checkpoint || state.goalDoc.trim() || state.plan.trim() || state.ledger.length > 0) return true;
+  if (state.goal || state.checkpoint || state.ledger.length > 0) return true;
   if (state.outbox.some((message) => !isInitialGoalRequiredText(message.text))) return true;
   return state.events.some((event) => !isInitialGoalRequiredText(event.message));
 }

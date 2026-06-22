@@ -36,7 +36,7 @@ export async function ensureGitRepo(paths: RunPaths, config: WiCiConfig): Promis
 async function hasOnlyWiCiScaffold(target: string): Promise<boolean> {
   try {
     const entries = await readdir(target, { withFileTypes: true });
-    return entries.every((entry) => WICI_SCAFFOLD_ENTRIES.has(entry.name));
+    return entries.every((entry) => WICI_SCAFFOLD_ENTRIES.has(entry.name) || /^\.thinkless[1-9]\d*$/.test(entry.name));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
     throw error;
@@ -109,7 +109,7 @@ export async function revertToBest(paths: RunPaths, bestCommit: string): Promise
   } else {
     await git(paths, ['restore', '--staged', '--worktree', '.'], false);
   }
-  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.wici/'], false);
+  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.thinkless*/', '-e', '.wici/'], false);
 }
 
 export async function resetToCommit(paths: RunPaths, commit: string): Promise<void> {
@@ -117,5 +117,5 @@ export async function resetToCommit(paths: RunPaths, commit: string): Promise<vo
     throw new Error(`Cannot reset to invalid WiCi checkpoint commit: ${commit}`);
   }
   await git(paths, ['reset', '--hard', commit]);
-  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.wici/'], false);
+  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.thinkless*/', '-e', '.wici/'], false);
 }
