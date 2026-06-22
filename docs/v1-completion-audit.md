@@ -78,9 +78,10 @@ This audit records what is currently proven, what is covered by automated checks
 | Hot-reload steering is persisted into `GOAL.md`, not only passed as a transient prompt note | `npm run verify:hotreload` report `goal_doc_contains_steering`; `npm run verify:v1-requirements` | Covered |
 | Safe-point inbox draining is idempotent through `drained_inbox[]` | `npm run verify:hotreload` | Covered |
 | `checkpoint.json`, `events.jsonl`, and `ledger.jsonl` support direct V1 crash recovery and resume | `npm run verify:v1-slice`, `npm run verify:direct-recovery`, `npm run verify:durability` report `direct_recovered`, `npm run verify:setup-state` | Covered |
-| `/resume` in the TUI opens a selectable recovery page instead of blindly continuing the displayed run | `npm run verify:tui-resume-selector-pty` types `/resume` in a real PTY, shows runnable/blocked candidates, selects `.thinkless2`, and verifies new supervisor events in that selected session. `npm run verify:tui-resume-selector-built` repeats the selector flow through the built CLI entrypoint and verifies full-context preflight metadata. | Covered |
-| Resume candidates preserve full run context and distinguish runnable from read-only blocked states | `npm run verify:resume-selector` covers current, numbered `.thinklessN`, legacy `.wici`, chat/runtime presence, GOAL/PLAN/checkpoint/ledger/events, and planner/executor session metadata | Covered |
+| `/resume` in the TUI opens a selectable recovery page instead of blindly continuing the displayed run | `npm run verify:tui-resume-selector-pty` types `/resume` in a real PTY, shows runnable/blocked candidates, selects `.thinkless2`, and verifies new supervisor events in that selected session. `npm run verify:tui-resume-selector-built` repeats the selector flow through the built CLI entrypoint, verifies full-context preflight metadata, proves up/down movement, Enter launch, Escape cancellation, and refuses blocked candidates without `RESUME_CONTEXT_VALIDATED`, `SUPERVISOR_START`, or `EXECUTOR_RESUME_FALLBACK` side effects. | Covered |
+| Resume candidates preserve full run context and distinguish runnable from read-only blocked states | `npm run verify:resume-selector` covers current, numbered `.thinklessN`, legacy `.wici`, chat/runtime presence, GOAL/PLAN/checkpoint/ledger/events, and planner/executor session metadata. `npm run verify:tui-resume-cross-target` selects a historical workspace run and verifies `RESUME_CONTEXT_VALIDATED` plus `SUPERVISOR_START` are appended only to the selected target/session while Chat transcript/runtime selection, GOAL.md, PLAN.md, ledger, checkpoint, planner session, executor session, and executor app thread metadata are preserved. | Covered |
 | Interrupted planner/executor resume is preflighted before launch | `npm run verify:resume-rerunnable` covers `RESUME_CONTEXT_BLOCKED`, `RESUME_CONTEXT_VALIDATED`, and `EXECUTOR_RESUME_FALLBACK` so blocked planner states and executor rerun fallback are visible | Covered |
+| Packaged `/resume` acceptance is included in the V1 aggregate gate | `npm run verify:v1-core` includes `verify:tui-resume-selector-built` and `verify:tui-resume-cross-target` alongside the source selector and runnable-preflight resume checks | Covered |
 | Existing goals can be continued or rewound from documented commands | README Resume Or Re-Run section; `npm run verify:durability`, `npm run verify:resume-iteration`, `npm run verify:docs-sync` | Covered |
 | Git checkpoint and rollback path exists | `npm run verify:rollback`, README rollback section | Covered |
 | TUI exposes the current rollback/version point instead of hiding it in logs | `npm run verify:tui-structure` checks Header `rollbackSummary` renders `rollback pending` before a checkpoint and a short rollback commit when available | Covered |
@@ -129,6 +130,8 @@ npm run verify:tool-commands
 npm run verify:hotreload
 npm run verify:hotreload-resume
 npm run verify:tui-chat-intake
+npm run verify:tui-resume-selector-built
+npm run verify:tui-resume-cross-target
 npm run verify:tui-real-fake-chat
 npm run verify:demo-tui
 npm run verify:tui-live
