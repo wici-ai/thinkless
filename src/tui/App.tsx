@@ -408,6 +408,7 @@ function ResumeSelector({
   onCancel: () => void;
 }) {
   const visible = candidates.slice(0, 8);
+  const selectedCandidate = candidates[selectedIndex];
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
       <Text color="yellow" bold>
@@ -428,6 +429,11 @@ function ResumeSelector({
           );
         })
       )}
+      {selectedCandidate ? (
+        <Text color={selectedCandidate.runnable ? 'white' : 'yellow'}>
+          {selectedCandidate.runnable ? 'Selected runnable' : 'Selected blocked'}: {selectedCandidate.reason}
+        </Text>
+      ) : null}
     </Box>
   );
 }
