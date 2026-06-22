@@ -59,6 +59,7 @@ npm run verify:curriculum
 npm run verify:rollback
 npm run verify:setup-state
 npm run verify:install-bootstrap
+npm run verify:install-clean-env
 npm run verify:ssh-evidence
 npm run verify:canary-evidence
 npm run verify:release-tag
@@ -72,7 +73,9 @@ Individual and extended verifier scripts remain available:
 npm run typecheck
 npm run build
 npm run smoke
+npm run verify:audio-dictation
 npm run verify:bin
+npm run verify:direct-plan-continuation
 npm run verify:durability
 npm run verify:existing-goal
 npm run verify:hotreload
@@ -91,7 +94,11 @@ npm run verify:canary-evidence
 npm run verify:release-tag
 npm run verify:no-secrets
 npm run verify:install-bootstrap
+npm run verify:install-clean-env
 npm run verify:limit-artifact
+npm run verify:runtime-fallback
+npm run verify:startup-self-update
+npm run verify:state-paths
 ```
 
 Legacy optimizer compatibility checks are intentionally outside the fresh V1 gate. They keep the old benchmark/baseline path buildable for existing fixtures, but they are not requirements for starting Codex from a new Chat goal:
@@ -151,7 +158,7 @@ npx tsx src/cli.tsx doctor --update
 npx tsx src/cli.tsx doctor --deep
 ```
 
-`doctor --update` runs the Codex and Claude updaters, then reports health. `doctor --deep` performs a Claude print-mode auth probe. On supervisor start, Thinkless automatically checks for Codex/Claude updates at run boundaries when `tools.auto_update` is true, then records the versions in the checkpoint, and pending updates are not a Thinkless supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run.
+`doctor --update` runs the Codex and Claude updaters, then reports health. `doctor --deep` performs a Claude print-mode auth probe. On supervisor start, Thinkless automatically checks for Codex/Claude updates at run boundaries when `tools.auto_update` is true, then records the versions in the checkpoint, and pending updates are not a WiCi supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run.
 
 Use `--mode stub`, `--mode auto`, or `--mode real` on `run` / `tui`.
 
@@ -287,7 +294,7 @@ From a clean machine, use the public release installer instead:
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
 ```
 
-That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, GitHub CLI, Codex CLI, and Claude Code CLI, then installs Thinkless with npm lifecycle scripts enabled. It adds npm's global bin directory to `~/.zprofile` and `~/.zshrc` when needed, verifies `thinkless`, `codex`, `claude`, and `gh` from clean zsh login and interactive shells, then prints the exact `export PATH=...` and `export PATH=... && thinkless` commands to update the current terminal or launch Thinkless immediately.
+That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, GitHub CLI, Codex CLI, and Claude Code CLI, then installs Thinkless with npm lifecycle scripts enabled. It adds the discovered command directories for `node`, `npm`, `thinkless`, `codex`, `claude`, and `gh` to `~/.zprofile` and `~/.zshrc` when needed, verifies those commands from clean zsh login and interactive shells, then prints the exact `export PATH=...` and `export PATH=... && thinkless` commands to update the current terminal or launch Thinkless immediately.
 
 After command verification, the public installer and `scripts/bootstrap-macos.sh` always print an auth onboarding status for Codex, GitHub CLI, and Claude. When a terminal is available, the installer prompts through `/dev/tty` so `curl | bash` can still run `codex login` or `codex`, `gh auth login`, and `claude` interactively. Set `THINKLESS_AUTH_ONBOARDING=0` to skip the prompts and finish auth later. If auth is skipped, declined, or unavailable in a non-interactive shell, the installer reports that auth is pending instead of claiming full setup is complete.
 

@@ -141,7 +141,7 @@ if (!target) {
   console.error('WICI_FAKE_TARGET missing');
   process.exit(2);
 }
-const wici = join(target, '.wici');
+const wici = join(target, '.thinkless');
 mkdirSync(wici, { recursive: true });
 const prompt = args.at(-1) ?? '';
 appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args, prompt }) + '\\n');

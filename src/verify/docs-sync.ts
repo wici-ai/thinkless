@@ -161,7 +161,7 @@ async function main(): Promise<void> {
       readme.includes('Apple Command Line Tools') &&
       readme.includes('~/.zprofile') &&
       readme.includes('~/.zshrc') &&
-      readme.includes('`thinkless`, `codex`, `claude`, and `gh`') &&
+      readme.includes('`node`, `npm`, `thinkless`, `codex`, `claude`, and `gh`') &&
       readme.includes('clean zsh login and interactive shells') &&
       readme.includes('export PATH=... && thinkless') &&
       readme.includes('auth onboarding status') &&

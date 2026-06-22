@@ -280,7 +280,7 @@ function verifyInputTraceFilter(): void {
 function verifyRuntimeSettings(): void {
   const defaults = defaultRuntimeSelection();
   assert(defaults.chat?.agent === 'claude' && defaults.chat.model === 'claude-opus-4-8' && defaults.chat.effort === 'high', 'Chat runtime should default to Claude claude-opus-4-8 high');
-  assert(defaults.planner?.agent === 'claude' && defaults.planner.model === 'claude-opus-4-8' && defaults.planner.effort === 'high', 'PLAN runtime should default to Claude claude-opus-4-8 high');
+  assert(defaults.planner?.agent === 'codex' && defaults.planner.model === 'gpt-5.5' && defaults.planner.effort === 'xhigh', 'PLAN runtime should default to Codex gpt-5.5 xhigh');
   assert(defaults.executor?.agent === 'codex' && defaults.executor.model === 'gpt-5.5' && defaults.executor.effort === 'medium', 'EXECUTION runtime should default to Codex gpt-5.5 medium');
 
   const line = formatRuntimeSelectorLine(defaults, 'executor', 'agent');
@@ -298,7 +298,7 @@ function verifyRuntimeSettings(): void {
   const plannerCodex = parseRuntimeCommand('/agent plan codex', defaults);
   assert(plannerCodex?.next.planner, `PLAN agent switch should produce a planner runtime: ${JSON.stringify(plannerCodex)}`);
   const plannerCodexRuntime = plannerCodex.next.planner;
-  assert(plannerCodexRuntime.agent === 'codex' && plannerCodexRuntime.model === 'gpt-5.5' && plannerCodexRuntime.effort === 'medium', `PLAN agent switch should force Codex defaults: ${JSON.stringify(plannerCodex)}`);
+  assert(plannerCodexRuntime.agent === 'codex' && plannerCodexRuntime.model === 'gpt-5.5' && plannerCodexRuntime.effort === 'xhigh', `PLAN agent switch should force planner Codex defaults: ${JSON.stringify(plannerCodex)}`);
 
   const plannerFast = parseRuntimeCommand('/effort plan fast', plannerCodex.next);
   assert(plannerFast?.next.planner, `PLAN effort switch should produce a planner runtime: ${JSON.stringify(plannerFast)}`);

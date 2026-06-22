@@ -221,7 +221,7 @@ if (!iter) {
 }
 
 const cwd = process.cwd();
-const artifacts = join(cwd, '.wici', 'artifacts');
+const artifacts = join(cwd, '.thinkless', 'artifacts');
 mkdirSync(artifacts, { recursive: true });
 const result = {
   step_done: iter > 1,
@@ -236,7 +236,7 @@ const outputIndex = args.indexOf('--output-last-message');
 if (outputIndex >= 0 && args[outputIndex + 1]) {
   writeFileSync(resolve(cwd, args[outputIndex + 1]), result.notes + '\\n');
 }
-appendFileSync(join(cwd, '.wici', 'fake-codex-args.jsonl'), JSON.stringify({ args, prompt, iter, cwd }) + '\\n');
+appendFileSync(join(cwd, '.thinkless', 'fake-codex-args.jsonl'), JSON.stringify({ args, prompt, iter, cwd }) + '\\n');
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100 + iter, output_tokens: 10 + iter, cost_usd: Number((0.001 * iter).toFixed(3)) } }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'message', iter } }));
 `;

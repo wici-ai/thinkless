@@ -167,6 +167,10 @@ function commandExists(command) {
 function runShell(command, extraEnv = {}) {
   const path = [
     join(homedir(), '.local', 'bin'),
+    join(homedir(), '.codex', 'bin'),
+    join(homedir(), '.claude', 'local'),
+    join(homedir(), '.claude', 'bin'),
+    join(homedir(), '.volta', 'bin'),
     '/opt/homebrew/bin',
     '/usr/local/bin',
     extraEnv.PATH || process.env.PATH || ''

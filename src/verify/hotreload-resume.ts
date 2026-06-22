@@ -30,6 +30,7 @@ async function main(): Promise<void> {
       env: {
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        WICI_PLANNER_AGENT: 'claude',
         WICI_FAKE_TARGET: target,
         WICI_PAUSE_AFTER_EVENT: 'EXECUTE_DONE:5000'
       },
@@ -174,7 +175,7 @@ if (!target) {
   console.error('WICI_FAKE_TARGET missing');
   process.exit(2);
 }
-const wici = join(target, '.wici');
+const wici = join(target, '.thinkless');
 mkdirSync(wici, { recursive: true });
 appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args }) + '\\n');
 const outIndex = args.indexOf('--output-last-message');

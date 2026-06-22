@@ -179,6 +179,60 @@ emit([
   const fakeClaude = join(fakeBin, 'claude');
   await writeFile(fakeClaude, script);
   await chmod(fakeClaude, 0o755);
+
+  const fakeCodex = join(fakeBin, 'codex');
+  await writeFile(
+    fakeCodex,
+    `#!/usr/bin/env node
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(2);
+if (args.includes('--version')) {
+  console.log('codex-cli 0.999.0');
+  process.exit(0);
+}
+if (args[0] === 'update') {
+  console.log('updated');
+  process.exit(0);
+}
+if (args[0] === 'doctor') {
+  console.log('0 fail degraded');
+  process.exit(0);
+}
+const outIndex = args.indexOf('--output-last-message');
+const out = outIndex >= 0 ? args[outIndex + 1] : '';
+if (!out) {
+  console.error('missing --output-last-message');
+  process.exit(2);
+}
+mkdirSync(dirname(out), { recursive: true });
+const prompt = args.at(-1) || '';
+const isResume = args[0] === 'exec' && args[1] === 'resume';
+console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-planner-session' }));
+if (!isResume && prompt.includes('${firstChat}')) {
+  writeFileSync(out, '## QUESTION\\n\\nWhich remote target should the planner use for this benchmark?\\n');
+  process.exit(0);
+}
+if (!isResume) {
+  console.error('fake codex expected initial PTY clarification goal');
+  process.exit(3);
+}
+if (!prompt.includes('${answerText}')) {
+  console.error('planner resume prompt did not include PTY clarification answer');
+  process.exit(4);
+}
+writeFileSync(out, [
+  '## PLAN.md',
+  '',
+  '# WiCi PTY Clarification Plan',
+  '',
+  '- [ ] S1 Remote benchmark bootstrap',
+  '  - Action: let Codex inspect the clarified remote target and prepare the benchmark.',
+  '  - Validation: Codex reports the remote runtime discovery result.'
+].join('\\n') + '\\n');
+`
+  );
+  await chmod(fakeCodex, 0o755);
 }
 
 function stripAnsi(value: string): string {

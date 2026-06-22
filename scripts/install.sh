@@ -8,8 +8,29 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+path_prepend_once() {
+  local dir
+  for dir in "$@"; do
+    if [[ -z "$dir" || ! -d "$dir" ]]; then
+      continue
+    fi
+    case ":$PATH:" in
+      *":$dir:"*) ;;
+      *) PATH="$dir:$PATH" ;;
+    esac
+  done
+  export PATH
+}
+
 prepend_common_paths() {
-  export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  path_prepend_once \
+    "$HOME/.local/bin" \
+    "$HOME/.codex/bin" \
+    "$HOME/.claude/local" \
+    "$HOME/.claude/bin" \
+    "$HOME/.volta/bin" \
+    "/opt/homebrew/bin" \
+    "/usr/local/bin"
 }
 
 load_brew() {
@@ -60,20 +81,71 @@ npm_global_bin() {
   printf '%s/bin\n' "$prefix"
 }
 
-add_to_current_path() {
-  local bin="$1"
-  case ":$PATH:" in
-    *":$bin:"*) ;;
-    *) export PATH="$bin:$PATH" ;;
-  esac
+command_dir() {
+  local resolved
+  resolved="$(command -v "$1" 2>/dev/null || true)"
+  if [[ -n "$resolved" && "$resolved" == */* ]]; then
+    printf '%s\n' "${resolved%/*}"
+  fi
+}
+
+activation_path_dirs() {
+  local npm_bin
+  npm_bin="$(npm_global_bin 2>/dev/null || true)"
+  {
+    printf '%s\n' "$npm_bin"
+    command_dir node
+    command_dir npm
+    command_dir thinkless
+    command_dir codex
+    command_dir claude
+    command_dir gh
+    command_dir git
+    command_dir brew
+    printf '%s\n' "$HOME/.local/bin"
+    printf '%s\n' "$HOME/.codex/bin"
+    printf '%s\n' "$HOME/.claude/local"
+    printf '%s\n' "$HOME/.claude/bin"
+    printf '%s\n' "$HOME/.volta/bin"
+    printf '%s\n' "/opt/homebrew/bin"
+    printf '%s\n' "/usr/local/bin"
+  } | awk 'NF && !seen[$0]++'
+}
+
+join_path_dirs() {
+  local joined=""
+  local dir
+  for dir in "$@"; do
+    if [[ -z "$joined" ]]; then
+      joined="$dir"
+    else
+      joined="$joined:$dir"
+    fi
+  done
+  printf '%s' "$joined"
+}
+
+escape_double_quoted() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//\$/\\\$}"
+  value="${value//\`/\\\`}"
+  printf '%s' "$value"
 }
 
 persist_zsh_path() {
-  local bin="$1"
-  if [[ "$(uname -s)" != "Darwin" || ! -d "$bin" ]]; then
+  if [[ "$(uname -s)" != "Darwin" || "$#" -eq 0 ]]; then
     return
   fi
-  local line="export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\""
+  local path_prefix
+  path_prefix="$(join_path_dirs "$@")"
+  if [[ -z "$path_prefix" ]]; then
+    return
+  fi
+  local escaped
+  escaped="$(escape_double_quoted "$path_prefix")"
+  local line="export PATH=\"$escaped:\$PATH\""
   local file
   for file in "$HOME/.zprofile" "$HOME/.zshrc"; do
     if [[ -f "$file" ]] && grep -F "$line" "$file" >/dev/null 2>&1; then
@@ -84,7 +156,7 @@ persist_zsh_path() {
       echo "# Added by Thinkless installer"
       echo "$line"
     } >> "$file"
-    echo "thinkless install: added $bin to ${file/#$HOME/~} for zsh"
+    echo "thinkless install: added command paths to ${file/#$HOME/~} for zsh"
   done
 }
 
@@ -122,48 +194,66 @@ install_agent_clis() {
 }
 
 verify_required_commands() {
-  local bin
-  if ! bin="$(npm_global_bin)"; then
+  local npm_bin
+  if ! npm_bin="$(npm_global_bin)"; then
     echo "thinkless install: could not determine npm global bin directory." >&2
     exit 1
   fi
-  add_to_current_path "$bin"
-  persist_zsh_path "$bin"
-  local clean_check='for cmd in thinkless codex claude gh; do command -v "$cmd" >/dev/null 2>&1 || exit 127; done; thinkless --version >/dev/null && codex --version >/dev/null && claude --version >/dev/null && gh --version >/dev/null'
+  prepend_common_paths
+  path_prepend_once "$npm_bin"
+  local path_dirs=()
+  local dir
+  while IFS= read -r dir; do
+    if [[ -d "$dir" ]]; then
+      path_dirs+=("$dir")
+    fi
+  done < <(activation_path_dirs)
+  path_prepend_once "${path_dirs[@]}"
+  persist_zsh_path "${path_dirs[@]}"
+  local path_export
+  path_export="$(escape_double_quoted "$(join_path_dirs "${path_dirs[@]}")")"
+  local clean_check="export THINKLESS_SELF_UPDATE=0; export PATH=\"$path_export:\$PATH\"; for cmd in node npm thinkless codex claude gh; do command -v \"\$cmd\" >/dev/null 2>&1 || exit 127; done; thinkless --version >/dev/null && codex --version >/dev/null && claude --version >/dev/null && gh --version >/dev/null"
   if [[ "$(uname -s)" == "Darwin" && -x /bin/zsh ]]; then
     if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -lc "$clean_check"; then
-      echo "thinkless install: installed, but a clean zsh login shell cannot find thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"" >&2
+      echo "thinkless install: installed, but a clean zsh login shell cannot find node, npm, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
       exit 1
     fi
     if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -ic "$clean_check"; then
-      echo "thinkless install: installed, but a clean interactive zsh shell cannot find thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"" >&2
+      echo "thinkless install: installed, but a clean interactive zsh shell cannot find node, npm, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
       exit 1
     fi
   else
     local cmd
-    for cmd in thinkless codex claude gh; do
+    for cmd in node npm thinkless codex claude gh; do
       if ! command_exists "$cmd"; then
-        echo "thinkless install: installed, but $cmd is not on PATH. Add $bin, \$HOME/.local/bin, /opt/homebrew/bin, and /usr/local/bin to PATH and retry." >&2
+        echo "thinkless install: installed, but $cmd is not on PATH. Add $(join_path_dirs "${path_dirs[@]}") to PATH and retry." >&2
         exit 1
       fi
     done
-    thinkless --version >/dev/null
+    THINKLESS_SELF_UPDATE=0 thinkless --version >/dev/null
     codex --version >/dev/null
     claude --version >/dev/null
     gh --version >/dev/null
   fi
-  echo "thinkless install: verified thinkless, codex, claude, and gh on PATH"
+  echo "thinkless install: verified node, npm, thinkless, codex, claude, and gh on PATH"
 }
 
 print_path_activation_note() {
-  local bin
-  bin="$(npm_global_bin 2>/dev/null || true)"
-  if [[ "$(uname -s)" == "Darwin" && -n "$bin" ]]; then
+  local path_dirs=()
+  local dir
+  while IFS= read -r dir; do
+    if [[ -d "$dir" ]]; then
+      path_dirs+=("$dir")
+    fi
+  done < <(activation_path_dirs)
+  local path_prefix
+  path_prefix="$(join_path_dirs "${path_dirs[@]}")"
+  if [[ "$(uname -s)" == "Darwin" && -n "$path_prefix" ]]; then
     echo "thinkless install: PATH updates were written to ~/.zprofile and ~/.zshrc for new zsh sessions."
     echo "thinkless install: open a new terminal, or update this terminal now with:"
-    echo "  export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\""
+    echo "  export PATH=\"$path_prefix:\$PATH\""
     echo "thinkless install: to launch Thinkless in this terminal now, run:"
-    echo "  export PATH=\"$bin:\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\" && thinkless"
+    echo "  export PATH=\"$path_prefix:\$PATH\" && thinkless"
   fi
 }
 

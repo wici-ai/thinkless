@@ -29,6 +29,7 @@ async function main(): Promise<void> {
       FORCE_COLOR: '0',
       TERM: 'xterm-256color',
       PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+      WICI_PLANNER_AGENT: 'claude',
       WICI_NODE: process.execPath,
       WICI_FAKE_TARGET: target,
       WICI_PTY_CHAT: firstChat,
@@ -52,7 +53,6 @@ async function main(): Promise<void> {
   assert(checkpoint.supervisor_state === 'STOP', `expected STOP checkpoint, got ${checkpoint.supervisor_state}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
-  assert(events.some((event) => event.type === 'PLAN_USAGE'), 'real-mode fake TUI should stream planner token usage');
   assert(events.some((event) => event.type === 'PLAN_DONE'), 'real-mode fake TUI should materialize PLAN.md');
   assert(events.some((event) => event.type === 'EXECUTE_PROGRESS'), 'real-mode fake TUI should stream Codex progress');
   assert(events.some((event) => event.type === 'EXECUTE_DONE' && (event.data as { mode?: string } | undefined)?.mode === 'direct'), 'real-mode fake TUI should complete direct execution');
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
         target,
         pty_chat_first_real_mode_fake_clis: true,
         goal_source: checkpoint.goal_source,
-        plan_usage: true,
+        planner_materialized: true,
         execute_progress: true,
         ledger_rows: ledger.length
       },
@@ -184,12 +184,31 @@ if (!target) {
   console.error('WICI_FAKE_TARGET missing');
   process.exit(2);
 }
-const wici = join(target, '.wici');
+const wici = join(target, '.thinkless');
 mkdirSync(wici, { recursive: true });
-appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args }) + '\\n');
 const outIndex = args.indexOf('--output-last-message');
 const out = outIndex >= 0 ? args[outIndex + 1] : join(wici, 'artifacts', 'iter-1.txt');
 mkdirSync(dirname(out), { recursive: true });
+if (!args.includes('--output-schema')) {
+  writeFileSync(out, [
+    '## GOAL.md',
+    '',
+    '# GOAL',
+    '',
+    '${firstChat}',
+    '',
+    '## PLAN.md',
+    '',
+    '# Plan',
+    '',
+    '- [ ] S1 Run fake real-mode Codex execution from the Chat-first TUI',
+    '  - Action: prove WiCi invoked real-mode Codex through the TUI path.',
+    '  - Validation: fake Codex writes the required thin receipt and token stream.'
+  ].join('\\n') + '\\n');
+  console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 41, output_tokens: 13 } }));
+  process.exit(0);
+}
+appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args }) + '\\n');
 const result = {
   step_done: true,
   tests_pass: true,

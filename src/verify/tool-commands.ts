@@ -1,5 +1,5 @@
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { basename, delimiter, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { buildExecutorArgs } from '../supervisor/executor.js';
 import { buildChatArgs, buildCodexChatArgs, extractCodexSessionId, runChatTurn } from '../supervisor/chatAgent.js';
@@ -324,8 +324,8 @@ async function main(): Promise<void> {
   assert(highEffortCodex.includes('-c') && highEffortCodex.includes('model_reasoning_effort="high"'), 'executor must map effort selection to Codex config override');
   const loadedConfig = await loadConfig('stub');
   assert(loadedConfig.tools.chat?.command === 'claude', 'default config should expose Chat agent command');
-  assert(loadedConfig.tools.chat?.model === 'claude-opus-4-8' && loadedConfig.tools.planner.model === 'claude-opus-4-8', 'Claude-backed panes must force claude-opus-4-8 by default');
-  assert(loadedConfig.tools.chat?.effort === 'high' && loadedConfig.tools.planner.effort === 'high', 'Claude-backed panes must default to high effort');
+  assert(loadedConfig.tools.chat?.model === 'claude-opus-4-8' && loadedConfig.tools.chat?.effort === 'high', 'Claude-backed Chat pane must default to claude-opus-4-8 high');
+  assert(loadedConfig.tools.planner.command === 'codex' && loadedConfig.tools.planner.model === 'gpt-5.5' && loadedConfig.tools.planner.effort === 'xhigh', 'Codex-backed planner must default to gpt-5.5 xhigh');
   assert(loadedConfig.tools.executor.model === 'gpt-5.5' && loadedConfig.tools.executor.effort === 'medium', 'Codex-backed executor must force gpt-5.5 medium by default');
   const switchedConfig = await loadConfig('stub');
   applyRuntimeSelection(switchedConfig, { planner: { agent: 'codex', effort: 'fast' }, executor: { agent: 'claude', effort: 'ultracode' } });
@@ -398,7 +398,7 @@ process.exit(1);
   const paths = runPaths(target);
   await ensureRunDirs(paths);
   const originalPath = process.env.PATH;
-  process.env.PATH = `${fakeBin}${delimiter}${originalPath ?? ''}`;
+  process.env.PATH = `${fakeBin}${delimiter}${dirname(process.execPath)}${delimiter}/usr/bin${delimiter}/bin`;
   try {
     const result = await runChatTurn({
       paths,
@@ -412,7 +412,7 @@ process.exit(1);
     });
     assert(result.degraded, `Claude Chat failure should degrade locally: ${JSON.stringify(result)}`);
     assert(result.reply.includes('503 No available accounts'), `Claude Chat failure detail was swallowed:\n${result.reply}`);
-    assert(result.reply.includes('.wici/artifacts/chat-claude-'), `Claude Chat failure should include artifact path:\n${result.reply}`);
+    assert(result.reply.includes('artifacts/chat-claude-'), `Claude Chat failure should include artifact path:\n${result.reply}`);
     const files = await readdir(paths.artifacts);
     const allLog = files.find((name) => /^chat-claude-.*-fresh\.all\.log$/.test(name));
     assert(allLog, `Claude Chat failure did not write all.log artifact: ${JSON.stringify(files)}`);
@@ -446,8 +446,8 @@ const out = args[args.indexOf('--output-last-message') + 1];
 const resumeIndex = args.indexOf('resume');
 const resumed = resumeIndex >= 0;
 mkdirSync(dirname(out), { recursive: true });
-mkdirSync(join(target, '.wici'), { recursive: true });
-appendFileSync(join(target, '.wici', 'fake-codex-chat-args.jsonl'), JSON.stringify({ args }) + '\\n');
+mkdirSync(join(target, '.thinkless'), { recursive: true });
+appendFileSync(join(target, '.thinkless', 'fake-codex-chat-args.jsonl'), JSON.stringify({ args }) + '\\n');
 writeFileSync(out, [
   '## REPLY',
   '',
