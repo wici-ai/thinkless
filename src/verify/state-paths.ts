@@ -17,6 +17,8 @@ async function main(): Promise<void> {
     await mkdir(fresh, { recursive: true });
     const freshPaths = runPaths(fresh);
     assert(freshPaths.wici.endsWith('/.thinkless'), `fresh state should use .thinkless, got ${freshPaths.wici}`);
+    assert(freshPaths.goalDoc.endsWith('/fresh/GOAL.md'), `fresh explicit target GOAL.md should be target-root, got ${freshPaths.goalDoc}`);
+    assert(freshPaths.plan.endsWith('/fresh/PLAN.md'), `fresh explicit target PLAN.md should be target-root, got ${freshPaths.plan}`);
     await ensureRunDirs(freshPaths);
     assert(existsSync(join(fresh, '.thinkless', 'artifacts')), 'ensureRunDirs did not create .thinkless artifacts');
     assert(!existsSync(join(fresh, '.wici')), 'fresh state should not create .wici');

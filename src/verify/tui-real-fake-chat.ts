@@ -44,6 +44,9 @@ async function main(): Promise<void> {
   const uiOutput = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0, `real-mode fake PTY Chat-first TUI run failed with code ${result.exitCode}:\n${uiOutput}`);
   assert(await exists(paths.goalDoc), `real-mode fake PTY run did not create GOAL.md:\n${uiOutput}`);
+  assert(await exists(paths.plan), `real-mode fake PTY run did not create PLAN.md:\n${uiOutput}`);
+  assert(!(await exists(join(paths.wici, 'GOAL.md'))), 'ordinary explicit-target TUI runs must keep GOAL.md at the target root, not inside .thinkless');
+  assert(!(await exists(join(paths.wici, 'PLAN.md'))), 'ordinary explicit-target TUI runs must keep PLAN.md at the target root, not inside .thinkless');
 
   const goalDoc = await readFile(paths.goalDoc, 'utf8');
   assert(goalDoc.includes(firstChat), 'GOAL.md should contain the real-mode fake first Chat input');
@@ -85,6 +88,7 @@ async function main(): Promise<void> {
         pty_chat_first_real_mode_fake_clis: true,
         goal_source: checkpoint.goal_source,
         codex_planner: true,
+        root_goal_plan: true,
         execute_progress: true,
         ledger_rows: ledger.length
       },
