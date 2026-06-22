@@ -415,7 +415,12 @@ function ResumeSelector({
   onSelect: (candidate: ResumeCandidate) => void;
   onCancel: () => void;
 }) {
-  const visible = candidates.slice(0, 8);
+  const maxVisible = 8;
+  const visibleStart = Math.min(
+    Math.max(0, selectedIndex - maxVisible + 1),
+    Math.max(0, candidates.length - maxVisible)
+  );
+  const visible = candidates.slice(visibleStart, visibleStart + maxVisible);
   const selectedCandidate = candidates[selectedIndex];
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
@@ -426,7 +431,8 @@ function ResumeSelector({
         <Text color="gray">{loaded ? 'No resumable Thinkless runs found.' : 'Scanning for resumable Thinkless runs...'}</Text>
       ) : (
         visible.map((candidate, index) => {
-          const selected = index === selectedIndex;
+          const candidateIndex = visibleStart + index;
+          const selected = candidateIndex === selectedIndex;
           const marker = selected ? '>' : ' ';
           const status = candidate.runnable ? 'runnable' : 'blocked';
           const text = `${marker} ${candidate.label} [${status}] ${candidate.supervisorState} ${candidate.goalSummary} - ${candidate.reason}`;
