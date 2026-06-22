@@ -53,3 +53,5 @@ fixture/setup-state-plan-target/
 fixture/setup-state-measure-target/
 fixture/metric-label-target/
 .wici/
+.thinkless/
+.thinkless*/

@@ -928,17 +928,13 @@ async function runDirectPlanExecution(
         mode: 'direct'
       });
       await setPlanStepStatus(paths, step.id, iterResult.step_done && iterResult.tests_pass ? 'done' : 'pending', nextIter);
-      let directBestCommit = checkpoint.best_commit ?? null;
+      const directBestCommit = await currentCommitOrNull(paths) ?? checkpoint.best_commit ?? null;
       if (await hasChanges(paths)) {
-        const commit = await commitAll(paths, `chore: WiCi direct iteration ${nextIter} ${step.id}`);
-        directBestCommit = commit;
-        await events.emit('GIT_COMMIT', `Created direct execution checkpoint ${commit.slice(0, 7)}`, {
-          commit,
+        await events.emit('DIRECT_UNCOMMITTED_CHANGES', 'Executor left uncommitted worktree changes; direct V1 expects PLAN.md to make Codex commit code changes itself', {
           iter: nextIter,
           step_id: step.id,
           mode: 'direct'
-        });
-        await tagBest(paths);
+        }, 'warn');
       }
       const directStatus: LedgerEntry['status'] = iterResult.step_done && iterResult.tests_pass ? 'keep' : 'reject';
       const ledgerEntry = directLedgerEntry({
@@ -970,16 +966,6 @@ async function runDirectPlanExecution(
         plan_hash: await hashFile(paths.plan)
       };
       await saveCheckpoint(paths, checkpoint);
-      if (await hasChanges(paths)) {
-        const stateCommit = await commitAll(paths, `chore: record WiCi direct iteration ${nextIter} state`);
-        await events.emit('GIT_COMMIT', `Created direct state checkpoint ${stateCommit.slice(0, 7)}`, {
-          commit: stateCommit,
-          iter: nextIter,
-          step_id: step.id,
-          mode: 'direct_state'
-        });
-        await tagBest(paths);
-      }
       steerText = undefined;
       if (options.once) break;
     } catch (error) {
@@ -1012,16 +998,6 @@ async function runDirectPlanExecution(
           plan_hash: await hashFile(paths.plan)
         };
         await saveCheckpoint(paths, checkpoint);
-        if (await hasChanges(paths)) {
-          const stateCommit = await commitAll(paths, `chore: record WiCi direct preemption ${nextIter} ${step.id}`);
-          await events.emit('GIT_COMMIT', `Created direct preemption checkpoint ${stateCommit.slice(0, 7)}`, {
-            commit: stateCommit,
-            iter: nextIter,
-            step_id: step.id,
-            mode: 'direct_preempt'
-          });
-          await tagBest(paths);
-        }
         steerText = undefined;
         if (options.once) break;
         continue;
@@ -1089,15 +1065,6 @@ async function runDirectPlanExecution(
         plan_hash: await hashFile(paths.plan)
       };
       await saveCheckpoint(paths, checkpoint);
-      if (await hasChanges(paths)) {
-        const stateCommit = await commitAll(paths, `chore: record WiCi direct recovery ${nextIter} ${step.id}`);
-        await events.emit('GIT_COMMIT', `Created direct recovery checkpoint ${stateCommit.slice(0, 7)}`, {
-          commit: stateCommit,
-          iter: nextIter,
-          step_id: step.id,
-          mode: 'direct_recovery'
-        });
-      }
       steerText = recoverySteerText(step.id, nextIter, reason);
       await writeOutbox(paths, {
         kind: 'info',
@@ -1214,15 +1181,6 @@ async function continueDirectExhaustedPlan(
     events_seq: events.seq
   };
   await saveCheckpoint(paths, checkpoint);
-  if (await hasChanges(paths)) {
-    const commit = await commitAll(paths, `chore: extend WiCi direct plan after exhaustion iter ${checkpoint.iter}`);
-    await events.emit('GIT_COMMIT', `Created exhausted-plan continuation checkpoint ${commit.slice(0, 7)}`, {
-      commit,
-      iter: checkpoint.iter,
-      mode: 'direct_plan_continuation'
-    });
-    await tagBest(paths);
-  }
   if (!nextStep) {
     const reason = 'Planner continuation completed but PLAN.md still has no pending executable step; treating this as concrete blocked evidence.';
     await writeOutbox(paths, { kind: 'info', text: reason });
@@ -1367,14 +1325,6 @@ async function applyDirectPendingInjections(
     },
     plan_hash: await hashFile(paths.plan)
   };
-  if (await hasChanges(paths)) {
-    const commit = await commitAll(paths, `chore: apply WiCi goal v${goal.version} plan update`);
-    await events.emit('GIT_COMMIT', `Created direct plan update checkpoint ${commit.slice(0, 7)}`, {
-      commit,
-      mode: 'direct'
-    });
-    await tagBest(paths);
-  }
   await events.emit('PLAN_DIFF_APPLIED', 'Planner updated PLAN.md for new input', { steerText, mode: 'direct' });
   return { goal, checkpoint, steerText };
 }
@@ -1791,16 +1741,8 @@ async function ensurePlanAndLegacyBaselineState(
   }
   let baseline: BaselineFile | null = legacyOptimizerEnabled ? await readJsonFileMaybe<BaselineFile>(paths.baseline) : null;
   if (!baseline && !legacyOptimizerEnabled) {
-    let directBestCommit = checkpoint.best_commit ?? null;
-    if (createdSetup && (await hasChanges(paths))) {
-      const commit = await commitAll(paths, 'chore: initialize WiCi plan');
-      directBestCommit = commit;
-      await events.emit('GIT_COMMIT', `Created initial plan checkpoint ${commit.slice(0, 7)}`, {
-        commit,
-        mode: 'direct'
-      });
-      await tagBest(paths);
-    } else if (!createdSetup && (await hasChanges(paths))) {
+    let directBestCommit = checkpoint.best_commit ?? await currentCommitOrNull(paths);
+    if (!createdSetup && (await hasChanges(paths))) {
       await events.emit('DIRTY_TARGET_ON_START', 'Existing target has uncommitted changes; direct execution will leave rollback decisions to git history', undefined, 'warn');
     }
     checkpoint = {
@@ -1817,24 +1759,8 @@ async function ensurePlanAndLegacyBaselineState(
       const headCommit = await currentCommit(paths);
       await saveIterationSnapshot(paths, checkpoint, goal, {
         headCommit,
-        bestCommit: headCommit
+        bestCommit: directBestCommit
       });
-      if (await hasChanges(paths)) {
-        const snapshotCommit = await commitAll(paths, 'chore: record WiCi direct snapshot iter 0');
-        directBestCommit = snapshotCommit;
-        await events.emit('GIT_COMMIT', `Created direct snapshot checkpoint ${snapshotCommit.slice(0, 7)}`, {
-          commit: snapshotCommit,
-          iter: 0,
-          mode: 'direct_snapshot'
-        });
-        await tagBest(paths);
-        checkpoint = {
-          ...checkpoint,
-          best_commit: directBestCommit,
-          events_seq: events.seq
-        };
-        await saveCheckpoint(paths, checkpoint);
-      }
     }
     return { baseline: null, waitReason: 'PLAN_READY', checkpoint, goal };
   }
@@ -2240,6 +2166,11 @@ function plannerQuestionData(data: unknown): { sessionId?: string; question?: st
 
 function isStopApproval(text: string): boolean {
   return /\b(stop|stopped|approve|approved|yes|ok|accept|accepted)\b/i.test(text);
+}
+
+async function currentCommitOrNull(paths: ReturnType<typeof runPaths>): Promise<string | null> {
+  const commit = await currentCommit(paths);
+  return commit === 'NO_HEAD' ? null : commit;
 }
 
 function hasEvalLockApproval(goal: GoalFile): boolean {

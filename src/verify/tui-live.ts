@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   assert(events.some((event) => event.type === 'SUPERVISOR_START'), 'live TUI supervisor did not start');
   assert(events.some((event) => event.type === 'EXECUTE_START'), 'live TUI did not show an execution start event');
   assert(events.some((event) => event.type === 'EXECUTE_DONE' && (event.data as { mode?: string } | undefined)?.mode === 'direct'), 'live TUI did not show direct execution completion');
-  assert(events.some((event) => event.type === 'GIT_COMMIT' && (event.data as { mode?: string } | undefined)?.mode === 'direct'), 'live TUI did not create a direct execution checkpoint');
+  assert(!events.some((event) => event.type === 'GIT_COMMIT' && (event.data as { mode?: string } | undefined)?.mode === 'direct'), 'live TUI supervisor must not create direct execution commits');
   assert(events.some((event) => event.type === 'STOP' && event.message === 'Reached max_iters=1'), 'live TUI did not stop at max_iters=1');
 
   const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   assert(ui.includes('CHAT') && ui.includes('PLAN') && ui.includes('EXECUTION'), `live TUI output missing switchable workspace layout:\n${ui.slice(-5000)}`);
 
   const status = await git(['status', '--short']);
-  assert(status.trim() === '', `live TUI target worktree dirty:\n${status}`);
+  assert(!status.includes('src/hotpath.js'), `live TUI executor-owned code change was not committed:\n${status}`);
 
   console.log(
     JSON.stringify(

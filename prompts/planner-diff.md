@@ -18,6 +18,8 @@ Return the smallest safe markdown update. Preserve existing step IDs and do not 
 
 Heading steps such as `### S3 — Short imperative step title` are also valid.
 
+When a changed or added step modifies target repository files, keep or add an executor-owned git commit action after validation. The Thinkless supervisor does not run `git add`/`git commit` for direct V1 work; Codex must commit intentional code changes itself. Do not use `git push`.
+
 Use this shape:
 
 ## GOAL.md

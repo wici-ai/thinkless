@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
+import { execa } from 'execa';
 import { atomicWriteFile, atomicWriteJson, exists } from '../shared/atomic.js';
 import { commandExists, resolveCommandForSpawn } from '../shared/commands.js';
 import { schemaPath, type RunPaths } from '../shared/paths.js';
@@ -238,6 +239,7 @@ async function buildExecutorPrompt(
       'Do not restart the task from scratch. Continue from the existing workspace and remote state; preserve completed useful work.',
       `If the updated ${goalPath}/${planPath} changes validation, update only the necessary local files/scripts and run the new checks.`,
       `Use the target repository as the only workspace.`,
+      `When you intentionally change target repository files, validate them and create the git commit yourself as directed by ${planPath}. Thinkless will not run git add or git commit for direct V1 execution.`,
       `For long-running installs, builds, SSH tasks, model downloads, and benchmarks, prefer commands that stream progress or write logs you can tail so the TUI remains observable.`,
       `Treat existing scripts under ${optPath} as planner-provided validation artifacts; follow ${planPath} if it explicitly asks you to run or adjust them.`,
       '',
@@ -255,6 +257,7 @@ async function buildExecutorPrompt(
     `Use the target repository as the only workspace.`,
     `Treat ${goalPath} and ${planPath} below as the execution goal input. Re-read the files from disk if you need exact current contents.`,
     `You may edit ${planPath}, ${goalPath}, and planner-provided scripts under ${optPath} when execution teaches you the plan is wrong, incomplete, or needs a better strategy. Keep the user's requirement intact and record the reasoning in the files you change.`,
+    `When you intentionally change target repository files, validate them and create the git commit yourself as directed by ${planPath}. Thinkless will not run git add or git commit for direct V1 execution.`,
     `Do not stop at the first failing command. Diagnose the failure, inspect logs/state, update the plan if needed, and continue with the best next attempt until the goal is actually satisfied or you have concrete evidence that it cannot be satisfied.`,
     `When the task depends on unfamiliar tools, models, services, runtimes, or deployment practices, research the relevant documentation or tutorials yourself using the native tools available to Codex; do not require the user to include research/debugging instructions in Chat.`,
     `For long-running installs, builds, SSH tasks, model downloads, and benchmarks, prefer commands that stream progress or write logs you can tail so the TUI remains observable.`,
@@ -624,8 +627,21 @@ async function runStubExecutor(paths: RunPaths, _goal: GoalFile, stepId: string,
     }
   }
 
+  if (result.changed_files.length > 0) {
+    await commitStubExecutorChanges(paths, result.changed_files, stepId);
+  }
   await atomicWriteJson(join(paths.artifacts, `iter-${iter}.json`), result);
   return result;
+}
+
+async function commitStubExecutorChanges(paths: RunPaths, changedFiles: string[], stepId: string): Promise<void> {
+  const status = await execa('git', ['-C', paths.target, 'status', '--porcelain', '--', ...changedFiles], { reject: false });
+  if (status.exitCode !== 0 || !status.stdout.trim()) return;
+  await execa('git', ['-C', paths.target, 'add', '--', ...changedFiles]);
+  const commit = await execa('git', ['-C', paths.target, 'commit', '-m', `test: stub executor complete ${stepId}`], { reject: false, all: true });
+  if (commit.exitCode !== 0) {
+    throw new Error(`Stub executor failed to commit changed files: ${commit.all ?? commit.stderr}`);
+  }
 }
 
 export function buildExecutorArgs(input: {

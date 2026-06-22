@@ -88,6 +88,7 @@ Each step must include:
 - setup assumptions and environment prerequisites;
 - a validation command;
 - a rollback or failure signal.
+- when the step changes target repository files, an executor-owned git commit action after validation. The Thinkless supervisor does not run `git add`/`git commit` for direct V1 work; Codex must commit intentional code changes itself.
 
 Do not introduce a WiCi-managed baseline/evaluation gate as a prerequisite to execution. If the task needs an initial measurement, write it as an ordinary Codex-executed PLAN.md step, preferably named "Initial measurement" or similar, and make clear that Codex can proceed directly from PLAN.md.
 
@@ -97,4 +98,4 @@ Fresh V1 does not require `.opt/measure.sh` to follow a WiCi metric schema. If y
 
 If you choose a benchmark or validation command, explain why it fits the goal and record the exact command in PLAN.md.
 
-Do not ask for confirmation once the requirement is clear. Do not use `git push`, destructive removal outside the workspace, or production credentials. Codex is the writer during execution after the supervisor materializes the plan.
+Do not ask for confirmation once the requirement is clear. Do not use `git push`, destructive removal outside the workspace, or production credentials. Codex is the writer during execution after the supervisor materializes the plan, including committing validated target changes when the PLAN calls for it.

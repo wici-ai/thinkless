@@ -48,11 +48,11 @@ async function main(): Promise<void> {
     'PLAN_DONE',
     'EXECUTE_START',
     'EXECUTE_DONE',
-    'GIT_COMMIT',
     'STOP'
   ]) {
     assert(events.some((event) => event.type === type), `missing v1 event ${type}`);
   }
+  assert(!events.some((event) => event.type === 'GIT_COMMIT' && (event.data as { mode?: string } | undefined)?.mode === 'direct'), 'fresh V1 direct supervisor must not create code commits');
   assert(!events.some((event) => event.type === 'BASELINE_START'), 'fresh V1 direct run must not initialize baseline before Codex execution');
   assert(!events.some((event) => event.type === 'EVALUATE_START'), 'fresh V1 direct run must not require measure/evaluate before completing execution');
 
@@ -85,6 +85,7 @@ async function main(): Promise<void> {
   assert(prompt.includes('v1 vertical slice'), 'executor prompt missing GOAL.md content');
   assert(prompt.includes('Current PLAN.md:'), 'executor prompt missing embedded PLAN.md section');
   assert(prompt.includes('S1'), 'executor prompt missing PLAN.md step content');
+  assert(prompt.includes('Thinkless will not run git add or git commit for direct V1 execution'), 'executor prompt must make commits executor-owned');
 
   const checks = await execa(paths.checks, [], { cwd: target, all: true, reject: false });
   assert(checks.exitCode === 0, `locked checks failed after v1 run:\n${checks.all}`);
@@ -92,11 +93,12 @@ async function main(): Promise<void> {
   assert(measure.exitCode === 0 && (measure.all ?? '').includes('METRIC '), `locked measure failed after v1 run:\n${measure.all}`);
 
   const log = await git(['log', '--oneline', '--decorate', '-8']);
-  assert(log.includes('chore: initialize WiCi plan'), `v1 target git log missing initial plan checkpoint:\n${log}`);
-  assert(log.includes('chore: WiCi direct iteration 1 S1'), `v1 target git log missing direct execution checkpoint:\n${log}`);
-  assert(log.includes('chore: record WiCi direct iteration 1 state'), `v1 target git log missing direct state checkpoint:\n${log}`);
+  assert(log.includes('test: stub executor complete S1'), `v1 target git log missing executor-owned code commit:\n${log}`);
+  assert(!log.includes('chore: initialize WiCi plan'), `fresh V1 supervisor should not commit the initial plan:\n${log}`);
+  assert(!log.includes('chore: WiCi direct iteration 1 S1'), `fresh V1 supervisor should not commit direct execution:\n${log}`);
+  assert(!log.includes('chore: record WiCi direct iteration 1 state'), `fresh V1 supervisor should not commit direct state:\n${log}`);
   const status = await git(['status', '--short']);
-  assert(status.trim() === '', `v1 target worktree dirty:\n${status}`);
+  assert(!status.includes('src/hotpath.js'), `executor-owned code change was not committed:\n${status}`);
 
   const tui = await verifyTuiRender();
 

@@ -59,12 +59,13 @@ async function main(): Promise<void> {
   assert(prompt.includes('Treat existing scripts under .opt as planner-provided validation artifacts'), 'executor prompt should treat .opt scripts as optional artifacts');
   assert(prompt.includes('Current GOAL.md:'), 'executor prompt missing GOAL.md');
   assert(prompt.includes('Current PLAN.md:'), 'executor prompt missing PLAN.md');
+  assert(prompt.includes('Thinkless will not run git add or git commit for direct V1 execution'), 'executor prompt must keep commits executor-owned');
 
   const plan = await readFile(paths.plan, 'utf8');
   assert(plan.includes('- [x] S1') || plan.includes('status:done'), `PLAN.md was not updated after direct execution:\n${plan}`);
 
   const status = await git(['status', '--short']);
-  assert(status.trim() === '', `target worktree dirty after no-script direct run:\n${status}`);
+  assert(!status.includes('src/') && !status.includes('test.mjs') && !status.includes('measure.mjs'), `executor-owned target files should not be left dirty:\n${status}`);
 
   console.log(
     JSON.stringify(

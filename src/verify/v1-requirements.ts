@@ -152,6 +152,8 @@ async function main(): Promise<void> {
   assert(!files.selfupdate.includes('Refusing to start long run because tool update is pending'), 'selfupdate must not contain the old pending-update start gate');
   assert(!files.context.includes('locked eval scripts'), 'direct context must not tell Codex eval scripts are locked by default');
   assert(files.executor.includes('Treat existing scripts under') && files.executor.includes('planner-provided validation artifacts'), 'executor prompt must treat .opt scripts as planner artifacts');
+  assert(files.executor.includes('Thinkless will not run git add or git commit for direct V1 execution'), 'executor prompt must make direct V1 commits executor-owned');
+  assert(files.plannerPrompt.includes('executor-owned git commit action') && files.plannerDiffPrompt.includes('executor-owned git commit action'), 'planner prompts must put commit responsibility into PLAN.md');
   assert(files.executor.includes('You may edit ${planPath}') && files.executor.includes('Do not stop at the first failing command'), 'executor prompt must authorize recovery/debug/plan updates');
   assert(files.executor.includes('research the relevant documentation or tutorials yourself'), 'executor prompt must make research/debugging a Codex responsibility, not a Chat input requirement');
   assert(files.executor.includes('Current ${goalPath}:') && files.executor.includes('Current ${planPath}:'), 'executor prompt must embed GOAL.md and PLAN.md as Codex goal input');
