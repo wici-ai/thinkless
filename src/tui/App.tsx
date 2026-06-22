@@ -14,7 +14,8 @@ import { runPaths } from '../shared/paths.js';
 import { disablePointerInput, enableMouseReporting, parseMouseInput } from './input.js';
 import { traceInkInput } from './inputTrace.js';
 import { appendSupervisorError } from './supervisorLog.js';
-import { discoverResumeCandidates, type ResumeCandidate } from '../shared/resume.js';
+import { discoverResumeCandidates, preflightResumeCandidate, type ResumeCandidate } from '../shared/resume.js';
+import { EventWriter } from '../supervisor/events.js';
 import {
   cycleRuntimeValue,
   defaultRuntimeSelection,
@@ -179,17 +180,33 @@ export function App({
     });
   }, [activeTarget]);
 
-  const selectResumeCandidate = useCallback((candidate: ResumeCandidate) => {
+  const selectResumeCandidate = useCallback(async (candidate: ResumeCandidate) => {
     if (!candidate.runnable) {
       setChatLocalStatus(`resume blocked: ${candidate.reason}`);
       return;
     }
+    const freshCandidate = await preflightResumeCandidate(candidate.target, candidate.sessionDir);
+    if (!freshCandidate.runnable) {
+      const blockedPaths = runPaths(freshCandidate.target, freshCandidate.sessionDir);
+      const events = new EventWriter(blockedPaths.events);
+      await events.init();
+      await events.emit('RESUME_CONTEXT_BLOCKED', `Resume blocked: ${freshCandidate.reason}`, {
+        target: freshCandidate.target,
+        session_dir: freshCandidate.sessionDir ?? null,
+        state_dir: freshCandidate.stateDir,
+        supervisor_state: freshCandidate.supervisorState,
+        reason: freshCandidate.reason
+      }, 'warn');
+      setResumeCandidates((current) => current.map((item) => item.id === freshCandidate.id ? freshCandidate : item));
+      setChatLocalStatus(`resume blocked: ${freshCandidate.reason}`);
+      return;
+    }
     setResumeSelectorOpen(false);
-    setActiveTarget(candidate.target);
-    setActiveSessionDir(candidate.sessionDir);
+    setActiveTarget(freshCandidate.target);
+    setActiveSessionDir(freshCandidate.sessionDir);
     setWorkspaceTab('execution');
-    setChatLocalStatus(`resume: ${candidate.label}`);
-    launchSupervisor(undefined, undefined, undefined, candidate.target, candidate.sessionDir, true);
+    setChatLocalStatus(`resume: ${freshCandidate.label}`);
+    launchSupervisor(undefined, undefined, undefined, freshCandidate.target, freshCandidate.sessionDir, true);
   }, [launchSupervisor]);
 
   useEffect(() => {
@@ -236,13 +253,13 @@ export function App({
         setResumeIndex((current) => Math.min(Math.max(0, resumeCandidates.length - 1), current + 1));
       } else if (key.return || input.includes('\r') || input.includes('\n')) {
         const candidate = resumeCandidates[resumeIndex];
-        if (candidate) selectResumeCandidate(candidate);
+        if (candidate) void selectResumeCandidate(candidate);
       } else if (key.escape || input === '\x1b') {
         setResumeSelectorOpen(false);
         setChatLocalStatus('resume: cancelled');
       } else if (input && !key.leftArrow && !key.rightArrow && !key.tab && !key.ctrl && !key.meta) {
         const candidate = resumeCandidates[resumeIndex];
-        if (candidate) selectResumeCandidate(candidate);
+        if (candidate) void selectResumeCandidate(candidate);
       }
       return;
     }
