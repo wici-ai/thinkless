@@ -35,6 +35,7 @@
     "verify:tui-chat-intake": "tsx src/verify/tui-chat-intake.ts",
     "verify:resume-selector": "tsx src/verify/resume-selector.ts",
     "verify:tui-resume-selector-pty": "tsx src/verify/tui-resume-selector-pty.ts",
+    "verify:tui-resume-selector-built": "tsx src/verify/tui-resume-selector-built.ts",
     "verify:resume-rerunnable": "tsx src/verify/resume-rerunnable.ts",
     "verify:tui-chat-pty": "tsx src/verify/tui-chat-pty.ts",
     "verify:tui-real-fake-chat": "tsx src/verify/tui-real-fake-chat.ts",
