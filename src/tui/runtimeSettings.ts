@@ -16,14 +16,14 @@ export const RUNTIME_FIELDS: RuntimeField[] = ['agent', 'effort'];
 
 const DEFAULT_AGENTS: Record<RuntimePane, RuntimeAgent> = {
   chat: 'claude',
-  planner: 'claude',
+  planner: 'codex',
   executor: 'codex'
 };
 
 export function defaultRuntimeSelection(): RuntimeSelection {
   return {
     chat: runtimeDefaultsForAgent('claude'),
-    planner: runtimeDefaultsForAgent('claude'),
+    planner: runtimeDefaultsForPane('planner', 'codex'),
     executor: runtimeDefaultsForAgent('codex')
   };
 }
@@ -134,7 +134,7 @@ function updateRuntimeSelection(selection: RuntimeSelection, pane: RuntimePane, 
     const agent = isRuntimeAgent(value) ? value : DEFAULT_AGENTS[pane];
     return {
       ...selection,
-      [pane]: runtimeDefaultsForAgent(agent)
+      [pane]: runtimeDefaultsForPane(pane, agent)
     };
   }
 
@@ -161,7 +161,7 @@ function normalizedRuntime(selection: RuntimeSelection, pane: RuntimePane): Requ
   return {
     agent,
     model: runtimeModelForAgent(agent),
-    effort: normalizeEffortForAgent(agent, runtime.effort)
+    effort: runtime.effort ? normalizeEffortForAgent(agent, runtime.effort) : runtimeDefaultsForPane(pane, agent).effort
   };
 }
 
@@ -177,5 +177,12 @@ function runtimeDefaultsForAgent(agent: RuntimeAgent): Required<AgentRuntimeSele
     agent,
     model: runtimeModelForAgent(agent),
     effort: defaultEffortForAgent(agent)
+  };
+}
+
+function runtimeDefaultsForPane(pane: RuntimePane, agent: RuntimeAgent): Required<AgentRuntimeSelection> {
+  return {
+    ...runtimeDefaultsForAgent(agent),
+    effort: pane === 'planner' && agent === 'codex' ? 'xhigh' : defaultEffortForAgent(agent)
   };
 }

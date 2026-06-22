@@ -310,6 +310,10 @@ export interface Checkpoint {
       threadId: string;
       activeTurnId?: string;
       updatedAt: string;
+      workspace?: string;
+      lastActivityAt?: string;
+      phase?: 'starting' | 'running' | 'idle' | 'stalled' | 'completed';
+      lastEventType?: string;
     };
   };
   tool_versions?: {

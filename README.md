@@ -7,18 +7,18 @@ The V1 path is intentionally thin:
 - Chat is the initial intake and output surface.
 - `GOAL.md` is a human-readable markdown goal built from the conversation.
 - Claude Code plan mode produces `PLAN.md` and, when useful, `.opt/checks.sh` / `.opt/measure.sh`.
-- Once `PLAN.md` exists, WiCi feeds `GOAL.md + PLAN.md` directly to Codex.
+- Once `PLAN.md` exists, Thinkless feeds `GOAL.md + PLAN.md` directly to Codex.
 - The supervisor handles TUI state, events, token usage, checkpoints, git rollback points, and hot reload.
 
-WiCi does not parse natural-language requirements into task-specific schemas. If the user says "700 token/s" or asks to build an app, that raw requirement goes into `GOAL.md` once Chat decides it needs planner/executor. A bounded SSH/code-reading request can stay in Chat; a longer remote deployment, debug, benchmark, or optimization loop becomes planner/executor work.
+Thinkless does not parse natural-language requirements into task-specific schemas. If the user says "700 token/s" or asks to build an app, that raw requirement goes into `GOAL.md` once Chat decides it needs planner/executor. A bounded SSH/code-reading request can stay in Chat; a longer remote deployment, debug, benchmark, or optimization loop becomes planner/executor work.
 
 Chat agents run with enough native CLI permission to complete bounded direct work themselves: Claude Chat is not forced into plan-only mode, and Codex Chat uses a network-capable sandbox. Chat still must not commit, push, deploy, run destructive commands, or start long benchmark/debug loops itself.
 
 ## Safety
 
-Real mode uses Claude Code plan mode with `--dangerously-skip-permissions` for planning and `codex exec --dangerously-bypass-approvals-and-sandbox` for execution. A disposable VM or container is safest. Direct use on a primary machine is supported when the target repo is under git and the WiCi checkout is versioned.
+Real mode uses Claude Code plan mode with `--dangerously-skip-permissions` for planning and `codex exec --dangerously-bypass-approvals-and-sandbox` for execution. A disposable VM or container is safest. Direct use on a primary machine is supported when the target repo is under git and the Thinkless checkout is versioned.
 
-The `--target` path must be the git top-level for the target workspace. If the target does not exist, is empty, or only contains WiCi-owned `.wici/` / `.opt/` scaffolding, WiCi initializes a local git repo before planning; existing non-git directories with user files are rejected.
+The `--target` path must be the git top-level for the target workspace. If the target does not exist, is empty, or only contains Thinkless-owned `.thinkless/` or legacy `.wici/` plus `.opt/` scaffolding, Thinkless initializes a local git repo before planning; existing non-git directories with user files are rejected.
 
 WiCi does not pass CLI budget caps to Claude or Codex. The default `max_cost_usd` is `0` and default `max_iters` is `0`; together they disable WiCi's own cost and iteration hard stops for real runs. Use explicit `--max-iters`, `deadline`, or manual stop control only when you want a bounded run.
 
@@ -131,7 +131,7 @@ After installing the `thinkless` binary, start a fresh Chat-first TUI workspace 
 thinkless
 ```
 
-Bare `thinkless` does not attach to the current repository's old `GOAL.md` / `PLAN.md`. It starts from an empty workspace under `~/thinkless-workspaces`, so typing the first concrete goal creates a new `GOAL.md`, `PLAN.md`, `.opt/`, and `.wici/` there. Pass `--target /path/to/new-workspace` only when you want to choose the fresh workspace path yourself.
+Bare `thinkless` attaches to the current git repository by default. Typing the first concrete goal creates `GOAL.md`, `PLAN.md`, `.opt/`, and `.thinkless/` in that repository; outside git, Thinkless falls back to a new isolated workspace under `~/thinkless-workspaces`. Existing `.wici/` runs are still discovered for compatibility, and `thinkless resume` can migrate an isolated legacy run back into the matching real repository as `.thinkless/` state.
 
 To continue an existing run, use `thinkless resume` or type `/resume` while viewing that run in the TUI.
 
@@ -151,15 +151,15 @@ npx tsx src/cli.tsx doctor --update
 npx tsx src/cli.tsx doctor --deep
 ```
 
-`doctor --update` runs the Codex and Claude updaters, then reports health. `doctor --deep` performs a Claude print-mode auth probe. On supervisor start, WiCi automatically checks for Codex/Claude updates at run boundaries when `tools.auto_update` is true, then records the versions in the checkpoint, and pending updates are not a WiCi supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run.
+`doctor --update` runs the Codex and Claude updaters, then reports health. `doctor --deep` performs a Claude print-mode auth probe. On supervisor start, Thinkless automatically checks for Codex/Claude updates at run boundaries when `tools.auto_update` is true, then records the versions in the checkpoint, and pending updates are not a Thinkless supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run.
 
 Use `--mode stub`, `--mode auto`, or `--mode real` on `run` / `tui`.
 
 ## Chat-First Flow
 
-In an interactive TUI with no existing run and no `--goal`, the top Chat History / Goal/Plan / Execution workspace starts empty and can be switched with the left/right arrows, while the Chat input stays fixed at the bottom. The first natural-language Chat message is ordinary conversation first: the Chat agent may answer questions, inspect local or remote code, run bounded non-destructive discovery commands, or make small self-contained edits without starting a run. When the user asks for a plan, or the Chat agent decides the work is large, long-running, risky, or concrete enough for planner/executor, it emits an update; WiCi creates `GOAL.md`, records `goal_source: "tui_chat"`, and starts Claude Code plan mode. If Claude needs a clarification before materializing `PLAN.md`, or later while updating `PLAN.md` after a hot-reload Chat message, WiCi surfaces that as a Chat question and routes the next ordinary Chat message back as the answer. That answer wakes the stopped supervisor and resumes the same Claude planner session.
+In an interactive TUI with no existing run and no `--goal`, the top Chat History / Goal/Plan / Execution workspace starts empty and can be switched with the left/right arrows, while the Chat input stays fixed at the bottom. The first natural-language Chat message is ordinary conversation first: the Chat agent may answer questions, inspect local or remote code, run bounded non-destructive discovery commands, or make small self-contained edits without starting a run. When the user asks for a plan, or the Chat agent decides the work is large, long-running, risky, or concrete enough for planner/executor, it emits an update; Thinkless creates `GOAL.md`, records `goal_source: "tui_chat"`, and starts Claude Code plan mode. If Claude needs a clarification before materializing `PLAN.md`, or later while updating `PLAN.md` after a hot-reload Chat message, Thinkless surfaces that as a Chat question and routes the next ordinary Chat message back as the answer. That answer wakes the stopped supervisor and resumes the same Claude planner session.
 
-The active workspace shows its current runtime selection. Press `Ctrl+R` to open the selector, use left/right to choose `agent` or `effort`, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. `agent` is always one of `claude` or `codex`; model is fixed by that agent: `claude` uses `claude-opus-4-8`, and `codex` uses `gpt-5.5`.
+The active workspace shows its current runtime selection. Press `Ctrl+R` to open the selector, use left/right to choose `agent` or `effort`, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. `agent` is always one of `claude` or `codex`; model is fixed by that agent: `claude` uses `claude-opus-4-8`, and `codex` uses `gpt-5.5`. Chat remains Claude-first and falls back to Codex medium when Claude is unavailable. PLAN defaults to Codex xhigh.
 
 Terminal text selection/copy is the default pointer mode in the Chat, PLAN, and EXECUTION panes. Terminal mouse protocols cannot reliably provide native drag selection and app-level touchpad scrolling at the same time, so Thinkless exposes two explicit modes: `mouse=select` for normal terminal selection, and `mouse=scroll` for TUI mouse-wheel/touchpad scrolling. Press `Ctrl+O` in the TUI to toggle modes, or start in scroll mode with `--mouse-reporting`.
 
@@ -168,9 +168,13 @@ Typed commands remain available for custom values that are not in the selector p
 ```text
 /agent chat claude
 /effort execution high
+/dictate
+/dictate submit
 ```
 
 Valid panes are `chat`, `plan`/`planner`, and `execution`/`exec`/`executor`. Claude effort options are `high`, `xhigh`, `max`, and `ultracode`. Codex effort options are `fast`, `medium`, `high`, and `xhigh`. Claude-backed panes receive `--model claude-opus-4-8` and the selected `--effort`; Codex-backed panes receive `--model gpt-5.5`, and Codex effort is passed through config as `model_reasoning_effort`.
+
+`/dictate` runs the local command configured in `WICI_DICTATION_COMMAND`, normalizes its stdout as transcript text, and inserts it into the bottom Chat input. `/dictate submit` sends that transcript immediately. The command can be any local speech-to-text bridge, such as a macOS Shortcut wrapper, Whisper CLI, or organization-approved transcription tool; Thinkless does not store speech credentials in config.
 
 Planner output is markdown artifacts, not a second goal schema:
 
@@ -180,21 +184,21 @@ Planner output is markdown artifacts, not a second goal schema:
 - `## .opt/measure.sh` is optional.
 - `## QUESTION` is used only when a necessary clarification is missing.
 
-The absence of `.opt` scripts is a valid fresh V1 path. WiCi must still hand `GOAL.md + PLAN.md` directly to Codex; scripts are planner artifacts for tasks that need reusable commands, not a supervisor-controlled execution prerequisite.
+The absence of `.opt` scripts is a valid fresh V1 path. Thinkless must still hand `GOAL.md + PLAN.md` directly to Codex; scripts are planner artifacts for tasks that need reusable commands, not a supervisor-controlled execution prerequisite.
 
-Claude plan mode keeps its native tool behavior. WiCi does not pass a custom tool allowlist or denylist; planning-time web research or remote discovery can be used when Claude needs context for `PLAN.md`. The deployment, benchmark target, application build, or optimization result still belongs in Codex execution after `PLAN.md` is materialized.
+Planner mode can run through Codex or Claude. Codex is the default planner backend with xhigh effort; if a Claude-backed planner is selected and Claude is unavailable, Thinkless falls back to Codex xhigh. Thinkless does not pass a custom tool allowlist or denylist; planning-time web research or remote discovery can be used when the planner needs context for `PLAN.md`. The deployment, benchmark target, application build, or optimization result still belongs in Codex execution after `PLAN.md` is materialized.
 
 Users should not need to add meta-instructions such as "search tutorials", "debug if one path fails", or "update PLAN.md/.opt and keep going" to the Chat goal. Those are planner/executor responsibilities. Planner should encode research and fallback strategy in `PLAN.md` when the task needs it, and Codex should use native tools, logs, documentation, and environment inspection during execution.
 
 When `PLAN.md` exists, the fresh V1 path starts Codex directly. It does not require `baseline.json`, `.opt/benchmark.json`, `acceptance.spec.json`, or pre-run measurements before execution. A stray or historical `baseline.json` does not switch V1 into an eval-gated loop; the legacy optimizer must be explicitly enabled with `WICI_LEGACY_OPTIMIZER=1`.
 
-During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.wici/artifacts/planner-*.stdout.jsonl`. Real Codex execution defaults to `codex app-server` in `auto` mode when the CLI supports it, streams raw app-server JSON-RPC notifications into `.wici/codex-run.jsonl`, and shows those raw lines directly in the Execution pane. If app-server is unavailable or a fake legacy CLI is on `PATH`, WiCi falls back to `codex exec --json`; the legacy executor watchdog is intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work, but an empty `codex exec resume` that only emits session startup and no actionable item is restarted quickly as a recoverable timeout.
+During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.thinkless/artifacts/planner-*.stdout.jsonl` for new runs. Real Codex execution defaults to `codex app-server` in `auto` mode when the CLI supports it, streams raw app-server JSON-RPC notifications into `.thinkless/codex-run.jsonl`, checkpoints the active workspace, turn phase, last event, and last activity time, and shows progress in the Chat status line. Existing `.wici/` runs keep using their legacy directory. If app-server is unavailable, stalls without progress, or a fake legacy CLI is on `PATH`, Thinkless falls back to a recoverable retry path; the legacy executor watchdog remains intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work.
 
-WiCi does not treat a single executor failure as the whole goal failing. Direct V1 execution is intentionally long-horizon: command failures, failed validation, and executor timeouts are recorded as recoverable crash ledger rows, the active `PLAN.md` step is reset to pending, and the next Codex `exec resume --last` prompt receives the failure reason. Codex is allowed to inspect logs and remote state, update `PLAN.md`, repair planner-provided `.opt` scripts, choose a different deployment or validation strategy, and continue the same `GOAL.md` until the goal is actually satisfied or there is concrete repeated evidence that it cannot proceed.
+Thinkless does not treat a single executor failure as the whole goal failing. Direct V1 execution is intentionally long-horizon: command failures, failed validation, and executor timeouts are recorded as recoverable crash ledger rows, the active `PLAN.md` step is reset to pending, and the next Codex prompt receives the failure reason. Codex is allowed to inspect logs and remote state, update `PLAN.md`, repair planner-provided `.opt` scripts, choose a different deployment or validation strategy, and continue the same `GOAL.md` until the goal is actually satisfied or there is concrete repeated evidence that it cannot proceed.
 
-Later Chat messages are drained through `.wici/inbox/`. With the app-server backend, WiCi updates `GOAL.md`, asks Claude plan mode for the smallest `PLAN.md` update, then sends `turn/steer` to the active Codex turn so execution continues without restarting. With the legacy `codex exec` fallback, WiCi preempts at the next executor output or heartbeat, applies the same planner diff, and resumes through `codex exec resume --last`.
+Later Chat messages are drained through `.thinkless/inbox/` for new runs, or `.wici/inbox/` for legacy sessions. With the app-server backend, Thinkless updates `GOAL.md`, asks Claude plan mode for the smallest `PLAN.md` update, then sends `turn/steer` to the active Codex turn so execution continues without restarting. With the legacy `codex exec` fallback, Thinkless preempts at the next executor output or heartbeat, applies the same planner diff, and resumes through `codex exec resume --last`.
 
-If the supervisor crashes during direct V1 execution, restart the same command. WiCi uses `checkpoint.json` and `wici/best` to revert unconfirmed direct-path work, resets the active `PLAN.md` step for replay, and preserves `.wici/` event and ledger history.
+If the supervisor crashes during direct V1 execution, restart the same command. Thinkless uses `checkpoint.json` and `wici/best` to revert unconfirmed direct-path work, resets the active `PLAN.md` step for replay, and preserves `.thinkless/` or legacy `.wici/` event and ledger history.
 
 ## V1 Acceptance
 
@@ -251,6 +255,8 @@ curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install
 ```
 
 That one-line installer downloads `thinkless.tgz` from the latest public release and installs it globally with npm. The release contains the built package and installer assets. If you need a different release host, set `THINKLESS_RELEASE_BASE` or `THINKLESS_TARBALL_URL` before running the installer.
+
+On startup, the `thinkless` CLI checks the latest GitHub release and self-updates when the release is newer than the local package version. Global installs update from the release `thinkless.tgz`; clean source checkouts fetch and detach to the release tag, then run `npm install` and `npm run build`. Dirty source checkouts are left alone, and network, GitHub, or update failures fail open so launch continues. Set `THINKLESS_SELF_UPDATE=0` to disable the startup check, `THINKLESS_SELF_UPDATE_VERBOSE=1` to print the decision, `THINKLESS_RELEASE_REPO=owner/repo` for a different release repository, or `THINKLESS_TARBALL_URL` for a custom tarball.
 
 The included `Publish public install release` workflow is manually triggered. It builds `thinkless.tgz` from the selected source tag with `fetch-depth: 1`, then uploads `thinkless.tgz` and `install.sh` to this public repository's GitHub release using the workflow token.
 
@@ -362,13 +368,13 @@ npx tsx src/cli.tsx tui \
 
 ## Resume Or Re-Run
 
-To continue an existing goal, use the explicit resume command without a new `--goal`. WiCi reads the existing `GOAL.md`, `PLAN.md`, `.wici/checkpoint.json`, `events.jsonl`, and `ledger.jsonl`, then resumes from the recorded state:
+To continue an existing goal, use the explicit resume command without a new `--goal`. Thinkless reads the existing `GOAL.md`, `PLAN.md`, `.thinkless/checkpoint.json` or legacy `.wici/checkpoint.json`, `events.jsonl`, and `ledger.jsonl`, then resumes from the recorded state:
 
 ```bash
 thinkless resume --target /workspace/target-repo --mode real
 ```
 
-Without `--target`, `thinkless resume` first checks the current git repository for an existing Thinkless run, then falls back to the latest run under `~/thinkless-workspaces`.
+Without `--target`, `thinkless resume` first checks the current git repository for an existing Thinkless run. If the current repo has no state but a matching legacy isolated workspace exists under `~/thinkless-workspaces`, Thinkless migrates that run into the current repo as `.thinkless/` state, resets fixture-completed plans to a real-repo replan step, and resumes there. Otherwise it falls back to the latest run under `~/thinkless-workspaces`.
 
 If you are already viewing a run in the TUI, type `/resume` in the bottom Chat input to continue it. If the current TUI is a fresh empty workspace, `/resume` prints the resume command to use instead of treating the message as a goal.
 

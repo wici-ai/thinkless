@@ -8,6 +8,7 @@ import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { isMouseInput, mouseScrollDelta } from './input.js';
 import { scrollBy, scrollDeltaForInput, wrapLines, wrappedViewport } from './viewport.js';
 import { defaultRuntimeSelection, parseRuntimeCommand } from './runtimeSettings.js';
+import { appendDictationText, dictationUnavailableMessage, parseDictationRequest, runDictationCommand } from './dictation.js';
 
 type ChatColor = 'white' | 'gray' | 'cyan' | 'cyanBright' | 'green' | 'yellow' | 'red' | 'magenta';
 const PLANNING_CONTEXT_MAX_ENTRIES = 14;
@@ -182,6 +183,32 @@ export function ChatInputBox({
     const text = raw.trim();
     if (!text) return;
     setInputValue('');
+
+    const dictationRequest = parseDictationRequest(text);
+    if (dictationRequest) {
+      if (!dictationRequest.command) {
+        onLocalStatus?.(dictationUnavailableMessage());
+        return;
+      }
+      setBusy(true);
+      onLocalStatus?.('dictation: listening');
+      try {
+        const result = await runDictationCommand(dictationRequest.command);
+        const next = appendDictationText(valueRef.current, result.text);
+        setInputValue(next);
+        onLocalStatus?.(result.text ? `dictation: inserted ${result.wordCount} words` : 'dictation: no transcript');
+        if (dictationRequest.submit && next.trim()) {
+          setBusy(false);
+          await submit(next);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        onLocalStatus?.(`dictation failed: ${truncate(message, 120)}`);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
 
     const runtimeCommand = parseRuntimeCommand(text, runtime);
     if (runtimeCommand) {

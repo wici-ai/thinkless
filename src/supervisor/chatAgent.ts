@@ -75,7 +75,12 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
     const command = chatTool.command ?? config.tools.planner.command;
     const agent = runtimeAgentFromCommand(command, 'claude');
     const label = agent === 'codex' ? 'Codex Chat' : 'Claude Chat';
-    if (!(await commandExists(command))) return buildFallbackChatTurn(ctx, `${label} command not found: ${command}.`);
+    if (!(await commandExists(command))) {
+      if (agent === 'claude') {
+        return await runCodexChatFallback(ctx, config, `${label} command not found: ${command}.`) ?? buildFallbackChatTurn(ctx, `${label} command not found: ${command}.`);
+      }
+      return buildFallbackChatTurn(ctx, `${label} command not found: ${command}.`);
+    }
 
     const systemPrompt = await readFile(promptPath('chat'), 'utf8');
     const safetyText = formatSafetyForPrompt(config);
@@ -101,16 +106,37 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
       artifactPath = await writeClaudeChatArtifacts(ctx.paths, result, artifactStamp, 'fresh');
       action = 'exited';
     }
-    if (result.timeoutReason || result.exitCode !== 0) return buildFallbackChatTurn(ctx, claudeFailureReason(label, action, result, artifactPath));
+    if (result.timeoutReason || result.exitCode !== 0) {
+      return await runCodexChatFallback(ctx, config, claudeFailureReason(label, action, result, artifactPath)) ?? buildFallbackChatTurn(ctx, claudeFailureReason(label, action, result, artifactPath));
+    }
 
     const parsed = parseChatResponse(result.stdout);
-    if (!parsed || !parsed.reply.trim()) return buildFallbackChatTurn(ctx, `${label} returned no usable reply.`);
+    if (!parsed || !parsed.reply.trim()) {
+      return await runCodexChatFallback(ctx, config, `${label} returned no usable reply.`) ?? buildFallbackChatTurn(ctx, `${label} returned no usable reply.`);
+    }
     if (parsed.sessionId) await writeChatSession(ctx.paths, agent, parsed.sessionId, { agent, model: chatTool.model, effort: chatTool.effort });
     // Respect the agent's judgment: a reply with no UPDATE is pure conversation.
     return { reply: parsed.reply, update: parsed.update, degraded: false };
   } catch (error) {
     return buildFallbackChatTurn(ctx, error instanceof Error ? error.message : String(error));
   }
+}
+
+async function runCodexChatFallback(ctx: ChatTurnContext, config: Awaited<ReturnType<typeof loadConfig>>, reason: string): Promise<ChatTurnResult | null> {
+  const command = 'codex';
+  if (!(await commandExists(command))) return null;
+  const systemPrompt = await readFile(promptPath('chat'), 'utf8');
+  const safetyText = formatSafetyForPrompt(config);
+  const userPrompt = `${buildChatPrompt(ctx)}\n\nClaude Chat was unavailable; answer through Codex Chat fallback. Claude failure: ${reason}`;
+  const sessionId = await readChatSession(ctx.paths, 'codex');
+  return runCodexChatTurn(ctx, command, {
+    model: 'gpt-5.5',
+    effort: 'medium',
+    systemPrompt,
+    safetyText,
+    userPrompt,
+    sessionId
+  });
 }
 
 async function runCodexChatTurn(

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput, useStdout, useFocusManager } from 'ink';
+import { basename } from 'node:path';
 import { Header } from './Header.js';
 import { ChatHistoryPane, ChatInputBox } from './ChatPane.js';
 import { GoalPane } from './GoalPane.js';
@@ -356,10 +357,27 @@ export function buildActivityStatus(state: RunState): string | null {
   if (checkpoint.supervisor_state === 'EXECUTE') {
     const event = latest.find((item) => item.type.startsWith('EXECUTE_'));
     const step = checkpoint.next_step ? ` ${checkpoint.next_step}` : '';
+    const appStatus = formatExecutorAppStatus(checkpoint.sessions.executorApp);
+    if (appStatus) {
+      const suffix = event ? `: ${shortEventMessage(event)}` : '';
+      return `executor${step} ${appStatus}${suffix}`;
+    }
     return event ? `executor${step} ${eventAge(event.ts)}: ${shortEventMessage(event)}` : `executor${step} is running`;
   }
   if (!latestEvent) return checkpoint.supervisor_state.toLowerCase();
   return `${checkpoint.supervisor_state.toLowerCase()} ${eventAge(latestEvent.ts)}: ${shortEventMessage(latestEvent)}`;
+}
+
+function formatExecutorAppStatus(session: NonNullable<RunState['checkpoint']>['sessions']['executorApp'] | undefined): string | null {
+  if (!session) return null;
+  const phase = session.phase ?? (session.activeTurnId ? 'running' : 'idle');
+  const workspace = session.workspace ? ` in ${basename(session.workspace) || session.workspace}` : '';
+  const lastActivity = session.lastActivityAt ?? session.updatedAt;
+  const active = phase === 'running' || phase === 'starting';
+  const state = active ? `active ${phase}` : phase;
+  const idle = lastActivity ? `, last activity ${eventAge(lastActivity)}` : '';
+  const event = session.lastEventType ? `, ${session.lastEventType}` : '';
+  return `${state}${workspace}${idle}${event}`;
 }
 
 function shortEventMessage(event: RunState['events'][number]): string {

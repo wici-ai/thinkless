@@ -22,6 +22,7 @@ export interface CodexAppTurn {
   threadId: string;
   turnId: string;
   done: Promise<{ usage: ToolUsageSummary; stdout: string }>;
+  lastActivityAt: () => number;
   steer: (text: string) => Promise<boolean>;
   interrupt: () => Promise<void>;
 }
@@ -51,6 +52,9 @@ export async function startCodexAppServerTurn(input: {
   prompt: string;
   artifactId: string;
   onRawNotification?: (line: string, usage: ToolUsageSummary, method?: string) => Promise<void>;
+  idleTimeoutMs?: number;
+  hardTimeoutMs?: number;
+  heartbeatMs?: number;
 }): Promise<CodexAppTurn> {
   const client = new CodexAppServerClient(input.config.tools.executor.command, input.paths, input.config.tools.executor.effort);
   await client.start();
@@ -58,6 +62,8 @@ export async function startCodexAppServerTurn(input: {
   let stdout = '';
   let activeTurnId = '';
   let completed = false;
+  const startedAt = Date.now();
+  let lastActivityAt = startedAt;
   let completionResolve: (() => void) | undefined;
   let completionReject: ((error: Error) => void) | undefined;
   const completion = new Promise<void>((resolve, reject) => {
@@ -66,6 +72,7 @@ export async function startCodexAppServerTurn(input: {
   });
 
   client.onNotification = async (message, raw) => {
+    lastActivityAt = Date.now();
     stdout = tail(stdout + `${raw}\n`, STDOUT_TAIL_CHARS);
     await appendFile(input.paths.codexRun, `${raw}\n`);
     const delta = parseCodexRunEvents(raw);
@@ -122,21 +129,45 @@ export async function startCodexAppServerTurn(input: {
     throw error;
   }
 
+  const heartbeatMs = input.heartbeatMs ?? 30_000;
+  const idleTimeoutMs = input.idleTimeoutMs ?? 60 * 60_000;
+  const hardTimeoutMs = input.hardTimeoutMs ?? 12 * 60 * 60_000;
+  const watchdog = setInterval(() => {
+    if (completed) return;
+    const now = Date.now();
+    if (now - startedAt > hardTimeoutMs) {
+      usage.failed = true;
+      usage.errors.push(`Codex app-server turn exceeded hard timeout after ${formatDuration(now - startedAt)}`);
+      completionReject?.(new CodexRunError(usage.errors.at(-1) ?? 'Codex app-server hard timeout', cloneUsageSummary(usage)));
+      return;
+    }
+    if (now - lastActivityAt > idleTimeoutMs) {
+      usage.failed = true;
+      usage.errors.push(`Codex app-server turn stalled after ${formatDuration(now - lastActivityAt)} without progress`);
+      completionReject?.(new CodexRunError(usage.errors.at(-1) ?? 'Codex app-server idle timeout', cloneUsageSummary(usage)));
+    }
+  }, Math.max(250, heartbeatMs));
+  watchdog.unref();
+
   return {
     threadId,
     turnId: activeTurnId,
+    lastActivityAt: () => lastActivityAt,
     done: completion
       .then(async () => {
+        clearInterval(watchdog);
         await client.close();
         return { usage: cloneUsageSummary(usage), stdout };
       })
       .catch(async (error) => {
+        clearInterval(watchdog);
         await client.close();
         throw error;
       }),
     steer: async (text: string) => {
       if (completed || !activeTurnId) return false;
       try {
+        lastActivityAt = Date.now();
         await client.request('turn/steer', {
           threadId,
           expectedTurnId: activeTurnId,
@@ -150,6 +181,7 @@ export async function startCodexAppServerTurn(input: {
     },
     interrupt: async () => {
       if (completed || !activeTurnId) return;
+      lastActivityAt = Date.now();
       await client.request('turn/interrupt', { threadId, turnId: activeTurnId }).catch(() => undefined);
     }
   };
@@ -365,4 +397,15 @@ function stringValue(value: unknown): string | undefined {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const minuteRest = minutes % 60;
+  return minuteRest ? `${hours}h ${minuteRest}m` : `${hours}h`;
 }
