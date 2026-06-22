@@ -4,6 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { scanFilesForSecrets } from '../verify/secret-scan.js';
 import { inspectCodexSshTranscript } from '../verify/ssh-evidence.js';
+import { runPaths, type RunPaths } from '../shared/paths.js';
 
 interface Args {
   name: string;
@@ -39,9 +40,10 @@ const requiredArtifacts = [
 const optionalArtifacts = ['.opt/checks.sh', '.opt/measure.sh', '.opt/benchmark.json'];
 
 async function assertSourceArtifactsHaveNoSecrets(target: string): Promise<void> {
+  const paths = runPaths(target);
   const artifactPaths: string[] = [];
   for (const relativePath of [...requiredArtifacts, ...optionalArtifacts]) {
-    const source = join(target, relativePath);
+    const source = artifactSource(target, paths, relativePath);
     if (await exists(source)) artifactPaths.push(source);
   }
   const findings = await scanFilesForSecrets(artifactPaths);
@@ -52,7 +54,8 @@ async function assertSourceArtifactsHaveNoSecrets(target: string): Promise<void>
 
 async function assertCodexSshAttestationSupported(target: string, args: Args): Promise<void> {
   if (!args.codexAttemptedSsh) return;
-  const transcriptPath = join(target, '.wici/codex-run.jsonl');
+  const paths = runPaths(target);
+  const transcriptPath = artifactSource(target, paths, '.wici/codex-run.jsonl');
   const transcript = await readText(transcriptPath);
   const expectedText = [args.firstChat, await readText(join(target, 'GOAL.md')), await readText(join(target, 'PLAN.md'))].join('\n');
   const evidence = inspectCodexSshTranscript(transcript, expectedText);
@@ -69,15 +72,16 @@ export async function recordCanaryEvidence(args: Args): Promise<{ markdown: stri
   const artifactRoot = join(evidenceDir, 'artifacts');
   const markdownPath = join(args.outDir, `${canaryName}.md`);
   const evidencePath = join(evidenceDir, 'evidence.json');
+  const paths = runPaths(target);
 
   await assertSourceArtifactsHaveNoSecrets(target);
   await assertCodexSshAttestationSupported(target, args);
 
   const goal = await readText(join(target, 'GOAL.md'));
   const plan = await readText(join(target, 'PLAN.md'));
-  const events = await readJsonLines<Record<string, unknown>>(join(target, '.wici/events.jsonl'));
+  const events = await readJsonLines<Record<string, unknown>>(paths.events);
   const ledger = await readJsonLines<Record<string, unknown>>(join(target, 'ledger.jsonl'));
-  const checkpoint = await readJsonMaybe<Record<string, unknown>>(join(target, '.wici/checkpoint.json'));
+  const checkpoint = await readJsonMaybe<Record<string, unknown>>(paths.checkpoint);
   const toolVersions = checkpoint?.tool_versions as Record<string, unknown> | undefined;
   const wiciVersion = toolVersions?.wici as Record<string, unknown> | undefined;
   const targetHead = await git(target, ['rev-parse', 'HEAD']);
@@ -97,12 +101,12 @@ export async function recordCanaryEvidence(args: Args): Promise<{ markdown: stri
   const generated: Record<string, ArtifactDigest> = {};
   const copied: string[] = [];
   for (const relativePath of requiredArtifacts) {
-    const copiedPath = await copyArtifact(target, artifactRoot, relativePath, true);
+    const copiedPath = await copyArtifact(target, paths, artifactRoot, relativePath, true);
     copied.push(copiedPath);
     generated[relativePath] = await digest(copiedPath);
   }
   for (const relativePath of optionalArtifacts) {
-    const copiedPath = await copyArtifact(target, artifactRoot, relativePath, false);
+    const copiedPath = await copyArtifact(target, paths, artifactRoot, relativePath, false);
     if (!copiedPath) continue;
     copied.push(copiedPath);
     generated[relativePath] = await digest(copiedPath);
@@ -242,8 +246,8 @@ function markdownFor(args: Args, canaryName: string, evidencePath: string): stri
   ].join('\n');
 }
 
-async function copyArtifact(target: string, artifactRoot: string, relativePath: string, required: boolean): Promise<string> {
-  const source = join(target, relativePath);
+async function copyArtifact(target: string, paths: RunPaths, artifactRoot: string, relativePath: string, required: boolean): Promise<string> {
+  const source = artifactSource(target, paths, relativePath);
   if (!(await exists(source))) {
     if (required) throw new Error(`Missing required canary artifact: ${source}`);
     return '';
@@ -252,6 +256,13 @@ async function copyArtifact(target: string, artifactRoot: string, relativePath: 
   await mkdir(dirname(destination), { recursive: true });
   await copyFile(source, destination);
   return destination;
+}
+
+function artifactSource(target: string, paths: RunPaths, relativePath: string): string {
+  if (relativePath === '.wici/events.jsonl') return paths.events;
+  if (relativePath === '.wici/codex-run.jsonl') return paths.codexRun;
+  if (relativePath === '.wici/artifacts/planner-initial.stdout.jsonl') return join(paths.artifacts, 'planner-initial.stdout.jsonl');
+  return join(target, relativePath);
 }
 
 async function digest(path: string): Promise<ArtifactDigest> {

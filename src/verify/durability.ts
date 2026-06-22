@@ -5,12 +5,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { exists } from '../shared/atomic.js';
+import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/resume-target');
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
+  const paths = runPaths(target);
   await writeDeterministicMeasure(target);
   await git(['add', 'measure.mjs']);
   await git(['commit', '-m', 'test: make direct durability measure deterministic']);
@@ -25,7 +27,7 @@ async function main(): Promise<void> {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  await waitForEvent(join(target, '.wici', 'events.jsonl'), 'EXECUTE_DONE', 15_000);
+  await waitForEvent(paths.events, 'EXECUTE_DONE', 15_000);
   first.kill('SIGKILL');
   await waitForExit(first);
 
@@ -50,7 +52,7 @@ async function main(): Promise<void> {
 
   assert(!(await exists(join(target, 'baseline.json'))), 'direct V1 durability should not create baseline.json');
 
-  const events = await readJsonLines<RunEvent>(join(target, '.wici', 'events.jsonl'));
+  const events = await readJsonLines<RunEvent>(paths.events);
   assert(
     events.some((event) => event.type === 'RECOVER_REVERT' && (event.data as { mode?: string } | undefined)?.mode === 'direct'),
     'expected direct RECOVER_REVERT event after restart'
@@ -58,7 +60,7 @@ async function main(): Promise<void> {
   assert(!events.some((event) => event.type === 'BASELINE_START'), 'direct V1 durability must not initialize baseline before recovery');
   assert(!events.some((event) => event.type === 'EVALUATE_START'), 'direct V1 durability must not run evaluator gate before recovery');
 
-  const checkpoint = JSON.parse(await readFile(join(target, '.wici', 'checkpoint.json'), 'utf8')) as Checkpoint;
+  const checkpoint = JSON.parse(await readFile(paths.checkpoint, 'utf8')) as Checkpoint;
   assert(checkpoint.iter === 1, `expected checkpoint iter=1, got ${checkpoint.iter}`);
   assert(checkpoint.ledger_seq === 1, `expected checkpoint ledger_seq=1, got ${checkpoint.ledger_seq}`);
   assert(checkpoint.supervisor_state === 'STOP', `expected STOP checkpoint after resumed direct run, got ${checkpoint.supervisor_state}`);

@@ -15,6 +15,7 @@ const answerText = 'Use the SSH target from the original chat and let Codex do r
 async function main(): Promise<void> {
   await requireExpect();
   await installFakeClaude();
+  await installFakeCodex();
   await createSampleTarget(target, true);
   const paths = runPaths(target);
   assert(!(await exists(paths.plan)), 'fresh PTY clarification target should start without PLAN.md');
@@ -232,6 +233,53 @@ writeFileSync(out, [
 ].join('\\n') + '\\n');
 `
   );
+  await chmod(fakeCodex, 0o755);
+}
+
+async function installFakeCodex(): Promise<void> {
+  const script = `#!/usr/bin/env node
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+const args = process.argv.slice(2);
+if (args.includes('--version')) {
+  console.log('codex-cli 0.999.0');
+  process.exit(0);
+}
+if (args[0] === 'update' || args[0] === 'doctor') {
+  console.log('ok');
+  process.exit(0);
+}
+const outIndex = args.indexOf('--output-last-message');
+if (outIndex < 0) {
+  console.error('fake codex planner expected --output-last-message');
+  process.exit(2);
+}
+const out = args[outIndex + 1];
+const prompt = args.at(-1) || '';
+mkdirSync(dirname(out), { recursive: true });
+if (prompt.includes('${answerText}')) {
+  writeFileSync(out, [
+    '## PLAN.md',
+    '',
+    '# WiCi PTY Clarification Plan',
+    '',
+    '- [ ] S1 Remote benchmark bootstrap',
+    '  - Action: let Codex inspect the clarified remote target and prepare the benchmark.',
+    '  - Validation: Codex reports the remote runtime discovery result.'
+  ].join('\\n'));
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-planner-session' }));
+  process.exit(0);
+}
+if (prompt.includes('${firstChat}')) {
+  writeFileSync(out, '## QUESTION\\n\\nWhich remote target should the planner use for this benchmark?');
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-planner-session' }));
+  process.exit(0);
+}
+console.error('fake codex planner received unexpected prompt');
+process.exit(3);
+`;
+  const fakeCodex = join(fakeBin, 'codex');
+  await writeFile(fakeCodex, script);
   await chmod(fakeCodex, 0o755);
 }
 

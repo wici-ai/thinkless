@@ -45,7 +45,7 @@ export async function previewRollback(paths: RunPaths): Promise<RollbackPreview>
 export async function rollbackTarget(paths: RunPaths): Promise<RollbackResult> {
   const preview = await previewRollback(paths);
   await git(paths, ['reset', '--hard', preview.rollback_ref]);
-  await git(paths, ['clean', '-fd', '-e', '.wici/'], false);
+  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.wici/'], false);
   return {
     ...preview,
     reset: true,

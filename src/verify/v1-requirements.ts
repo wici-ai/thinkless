@@ -122,6 +122,8 @@ async function main(): Promise<void> {
   assert(files.plannerPrompt.includes('web research or remote discovery'), 'planner prompt must allow planning-time web and remote discovery');
   assert(files.plannerPrompt.includes('a PLAN.md-only workflow is valid'), 'planner prompt must not force optional .opt scripts');
   assert(files.plannerPrompt.includes('Treat research, debugging, and fallback strategy as planner/executor responsibilities'), 'planner prompt must own research/debug/fallback behavior instead of requiring Chat boilerplate');
+  assert(files.plannerPrompt.includes('## ASSUMPTIONS.md') && files.plannerPrompt.includes('Self-grill'), 'planner prompt must require self-interrogation and ASSUMPTIONS.md');
+  assert(files.plannerPrompt.includes('unresolvable by repository evidence'), 'planner prompt must reserve QUESTION for essential unresolvable unknowns');
   assert(files.plannerPrompt.includes('- [ ] S1 Short imperative step title') && files.plannerPrompt.includes('### S1'), 'planner prompt must require WiCi-discoverable executable step lines');
   assert(files.plannerPrompt.includes('Do not create scripts just to satisfy WiCi'), 'planner prompt must keep validation scripts optional');
   assert(files.plannerPrompt.includes('Fresh V1 does not require `.opt/measure.sh` to follow a WiCi metric schema'), 'planner prompt must not force a fresh V1 measurement schema');
@@ -133,15 +135,17 @@ async function main(): Promise<void> {
   assert(files.plannerClarification.includes('PLANNER_CLARIFY_REQUIRED'), 'planner clarification path must be verified');
   assert(files.plannerClarification.includes('plan_diff_question') && files.plannerClarification.includes('plan_diff_resumed_session'), 'planner clarification verifier must cover hot-reload plan diff questions');
   assert(files.plannerDiffPrompt.includes('## QUESTION'), 'planner diff prompt must allow clarification through Chat');
+  assert(files.plannerDiffPrompt.includes('living self-interrogation artifact') && files.plannerDiffPrompt.includes('override an adopted assumption'), 'planner diff prompt must maintain ASSUMPTIONS.md through steering');
   assert(files.plannerDiffPrompt.includes('native plan-mode tools remain available'), 'planner diff prompt must preserve native Claude tools during hot reload planning');
   assert(files.plannerDiffPrompt.includes('- [ ] S3 Short imperative step title') && files.plannerDiffPrompt.includes('### S3'), 'planner diff prompt must preserve WiCi-discoverable step shape for added steps');
   assert(files.chat.includes('latestQuestion') && files.chat.includes("kind: 'answer'"), 'ChatPane must route open planner questions through chat answers');
 
-	  assert(files.supervisor.includes("waitReason: 'PLAN_READY'"), 'fresh V1 setup must be able to return PLAN_READY without a baseline');
-	  assert(files.supervisor.includes('return runDirectPlanExecution'), 'fresh V1 setup must directly enter PLAN.md execution');
-	  assert(files.supervisor.includes("mode: 'direct'"), 'fresh V1 events must identify direct PLAN.md execution');
-	  assert(files.supervisor.includes('LEGACY_BASELINE_IGNORED'), 'fresh V1 must ignore historical baseline.json unless legacy optimizer is explicitly enabled');
-	  assert(files.supervisor.includes('legacy_optimizer === true'), 'legacy optimizer baseline path must be explicit opt-in');
+  assert(files.supervisor.includes("waitReason: 'PLAN_READY'"), 'fresh V1 setup must be able to return PLAN_READY without a baseline');
+  assert(files.supervisor.includes('return runDirectPlanExecution'), 'fresh V1 setup must directly enter PLAN.md execution');
+  assert(files.supervisor.includes("mode: 'direct'"), 'fresh V1 events must identify direct PLAN.md execution');
+  assert(files.supervisor.includes('directContinuationVerdict') && files.supervisor.includes('DIRECT_CONTINUATION_VERDICT'), 'fresh V1 must gate exhausted direct plans before continuation');
+  assert(files.supervisor.includes('LEGACY_BASELINE_IGNORED'), 'fresh V1 must ignore historical baseline.json unless legacy optimizer is explicitly enabled');
+  assert(files.supervisor.includes('legacy_optimizer === true'), 'legacy optimizer baseline path must be explicit opt-in');
 	  assert(files.supervisor.includes('emitPlannerUsage(events, progress') && files.supervisor.includes("phase: 'direct_plan_diff'"), 'hot reload planner diffs must stream PLAN_USAGE events');
 	  assert(!files.supervisor.includes('PREBASELINE') && !files.supervisor.includes('runPreBaselineSetupStep'), 'fresh V1 supervisor must not carry a pre-baseline setup control path');
   assert(!files.supervisor.includes('assertNoPendingToolUpdatesForLongRun'), 'fresh V1 supervisor must not block long runs on pending tool updates');
@@ -246,6 +250,9 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:v1-core']?.includes('verify:v1-requirements'), 'verify:v1-core must include verify:v1-requirements');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:direct-no-scripts'), 'verify:v1-core must include direct no-scripts PLAN.md execution');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:direct-recovery'), 'verify:v1-core must include direct executor recovery');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:direct-plan-continuation'), 'verify:v1-core must include exhausted direct plan continuation');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:self-interrogation'), 'verify:v1-core must include planner self-interrogation coverage');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:continuation-verdict'), 'verify:v1-core must include direct continuation verdict coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:existing-goal'), 'verify:v1-core must include existing GOAL.md/PLAN.md continuation');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:real-mode'), 'verify:v1-core must include real-mode target safety checks');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:demo-tui'), 'verify:v1-core must include the Chat-first demo TUI check');

@@ -2,6 +2,14 @@ You are updating an existing WiCi plan after a new requirement arrived mid-run.
 
 Use `GOAL.md` as the user-facing goal contract. `.wici/goal.json` is internal supervisor state and should not shape a task-specific schema.
 
+Also treat `ASSUMPTIONS.md` as the planner's living self-interrogation artifact. Read it before changing the plan. If the new requirement is user steering, treat it as authoritative evidence that can override an adopted assumption. Update `ASSUMPTIONS.md` when the steering changes an assumption, when new execution facts invalidate an assumption, or when a new risk/discovery item matters for the next steps.
+
+Before emitting artifacts, briefly self-interrogate the diff:
+
+1. Consider 2-3 ways to incorporate the new requirement within the existing fixed scope.
+2. Ask yourself what user questions those approaches seem to require.
+3. Resolve those questions from current `GOAL.md`, `PLAN.md`, `ASSUMPTIONS.md`, repository evidence, or a new Codex discovery step whenever possible.
+
 Return the smallest safe markdown update. Preserve existing step IDs and do not rewrite completed steps unless the new requirement explicitly makes them obsolete. Any newly added executable step must keep WiCi's discoverable step shape, preferably:
 
 ```markdown
@@ -18,15 +26,21 @@ Use this shape:
 <optional updated human-facing GOAL.md; preserve raw user requirements and chat steering>
 ```
 
+## ASSUMPTIONS.md
+
+```markdown
+<optional updated full ASSUMPTIONS.md, preserving still-valid approaches, assumptions, and risks>
+```
+
 ## PLAN.md
 
 ```markdown
 <the updated full PLAN.md>
 ```
 
-`PLAN.md` is required. `GOAL.md` is optional. If `.opt/checks.sh` or `.opt/measure.sh` must change, include those sections too. Do not emit JSON.
+`PLAN.md` is required. `ASSUMPTIONS.md` is optional for small diffs that do not affect assumptions; when emitted, it must be the updated full file. `GOAL.md` is optional. If `.opt/checks.sh` or `.opt/measure.sh` must change, include those sections too. Do not emit JSON.
 
-If the new requirement cannot be incorporated safely without essential user information, return:
+If the new requirement cannot be incorporated safely without essential user information and the answer is unresolvable by current artifacts, repository evidence, planning-time tools, web or remote evidence, or a concrete Codex discovery step in `PLAN.md`, return:
 
 ## QUESTION
 

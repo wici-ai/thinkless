@@ -4,7 +4,7 @@ import { execa } from 'execa';
 import type { RunPaths } from '../shared/paths.js';
 import type { WiCiConfig } from '../shared/types.js';
 
-const WICI_SCAFFOLD_ENTRIES = new Set(['.wici', '.opt']);
+const WICI_SCAFFOLD_ENTRIES = new Set(['.thinkless', '.wici', '.opt']);
 
 async function git(paths: RunPaths, args: string[], reject = true): Promise<string> {
   const result = await execa('git', ['-C', paths.target, ...args], {
@@ -109,7 +109,7 @@ export async function revertToBest(paths: RunPaths, bestCommit: string): Promise
   } else {
     await git(paths, ['restore', '--staged', '--worktree', '.'], false);
   }
-  await git(paths, ['clean', '-fd', '-e', '.wici/'], false);
+  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.wici/'], false);
 }
 
 export async function resetToCommit(paths: RunPaths, commit: string): Promise<void> {
@@ -117,5 +117,5 @@ export async function resetToCommit(paths: RunPaths, commit: string): Promise<vo
     throw new Error(`Cannot reset to invalid WiCi checkpoint commit: ${commit}`);
   }
   await git(paths, ['reset', '--hard', commit]);
-  await git(paths, ['clean', '-fd', '-e', '.wici/'], false);
+  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.wici/'], false);
 }

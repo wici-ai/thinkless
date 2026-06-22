@@ -36,6 +36,7 @@ export interface RunPaths {
   checkpoint: string;
   lock: string;
   plan: string;
+  assumptions: string;
   acceptanceSpec: string;
   opt: string;
   measure: string;
@@ -84,6 +85,7 @@ export function runPaths(target: string): RunPaths {
     checkpoint: join(stateDir, 'checkpoint.json'),
     lock: join(stateDir, '.lock'),
     plan: join(root, 'PLAN.md'),
+    assumptions: join(root, 'ASSUMPTIONS.md'),
     acceptanceSpec: join(root, 'acceptance.spec.json'),
     opt,
     measure: join(opt, 'measure.sh'),
@@ -147,6 +149,6 @@ export function schemaPath(name: 'iter-result'): string {
   return join(TOOL_ROOT, 'schemas', `${name}.schema.json`);
 }
 
-export function promptPath(name: 'planner' | 'planner-diff' | 'stop-verdict' | 'chat'): string {
+export function promptPath(name: 'planner' | 'planner-diff' | 'stop-verdict' | 'continue-verdict' | 'chat'): string {
   return join(TOOL_ROOT, 'prompts', `${name}.md`);
 }

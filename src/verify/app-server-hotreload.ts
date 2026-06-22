@@ -32,6 +32,7 @@ async function main(): Promise<void> {
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
         WICI_FAKE_TARGET: target,
         WICI_FAKE_STATE_DIR: paths.wici,
+        WICI_PLANNER_AGENT: 'claude',
         WICI_CODEX_EXECUTOR_BACKEND: 'app-server'
       },
       stdio: ['ignore', 'pipe', 'pipe']

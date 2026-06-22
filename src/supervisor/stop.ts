@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { execa } from 'execa';
+import { exists } from '../shared/atomic.js';
 import { commandExists } from '../shared/commands.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { GoalFile, LedgerEntry, WiCiConfig } from '../shared/types.js';
@@ -44,6 +45,12 @@ export interface StopAnalysis {
   recent_curve: StopCurvePoint[];
 }
 
+export interface DirectContinuationVerdict {
+  decision: 'continue' | 'complete';
+  reason: string;
+  source: 'llm' | 'fallback';
+}
+
 export async function shouldStop(paths: RunPaths, goal: GoalFile, ledger: LedgerEntry[], config: WiCiConfig): Promise<StopDecision> {
   const analysis = buildStopAnalysis(goal, ledger);
   const candidate = (analysis.target_met || analysis.no_recent_keep) && analysis.ewma_marginal_value < goal.stop.tau;
@@ -64,6 +71,59 @@ export async function shouldStop(paths: RunPaths, goal: GoalFile, ledger: Ledger
     analysis,
     verdict
   };
+}
+
+export async function directContinuationVerdict(
+  paths: RunPaths,
+  goal: GoalFile,
+  ledger: LedgerEntry[],
+  config: WiCiConfig
+): Promise<DirectContinuationVerdict> {
+  const fallback: DirectContinuationVerdict = {
+    decision: 'continue',
+    reason: 'Continue-biased fallback: the completion gate did not produce an explicit complete verdict.',
+    source: 'fallback'
+  };
+
+  if (config.tools.mode === 'stub') return fallback;
+  if (!(await commandExists(config.tools.planner.command))) return fallback;
+
+  try {
+    const prompt = await readFile(promptPath('continue-verdict'), 'utf8');
+    const result = await execa(
+      config.tools.planner.command,
+      [
+        '-p',
+        [
+          prompt,
+          '',
+          `GOAL.md:\n${await readGoalDocForVerdict(paths, goal)}`,
+          '',
+          `Acceptance criteria:\n${JSON.stringify(goal.acceptance_criteria, null, 2)}`,
+          '',
+          `ASSUMPTIONS.md:\n${(await readTextIfExists(paths.assumptions)) || '(missing)'}`,
+          '',
+          `Recent ledger:\n${JSON.stringify(ledger.slice(-12), null, 2)}`
+        ].join('\n'),
+        '--output-format',
+        'json',
+        '--permission-mode',
+        'plan'
+      ],
+      { cwd: paths.target, reject: true, all: true, maxBuffer: 1024 * 1024 * 5 }
+    );
+    const parsed = extractDirectContinuationVerdict(result.stdout);
+    if (parsed.decision === 'complete') {
+      return { decision: 'complete', reason: parsed.reason ?? 'LLM completion verdict', source: 'llm' };
+    }
+    if (parsed.decision === 'continue') {
+      return { decision: 'continue', reason: parsed.reason ?? 'LLM continuation verdict', source: 'llm' };
+    }
+  } catch {
+    return fallback;
+  }
+
+  return fallback;
 }
 
 export function buildStopAnalysis(goal: GoalFile, ledger: LedgerEntry[]): StopAnalysis {
@@ -206,4 +266,51 @@ function stopVerdictFromCandidate(candidate: unknown): { decision?: 'continue' |
   if (typeof candidate.result !== 'string') return null;
   const parsed = parseJsonObjectFromText(candidate.result);
   return parsed ? stopVerdictFromCandidate(parsed) : null;
+}
+
+async function readGoalDocForVerdict(paths: RunPaths, goal: GoalFile): Promise<string> {
+  const goalDoc = await readTextIfExists(paths.goalDoc);
+  if (goalDoc) return goalDoc;
+  return [
+    '# Goal',
+    '',
+    '## Requirements',
+    ...goal.requirements.filter((req) => req.status === 'active').map((req) => `- ${req.id}: ${req.text}`),
+    '',
+    '## Constraints',
+    ...(goal.constraints.length > 0 ? goal.constraints.map((constraint) => `- ${constraint}`) : ['- none recorded'])
+  ].join('\n');
+}
+
+async function readTextIfExists(path: string): Promise<string> {
+  return (await exists(path)) ? readFile(path, 'utf8') : '';
+}
+
+function extractDirectContinuationVerdict(raw: string): { decision?: 'continue' | 'complete'; reason?: string } {
+  const parsed = parseClaudeJsonOutput(raw);
+  for (const item of [...parsed].reverse()) {
+    const verdict = directContinuationVerdictFromCandidate(item);
+    if (verdict) return verdict;
+  }
+  return {};
+}
+
+function directContinuationVerdictFromCandidate(candidate: unknown): { decision?: 'continue' | 'complete'; reason?: string } | null {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const direct = candidate as { decision?: unknown; reason?: unknown; structured_output?: unknown };
+  if (direct.decision === 'continue' || direct.decision === 'complete') {
+    return {
+      decision: direct.decision,
+      reason: typeof direct.reason === 'string' ? direct.reason : undefined
+    };
+  }
+  if (direct.structured_output) {
+    const structured = directContinuationVerdictFromCandidate(direct.structured_output);
+    if (structured) return structured;
+  }
+  if (!isClaudeEnvelope(candidate) || candidate.result === undefined || candidate.result === null) return null;
+  if (typeof candidate.result === 'object') return directContinuationVerdictFromCandidate(candidate.result);
+  if (typeof candidate.result !== 'string') return null;
+  const parsed = parseJsonObjectFromText(candidate.result);
+  return parsed ? directContinuationVerdictFromCandidate(parsed) : null;
 }

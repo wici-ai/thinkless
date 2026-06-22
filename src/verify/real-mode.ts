@@ -21,8 +21,9 @@ async function main(): Promise<void> {
   await verifyFreshTargetGitInit(config);
   await verifyNonEmptyNonGitTargetRejected(config);
 
-  await expectRejects(() => runInitialPlanner(paths, goal, config), 'Planner command not found in real mode');
-  await expectRejects(() => runPlanDiff(paths, goal, undefined, 'new requirement', config), 'Planner command not found in real mode');
+  await expectRejects(() => runInitialPlanner(paths, goal, config), 'Planner command not found');
+  await writeFile(paths.plan, '# Plan\n\n- [ ] S1 Existing real-mode step\n');
+  await expectRejects(() => runPlanDiff(paths, goal, 'fake-planner-session', 'new requirement', config), 'Planner command not found');
   await expectRejects(() => runExecutorStep(paths, goal, 'S1', 1, config), 'Executor command not found in real mode');
 
   console.log(

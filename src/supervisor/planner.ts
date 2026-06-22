@@ -20,6 +20,7 @@ interface PlannerOutput {
   session_id?: string;
   goalMarkdown?: string;
   planMarkdown?: string;
+  assumptionsMarkdown?: string;
   measureSh?: string;
   checksSh?: string;
 }
@@ -174,11 +175,12 @@ export async function runPlanDiff(
   if (config.tools.mode !== 'stub') {
     const systemPrompt = await readFile(promptPath('planner-diff'), 'utf8');
     const plan = await readFile(paths.plan, 'utf8');
+    const assumptions = await readTextIfExists(paths.assumptions);
     const safetyText = formatSafetyForPrompt(config);
     const goalText = await readPlannerGoalText(paths, goal);
     if (plannerAgent === 'codex' && available) {
       try {
-        const result = await runCodexPlanDiff(paths, goalText, plan, newText, plannerSessionId, config, systemPrompt, safetyText);
+        const result = await runCodexPlanDiff(paths, goalText, plan, assumptions, newText, plannerSessionId, config, systemPrompt, safetyText);
         if (result) return result;
       } catch (error) {
         if (config.tools.mode === 'real') throw error;
@@ -189,12 +191,13 @@ export async function runPlanDiff(
       if (!available) throw new Error(`Planner command not found: ${config.tools.planner.command}`);
       const result = await runPlannerProcess(
         config.tools.planner.command,
-        buildPlanDiffArgs({
-          newText,
-          currentPlan: plan,
-          goalText,
-          sessionId: plannerSessionId,
-          effort: config.tools.planner.effort,
+          buildPlanDiffArgs({
+            newText,
+            currentPlan: plan,
+            currentAssumptions: assumptions,
+            goalText,
+            sessionId: plannerSessionId,
+            effort: config.tools.planner.effort,
           model: config.tools.planner.model,
           systemPrompt,
           safetyText
@@ -216,7 +219,7 @@ export async function runPlanDiff(
       return { ok: true, sessionId: plannerSessionId, stdout: result.all ?? result.stdout };
     } catch (error) {
       const fallback = plannerAgent === 'claude'
-        ? await runCodexPlanDiff(paths, goalText, plan, newText, undefined, config, systemPrompt, safetyText, error)
+        ? await runCodexPlanDiff(paths, goalText, plan, assumptions, newText, undefined, config, systemPrompt, safetyText, error)
         : null;
       if (fallback) return fallback;
       if (config.tools.mode === 'real') throw error;
@@ -342,6 +345,7 @@ function codexEffortArgs(effort: string | undefined): string[] {
 export function buildPlanDiffArgs(input: {
   newText: string;
   currentPlan: string;
+  currentAssumptions?: string;
   goalText: string;
   sessionId: string;
   effort?: string;
@@ -351,7 +355,12 @@ export function buildPlanDiffArgs(input: {
 }): string[] {
   return [
     '-p',
-    `New requirement: ${input.newText}\n\nCurrent GOAL.md:\n${input.goalText}\n\nCurrent PLAN.md:\n${input.currentPlan}`,
+    [
+      `New requirement: ${input.newText}`,
+      `\nCurrent GOAL.md:\n${input.goalText}`,
+      `\nCurrent PLAN.md:\n${input.currentPlan}`,
+      input.currentAssumptions?.trim() ? `\nCurrent ASSUMPTIONS.md:\n${input.currentAssumptions}` : ''
+    ].join('\n'),
     '--resume',
     input.sessionId,
     '--output-format',
@@ -405,6 +414,7 @@ async function runCodexPlanDiff(
   paths: RunPaths,
   goalText: string,
   currentPlan: string,
+  currentAssumptions: string,
   newText: string,
   plannerSessionId: string | undefined,
   config: WiCiConfig,
@@ -414,7 +424,7 @@ async function runCodexPlanDiff(
 ): Promise<PlannerInvocationResult | null> {
   const command = 'codex';
   if (!(await commandExists(command))) return null;
-  const prompt = buildCodexPlanDiffPrompt({ goalText, currentPlan, newText, systemPrompt, safetyText, previousError });
+  const prompt = buildCodexPlanDiffPrompt({ goalText, currentPlan, currentAssumptions, newText, systemPrompt, safetyText, previousError });
   return runCodexPlannerProcess(paths, command, `diff-codex-${Date.now()}`, prompt, {
     model: codexPlannerModel(config),
     effort: codexPlannerEffort(config),
@@ -488,6 +498,7 @@ function buildCodexInitialPlannerPrompt(input: {
 function buildCodexPlanDiffPrompt(input: {
   goalText: string;
   currentPlan: string;
+  currentAssumptions?: string;
   newText: string;
   systemPrompt: string;
   safetyText: string;
@@ -501,7 +512,8 @@ function buildCodexPlanDiffPrompt(input: {
     '',
     `New requirement: ${input.newText}`,
     `\nCurrent GOAL.md:\n${input.goalText}`,
-    `\nCurrent PLAN.md:\n${input.currentPlan}`
+    `\nCurrent PLAN.md:\n${input.currentPlan}`,
+    input.currentAssumptions?.trim() ? `\nCurrent ASSUMPTIONS.md:\n${input.currentAssumptions}` : ''
   ].join('\n');
 }
 
@@ -696,12 +708,14 @@ function plannerMarkdownOutputFromText(text: string, sessionId?: string): Planne
   const goalMarkdown = extractMarkdownArtifact(text, 'GOAL.md');
   const planMarkdown = extractMarkdownArtifact(text, 'PLAN.md');
   if (!planMarkdown) return null;
+  const assumptionsMarkdown = extractMarkdownArtifact(text, 'ASSUMPTIONS.md') ?? extractMarkdownArtifact(text, 'ASSUMPTIONS');
   const checksSh = extractMarkdownArtifact(text, '.opt/checks.sh') ?? extractMarkdownArtifact(text, 'checks.sh');
   const measureSh = extractMarkdownArtifact(text, '.opt/measure.sh') ?? extractMarkdownArtifact(text, 'measure.sh');
   return {
     ...(sessionId ? { session_id: sessionId } : {}),
     ...(goalMarkdown ? { goalMarkdown } : {}),
     planMarkdown,
+    ...(assumptionsMarkdown ? { assumptionsMarkdown } : {}),
     ...(checksSh ? { checksSh } : {}),
     ...(measureSh ? { measureSh } : {})
   };
@@ -727,7 +741,18 @@ function extractMarkdownArtifact(text: string, label: string): string | undefine
   return content || undefined;
 }
 
-const PLANNER_ARTIFACT_HEADINGS = new Set(['goal.md', 'plan.md', '.opt/checks.sh', 'checks.sh', '.opt/measure.sh', 'measure.sh', 'question', 'clarify']);
+const PLANNER_ARTIFACT_HEADINGS = new Set([
+  'goal.md',
+  'plan.md',
+  'assumptions.md',
+  'assumptions',
+  '.opt/checks.sh',
+  'checks.sh',
+  '.opt/measure.sh',
+  'measure.sh',
+  'question',
+  'clarify'
+]);
 
 function nextPlannerArtifactHeadingIndex(lines: string[], start: number): number {
   for (let index = start; index < lines.length; index += 1) {
@@ -770,6 +795,7 @@ async function materializePlannerOutput(paths: RunPaths, output: PlannerOutput):
     throw new Error('Planner output missing PLAN.md artifact');
   }
   await atomicWriteFile(paths.plan, ensureExecutableChecklist(output.planMarkdown));
+  if (output.assumptionsMarkdown) await atomicWriteFile(paths.assumptions, ensureTrailingNewline(output.assumptionsMarkdown));
   if (output.measureSh) await atomicWriteFile(paths.measure, ensureScript(output.measureSh), 0o755);
   if (output.checksSh) await atomicWriteFile(paths.checks, ensureScript(output.checksSh), 0o755);
   if (output.goalMarkdown) await atomicWriteFile(paths.goalDoc, ensureTrailingNewline(output.goalMarkdown));

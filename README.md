@@ -6,7 +6,7 @@ The V1 path is intentionally thin:
 
 - Chat is the initial intake and output surface.
 - `GOAL.md` is a human-readable markdown goal built from the conversation.
-- Claude Code plan mode produces `PLAN.md` and, when useful, `.opt/checks.sh` / `.opt/measure.sh`.
+- Claude Code plan mode produces `ASSUMPTIONS.md`, `PLAN.md`, and, when useful, `.opt/checks.sh` / `.opt/measure.sh`.
 - Once `PLAN.md` exists, Thinkless feeds `GOAL.md + PLAN.md` directly to Codex.
 - The supervisor handles TUI state, events, token usage, checkpoints, git rollback points, and hot reload.
 
@@ -33,6 +33,9 @@ npm run verify:v1-slice
 npm run verify:direct-no-scripts
 npm run verify:direct-recovery
 npm run verify:direct-preempt
+npm run verify:direct-plan-continuation
+npm run verify:self-interrogation
+npm run verify:continuation-verdict
 npm run verify:existing-goal
 npm run verify:v1-requirements
 npm run verify:tui-structure
@@ -81,9 +84,13 @@ npm run verify:existing-goal
 npm run verify:hotreload
 npm run verify:inbox-backpressure
 npm run verify:safety-prompts
+npm run verify:state-paths
+npm run verify:runtime-fallback
+npm run verify:startup-self-update
 npm run verify:rollback
 npm run verify:outbox
 npm run verify:tool-version
+npm run verify:audio-dictation
 npm run verify:codex-run-usage
 npm run verify:clarify
 npm run verify:claude-probe
@@ -186,14 +193,15 @@ Valid panes are `chat`, `plan`/`planner`, and `execution`/`exec`/`executor`. Cla
 Planner output is markdown artifacts, not a second goal schema:
 
 - `## GOAL.md` is optional and can carry planner-updated human-readable goal context.
+- `## ASSUMPTIONS.md` records the planner's self-interrogation: approaches considered, assumptions adopted with evidence or planned discovery, and open risks.
 - `## PLAN.md` is required.
 - `## .opt/checks.sh` is optional.
 - `## .opt/measure.sh` is optional.
-- `## QUESTION` is used only when a necessary clarification is missing.
+- `## QUESTION` is used only when essential information is missing and cannot be resolved from evidence or a Codex discovery step.
 
 The absence of `.opt` scripts is a valid fresh V1 path. Thinkless must still hand `GOAL.md + PLAN.md` directly to Codex; scripts are planner artifacts for tasks that need reusable commands, not a supervisor-controlled execution prerequisite.
 
-Planner mode can run through Codex or Claude. Codex is the default planner backend with xhigh effort; if a Claude-backed planner is selected and Claude is unavailable, Thinkless falls back to Codex xhigh. Thinkless does not pass a custom tool allowlist or denylist; planning-time web research or remote discovery can be used when the planner needs context for `PLAN.md`. The deployment, benchmark target, application build, or optimization result still belongs in Codex execution after `PLAN.md` is materialized.
+Planner mode can run through Codex or Claude. Codex is the default planner backend with xhigh effort; if a Claude-backed planner is selected and Claude is unavailable, Thinkless falls back to Codex xhigh. Thinkless does not pass a custom tool allowlist or denylist; planning-time web research or remote discovery can be used when the planner needs context for `PLAN.md`. The planner should brainstorm 2-3 approaches, self-grill its assumptions, persist the result in `ASSUMPTIONS.md`, and ask the user only for information that is essential and unresolvable by evidence or discovery. The deployment, benchmark target, application build, or optimization result still belongs in Codex execution after `PLAN.md` is materialized.
 
 Users should not need to add meta-instructions such as "search tutorials", "debug if one path fails", or "update PLAN.md/.opt and keep going" to the Chat goal. Those are planner/executor responsibilities. Planner should encode research and fallback strategy in `PLAN.md` when the task needs it, and Codex should use native tools, logs, documentation, and environment inspection during execution.
 
@@ -202,6 +210,8 @@ When `PLAN.md` exists, the fresh V1 path starts Codex directly. It does not requ
 During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.thinkless/artifacts/planner-*.stdout.jsonl` for new runs. Real Codex execution defaults to `codex app-server` in `auto` mode when the CLI supports it, streams raw app-server JSON-RPC notifications into `.thinkless/codex-run.jsonl`, checkpoints the active workspace, turn phase, last event, and last activity time, and shows progress in the Chat status line. Existing `.wici/` runs keep using their legacy directory. If app-server is unavailable, stalls without progress, or a fake legacy CLI is on `PATH`, Thinkless falls back to a recoverable retry path; the legacy executor watchdog remains intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work.
 
 Thinkless does not treat a single executor failure as the whole goal failing. Direct V1 execution is intentionally long-horizon: command failures, failed validation, and executor timeouts are recorded as recoverable crash ledger rows, the active `PLAN.md` step is reset to pending, and the next Codex prompt receives the failure reason. Codex is allowed to inspect logs and remote state, update `PLAN.md`, repair planner-provided `.opt` scripts, choose a different deployment or validation strategy, and continue the same `GOAL.md` until the goal is actually satisfied or there is concrete repeated evidence that it cannot proceed.
+
+When direct execution exhausts `PLAN.md`, Thinkless runs a continue-biased completion gate before asking the planner for another step. The gate reads `GOAL.md`, acceptance criteria, recent ledger rows, and `ASSUMPTIONS.md`; only an explicit `complete` verdict stops cleanly. Stub mode, tool errors, and ambiguous verdicts continue so the planner can deepen quality within the fixed user scope without inventing new scope.
 
 Later Chat messages are drained through `.thinkless/inbox/` for new runs, or `.wici/inbox/` for legacy sessions. With the app-server backend, Thinkless updates `GOAL.md`, asks Claude plan mode for the smallest `PLAN.md` update, then sends `turn/steer` to the active Codex turn so execution continues without restarting. With the legacy `codex exec` fallback, Thinkless preempts at the next executor output or heartbeat, applies the same planner diff, and resumes through `codex exec resume --last`.
 
@@ -237,13 +247,19 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 
 `npm run verify:direct-preempt` covers the legacy fallback path: a fake real-mode `codex exec` run is interrupted after pending Chat input appears, WiCi records `EXECUTE_PREEMPTED`, drains the inbox, applies a planner diff, then resumes Codex.
 
+`npm run verify:direct-plan-continuation` covers exhausted-plan continuation: if `PLAN.md` has no pending steps, Thinkless asks the planner for another in-scope step instead of stopping merely because the markdown checklist is empty.
+
+`npm run verify:self-interrogation` covers AI-led planning assumptions: the planner prompt requires 2-3 approaches, self-grilling, narrow `## QUESTION` use, and materializes `ASSUMPTIONS.md`.
+
+`npm run verify:continuation-verdict` covers the direct completion gate: explicit `complete` stops, explicit `continue` continues, and ambiguous or stub verdicts fall back to continue.
+
 `npm run verify:existing-goal` covers continuing a target that already has `GOAL.md` and `PLAN.md` without passing a new `--goal`.
 
 `npm run verify:tui-live` starts the `tui` command itself with the supervisor enabled and verifies that the live execution stream reaches the TUI while the target run commits and stops cleanly.
 
 `npm run verify:tui-chat-pty` starts the TUI in a real pseudo-terminal, types the first Chat message, submits it through the input line, and verifies that the run records `goal_source: "tui_chat"` before executing `GOAL.md + PLAN.md`.
 
-`npm run verify:tui-real-fake-chat` runs the same Chat-first PTY path in `--mode real` with fake Claude/Codex CLIs on `PATH`, proving the TUI starts the real-mode planner/executor subprocess path and streams `PLAN_USAGE` plus `EXECUTE_PROGRESS` without spending real tokens.
+`npm run verify:tui-real-fake-chat` runs the same Chat-first PTY path in `--mode real` with fake Claude/Codex CLIs on `PATH`, proving the TUI starts the real-mode planner/executor subprocess path and streams `EXECUTE_PROGRESS` without spending real tokens.
 
 `npm run verify:tui-planner-clarification-pty` covers the next interactive path: Claude plan mode asks a clarification question, the user answers through the same Chat input, and WiCi resumes the planner session to materialize `PLAN.md`.
 

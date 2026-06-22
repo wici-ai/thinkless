@@ -184,6 +184,11 @@ async function main(): Promise<void> {
           '# Plan',
           '- [ ] S1 Test',
           '',
+          '## ASSUMPTIONS.md',
+          '',
+          '## Approaches considered',
+          '- Try the direct fixture path first.',
+          '',
           '## .opt/measure.sh',
           '',
           'echo METRIC value=1 unit=score n=5 warmup_discarded=0',
@@ -198,6 +203,7 @@ async function main(): Promise<void> {
   assert(structured.session_id === 'session-abc', 'planner parser must preserve Claude envelope session id');
   assert(typeof structured.planMarkdown === 'string', 'planner parser must return plan markdown');
   assert(structured.planMarkdown.includes('S1'), 'planner parser must extract markdown artifacts from Claude result envelope');
+  assert(structured.assumptionsMarkdown?.includes('Approaches considered'), 'planner parser must extract ASSUMPTIONS.md artifacts');
 
   const question = extractPlannerResponse(
     JSON.stringify({
@@ -442,12 +448,13 @@ if (args.includes('--version')) {
   process.exit(0);
 }
 const target = process.env.WICI_CODEX_CHAT_TARGET;
+const stateDir = process.env.WICI_CODEX_CHAT_STATE_DIR || join(target, '.wici');
 const out = args[args.indexOf('--output-last-message') + 1];
 const resumeIndex = args.indexOf('resume');
 const resumed = resumeIndex >= 0;
 mkdirSync(dirname(out), { recursive: true });
-mkdirSync(join(target, '.thinkless'), { recursive: true });
-appendFileSync(join(target, '.thinkless', 'fake-codex-chat-args.jsonl'), JSON.stringify({ args }) + '\\n');
+mkdirSync(stateDir, { recursive: true });
+appendFileSync(join(stateDir, 'fake-codex-chat-args.jsonl'), JSON.stringify({ args }) + '\\n');
 writeFileSync(out, [
   '## REPLY',
   '',
@@ -467,8 +474,10 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
   await ensureRunDirs(paths);
   const originalPath = process.env.PATH;
   const originalTarget = process.env.WICI_CODEX_CHAT_TARGET;
+  const originalStateDir = process.env.WICI_CODEX_CHAT_STATE_DIR;
   process.env.PATH = `${fakeBin}${delimiter}${originalPath ?? ''}`;
   process.env.WICI_CODEX_CHAT_TARGET = target;
+  process.env.WICI_CODEX_CHAT_STATE_DIR = paths.wici;
   try {
     const result = await runChatTurn({
       paths,
@@ -522,6 +531,8 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     process.env.PATH = originalPath;
     if (originalTarget === undefined) delete process.env.WICI_CODEX_CHAT_TARGET;
     else process.env.WICI_CODEX_CHAT_TARGET = originalTarget;
+    if (originalStateDir === undefined) delete process.env.WICI_CODEX_CHAT_STATE_DIR;
+    else process.env.WICI_CODEX_CHAT_STATE_DIR = originalStateDir;
   }
 }
 

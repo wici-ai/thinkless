@@ -3,12 +3,14 @@ import { resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { exists } from '../shared/atomic.js';
+import { runPaths } from '../shared/paths.js';
 import type { RollbackPreview, RollbackResult } from '../supervisor/rollback.js';
 
 const target = resolve('fixture/rollback-target');
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
+  const paths = runPaths(target);
   await writeDeterministicMeasure(target);
   await git(['add', 'measure.mjs']);
   await git(['commit', '-m', 'test: make rollback measure deterministic']);
@@ -46,7 +48,7 @@ async function main(): Promise<void> {
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree dirty after rollback:\n${status}`);
   assert(!(await exists(`${target}/scratch.tmp`)), 'rollback did not remove untracked file');
-  assert(await exists(`${target}/.wici/checkpoint.json`), 'rollback should preserve .wici checkpoint state');
+  assert(await exists(paths.checkpoint), `rollback should preserve checkpoint state at ${paths.checkpoint}`);
 
   await git(['tag', '-d', 'wici/best']);
   const fallbackPreview = await rollback(['--target', target]) as RollbackPreview;

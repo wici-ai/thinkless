@@ -31,8 +31,10 @@ async function main(): Promise<void> {
   );
 
   const oldPath = process.env.PATH;
+  const oldStateDir = process.env.WICI_FAKE_STATE_DIR;
   process.env.PATH = `${fakeBin}:${oldPath ?? ''}`;
   process.env.WICI_FAKE_TARGET = target;
+  process.env.WICI_FAKE_STATE_DIR = paths.wici;
   try {
     const result = await runSupervisor({
       target,
@@ -47,6 +49,8 @@ async function main(): Promise<void> {
     if (oldPath === undefined) delete process.env.PATH;
     else process.env.PATH = oldPath;
     delete process.env.WICI_FAKE_TARGET;
+    if (oldStateDir === undefined) delete process.env.WICI_FAKE_STATE_DIR;
+    else process.env.WICI_FAKE_STATE_DIR = oldStateDir;
   }
 
   const events = await readJsonLines<RunEvent>(paths.events);
@@ -141,7 +145,7 @@ if (!target) {
   console.error('WICI_FAKE_TARGET missing');
   process.exit(2);
 }
-const wici = join(target, '.thinkless');
+const wici = process.env.WICI_FAKE_STATE_DIR || join(target, '.thinkless');
 mkdirSync(wici, { recursive: true });
 const prompt = args.at(-1) ?? '';
 appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args, prompt }) + '\\n');

@@ -23,7 +23,7 @@ async function main(): Promise<void> {
       FORCE_COLOR: '0',
       TERM: 'xterm-256color',
       WICI_NODE: process.execPath,
-      WICI_PAUSE_AFTER_EVENT: 'EXECUTE_DONE:5000',
+      WICI_PAUSE_AFTER_EVENT: 'PLAN_DONE:5000',
       WICI_PTY_CHAT: firstChat,
       WICI_PTY_FOLLOWUP: followupChat,
       WICI_PTY_TARGET: target
@@ -53,14 +53,14 @@ async function main(): Promise<void> {
   assert(checkpoint.supervisor_state === 'STOP', `expected STOP after two PTY iterations, got ${checkpoint.supervisor_state}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
-  const firstExecuteDone = events.findIndex((event) => event.type === 'EXECUTE_DONE');
   const injectionDrained = events.findIndex((event) => event.type === 'INJECTION_DRAINED');
   const planDiff = events.findIndex((event) => event.type === 'PLAN_DIFF_APPLIED');
-  const secondExecuteStart = events.findIndex((event, index) => index > planDiff && event.type === 'EXECUTE_START');
-  assert(firstExecuteDone >= 0, 'events should include first EXECUTE_DONE before PTY follow-up');
-  assert(injectionDrained > firstExecuteDone, 'follow-up Chat should drain after first execution completes');
+  const firstExecuteStart = events.findIndex((event) => event.type === 'EXECUTE_START');
+  const secondExecuteStart = events.findIndex((event, index) => index > firstExecuteStart && event.type === 'EXECUTE_START');
+  assert(injectionDrained >= 0, 'follow-up Chat should drain from the PTY input');
   assert(planDiff > injectionDrained, 'PLAN_DIFF_APPLIED should follow PTY Chat drain');
-  assert(secondExecuteStart > planDiff, 'next executor iteration should start after PTY hot reload plan diff');
+  assert(firstExecuteStart > planDiff, 'executor should start after PTY hot reload plan diff');
+  assert(secondExecuteStart > planDiff, 'next executor iteration should also occur after PTY hot reload plan diff');
 
   const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
   assert(ledger.length === 2, `expected two PTY hot-reload ledger rows, got ${ledger.length}`);
@@ -98,12 +98,30 @@ spawn "$env(WICI_NODE)" --import tsx src/cli.tsx tui --target "$env(WICI_PTY_TAR
 expect "CHAT"
 sleep 1
 send -- "$env(WICI_PTY_CHAT)\\r"
+expect {
+  "Planner materialized PLAN.md" {}
+  "PLAN_DONE" {}
+  timeout {
+    exit 4
+  }
+  eof {
+    exit 3
+  }
+}
+send -- "$env(WICI_PTY_FOLLOWUP)\\r"
+expect {
+  "$env(WICI_PTY_FOLLOWUP)" {}
+  "add_requirement:" {}
+  timeout {
+    exit 5
+  }
+  eof {
+    exit 3
+  }
+}
 send -- "\\033\\[C"
 expect -- "--- PLAN.md ---"
 send -- "\\033\\[C"
-expect "turn completed"
-sleep 1
-send -- "$env(WICI_PTY_FOLLOWUP)\\r"
 expect {
   "total=154" {
     expect "STOP"

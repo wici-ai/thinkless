@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promis
 import { resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
+import { runPaths } from '../shared/paths.js';
 import { runSupervisor } from '../supervisor/index.js';
 import { recordCanaryEvidence } from '../release/record-canary.js';
 
@@ -47,27 +48,8 @@ async function main(): Promise<void> {
     mode: 'stub'
   });
   assert(run.state === 'STOP', `stub canary run should stop cleanly: ${JSON.stringify(run)}`);
-  await mkdir(`${target}/.wici/artifacts`, { recursive: true });
-  await writeFile(`${target}/.wici/artifacts/planner-initial.stdout.jsonl`, `${JSON.stringify({ type: 'result', result: 'stub planner transcript' })}\n`);
-  await appendFile(
-    `${target}/.wici/events.jsonl`,
-    `${JSON.stringify({
-      seq: 999,
-      ts: '2026-06-14T20:52:54.999Z',
-      type: 'EXECUTE_PROGRESS',
-      level: 'info',
-      message: 'Codex event turn.completed events=2 turns=1 items=1 tokens in=127 out=23',
-      data: {
-        progress: {
-          usage: {
-            completed_turns: 1,
-            tokens_input: 127,
-            tokens_output: 23
-          }
-        }
-      }
-    })}\n`
-  );
+  await writePlannerTranscript(target);
+  await appendFakeExecuteProgress(target);
   await appendFakeSshTranscript(target);
 
   const recorded = await recordCanaryEvidence({
@@ -252,27 +234,8 @@ async function verifyTagGateHandlesNonSshPassedCanary(): Promise<void> {
     });
     assert(run.state === 'STOP', `non-ssh fixture run should stop cleanly: ${JSON.stringify(run)}`);
     await forceCheckpointToolMode(nonSshPassedTarget, 'stub', { wiciGitDirty: false });
-    await mkdir(`${nonSshPassedTarget}/.wici/artifacts`, { recursive: true });
-    await writeFile(`${nonSshPassedTarget}/.wici/artifacts/planner-initial.stdout.jsonl`, `${JSON.stringify({ type: 'result', result: 'stub planner transcript' })}\n`);
-    await appendFile(
-      `${nonSshPassedTarget}/.wici/events.jsonl`,
-      `${JSON.stringify({
-        seq: 999,
-        ts: '2026-06-14T20:52:54.999Z',
-        type: 'EXECUTE_PROGRESS',
-        level: 'info',
-        message: 'Codex event turn.completed events=2 turns=1 items=1 tokens in=127 out=23',
-        data: {
-          progress: {
-            usage: {
-              completed_turns: 1,
-              tokens_input: 127,
-              tokens_output: 23
-            }
-          }
-        }
-      })}\n`
-    );
+    await writePlannerTranscript(nonSshPassedTarget);
+    await appendFakeExecuteProgress(nonSshPassedTarget);
     let recorderRejectedStubPassed = false;
     try {
       await recordCanaryEvidence({
@@ -339,8 +302,36 @@ async function verifyTagGateHandlesNonSshPassedCanary(): Promise<void> {
   }
 }
 
+async function writePlannerTranscript(root: string): Promise<void> {
+  const paths = runPaths(root);
+  await mkdir(paths.artifacts, { recursive: true });
+  await writeFile(`${paths.artifacts}/planner-initial.stdout.jsonl`, `${JSON.stringify({ type: 'result', result: 'stub planner transcript' })}\n`);
+}
+
+async function appendFakeExecuteProgress(root: string): Promise<void> {
+  await appendFile(
+    runPaths(root).events,
+    `${JSON.stringify({
+      seq: 999,
+      ts: '2026-06-14T20:52:54.999Z',
+      type: 'EXECUTE_PROGRESS',
+      level: 'info',
+      message: 'Codex event turn.completed events=2 turns=1 items=1 tokens in=127 out=23',
+      data: {
+        progress: {
+          usage: {
+            completed_turns: 1,
+            tokens_input: 127,
+            tokens_output: 23
+          }
+        }
+      }
+    })}\n`
+  );
+}
+
 async function forceCheckpointToolMode(root: string, mode: 'stub' | 'real', options: { wiciGitDirty?: boolean } = {}): Promise<void> {
-  const checkpointPath = `${root}/.wici/checkpoint.json`;
+  const checkpointPath = runPaths(root).checkpoint;
   const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8')) as Record<string, unknown>;
   const existing = checkpoint.tool_versions && typeof checkpoint.tool_versions === 'object' ? (checkpoint.tool_versions as Record<string, unknown>) : {};
   const wici = existing.wici && typeof existing.wici === 'object' ? (existing.wici as Record<string, unknown>) : {};
@@ -360,7 +351,7 @@ async function forceCheckpointToolMode(root: string, mode: 'stub' | 'real', opti
 }
 
 async function setCheckpointGoalSource(root: string, goalSource: string): Promise<void> {
-  const checkpointPath = `${root}/.wici/checkpoint.json`;
+  const checkpointPath = runPaths(root).checkpoint;
   const checkpoint = JSON.parse(await readFile(checkpointPath, 'utf8')) as Record<string, unknown>;
   checkpoint.goal_source = goalSource;
   await writeFile(checkpointPath, `${JSON.stringify(checkpoint, null, 2)}\n`);
@@ -378,27 +369,8 @@ async function verifyTagGateRejectsPassedDirtyTarget(firstChat: string): Promise
     });
     assert(run.state === 'STOP', `passed-dirty fixture run should stop cleanly: ${JSON.stringify(run)}`);
     await forceCheckpointToolMode(passedDirtyTarget, 'real', { wiciGitDirty: false });
-    await mkdir(`${passedDirtyTarget}/.wici/artifacts`, { recursive: true });
-    await writeFile(`${passedDirtyTarget}/.wici/artifacts/planner-initial.stdout.jsonl`, `${JSON.stringify({ type: 'result', result: 'stub planner transcript' })}\n`);
-    await appendFile(
-      `${passedDirtyTarget}/.wici/events.jsonl`,
-      `${JSON.stringify({
-        seq: 999,
-        ts: '2026-06-14T20:52:54.999Z',
-        type: 'EXECUTE_PROGRESS',
-        level: 'info',
-        message: 'Codex event turn.completed events=2 turns=1 items=1 tokens in=127 out=23',
-        data: {
-          progress: {
-            usage: {
-              completed_turns: 1,
-              tokens_input: 127,
-              tokens_output: 23
-            }
-          }
-        }
-      })}\n`
-    );
+    await writePlannerTranscript(passedDirtyTarget);
+    await appendFakeExecuteProgress(passedDirtyTarget);
     await appendFakeSshTranscript(passedDirtyTarget);
     await recordCanaryEvidence({
       name: 'fixture-passed-dirty-target',
@@ -476,27 +448,8 @@ async function verifyNonTuiPassedCanaryRejected(firstChat: string): Promise<void
     });
     assert(run.state === 'STOP', `non-tui fixture run should stop cleanly: ${JSON.stringify(run)}`);
     await forceCheckpointToolMode(nonTuiPassedTarget, 'real', { wiciGitDirty: false });
-    await mkdir(`${nonTuiPassedTarget}/.wici/artifacts`, { recursive: true });
-    await writeFile(`${nonTuiPassedTarget}/.wici/artifacts/planner-initial.stdout.jsonl`, `${JSON.stringify({ type: 'result', result: 'stub planner transcript' })}\n`);
-    await appendFile(
-      `${nonTuiPassedTarget}/.wici/events.jsonl`,
-      `${JSON.stringify({
-        seq: 999,
-        ts: '2026-06-14T20:52:54.999Z',
-        type: 'EXECUTE_PROGRESS',
-        level: 'info',
-        message: 'Codex event turn.completed events=2 turns=1 items=1 tokens in=127 out=23',
-        data: {
-          progress: {
-            usage: {
-              completed_turns: 1,
-              tokens_input: 127,
-              tokens_output: 23
-            }
-          }
-        }
-      })}\n`
-    );
+    await writePlannerTranscript(nonTuiPassedTarget);
+    await appendFakeExecuteProgress(nonTuiPassedTarget);
     await appendFakeSshTranscript(nonTuiPassedTarget);
     let recorderRejectedNonTui = false;
     try {
@@ -564,7 +517,7 @@ async function verifyNonTuiPassedCanaryRejected(firstChat: string): Promise<void
 
 async function appendFakeOtherSshTranscript(root: string): Promise<void> {
   await appendFile(
-    `${root}/.wici/codex-run.jsonl`,
+    runPaths(root).codexRun,
     [
       JSON.stringify({
         type: 'item.completed',
@@ -641,7 +594,7 @@ async function verifyCliRecorderRejectsInvalidPassedObservedValue(firstChat: str
 
 async function appendFakeSshTranscript(root: string): Promise<void> {
   await appendFile(
-    `${root}/.wici/codex-run.jsonl`,
+    runPaths(root).codexRun,
     [
       JSON.stringify({
         type: 'item.started',
@@ -675,8 +628,7 @@ async function verifyRecorderRejectsUnsupportedSshAttestation(firstChat: string)
       mode: 'stub'
     });
     assert(run.state === 'STOP', `no-ssh fixture run should stop cleanly: ${JSON.stringify(run)}`);
-    await mkdir(`${noSshTarget}/.wici/artifacts`, { recursive: true });
-    await writeFile(`${noSshTarget}/.wici/artifacts/planner-initial.stdout.jsonl`, `${JSON.stringify({ type: 'result', result: 'stub planner transcript' })}\n`);
+    await writePlannerTranscript(noSshTarget);
     let failed = false;
     try {
       await recordCanaryEvidence({
@@ -715,8 +667,7 @@ async function verifyRecorderRejectsWrongSshTarget(firstChat: string): Promise<v
       mode: 'stub'
     });
     assert(run.state === 'STOP', `wrong-ssh fixture run should stop cleanly: ${JSON.stringify(run)}`);
-    await mkdir(`${wrongSshTarget}/.wici/artifacts`, { recursive: true });
-    await writeFile(`${wrongSshTarget}/.wici/artifacts/planner-initial.stdout.jsonl`, `${JSON.stringify({ type: 'result', result: 'stub planner transcript' })}\n`);
+    await writePlannerTranscript(wrongSshTarget);
     await appendFakeOtherSshTranscript(wrongSshTarget);
     let failed = false;
     try {
@@ -756,8 +707,7 @@ async function verifyRecorderRejectsSourceSecrets(firstChat: string): Promise<vo
       mode: 'stub'
     });
     assert(run.state === 'STOP', `secret fixture run should stop cleanly: ${JSON.stringify(run)}`);
-    await mkdir(`${secretTarget}/.wici/artifacts`, { recursive: true });
-    await writeFile(`${secretTarget}/.wici/artifacts/planner-initial.stdout.jsonl`, `${JSON.stringify({ type: 'result', result: 'stub planner transcript' })}\n`);
+    await writePlannerTranscript(secretTarget);
     const fakeToken = ['sk', 'fake'.padEnd(40, 'A')].join('-');
     await appendFile(`${secretTarget}/GOAL.md`, `\nDo not record this fake token: ${fakeToken}\n`);
     let failed = false;

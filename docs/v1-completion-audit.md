@@ -12,7 +12,7 @@ This audit records what is currently proven, what is covered by automated checks
 | Local TUI: bottom Chat input plus a switchable Chat History / Goal/Plan / Execution workspace | `npm run verify:tui-structure`, `npm run verify:demo-tui`, `npm run verify:tui-live` | Covered |
 | Chat is the first intake for a blank run, but first input is not automatically an initial goal | `npm run verify:tui-chat-intake` reports `blank_chat_routes_through_agent`, `degraded_inspection_does_not_start_planner`, and `degraded_plan_request_starts_planner` | Covered |
 | Real pseudo-terminal Chat input can submit the first blank-run goal and start execution | `npm run verify:tui-chat-pty` report `pty_chat_first` and `goal_source: tui_chat` | Covered |
-| Chat-first TUI can drive the real-mode planner/executor subprocess path without using stub execution | `npm run verify:tui-real-fake-chat` report `pty_chat_first_real_mode_fake_clis`, `PLAN_USAGE`, and `EXECUTE_PROGRESS` evidence | Covered |
+| Chat-first TUI can drive the real-mode planner/executor subprocess path without using stub execution | `npm run verify:tui-real-fake-chat` report `pty_chat_first_real_mode_fake_clis`, Codex planner invocation, and `EXECUTE_PROGRESS` evidence | Covered |
 | TUI exposes per-workspace Chat / PLAN / EXECUTION agent and effort selection, with model fixed by agent | `npm run verify:tui-structure`; `npm run verify:tool-commands` | Covered |
 | Real pseudo-terminal Chat input can answer planner clarification questions and resume the planner session | `npm run verify:tui-planner-clarification-pty` report `pty_planner_clarification`, `question_answered`, and `planner_session` | Covered |
 | Chat pane restores current goal, user steering, and planner answers from the blackboard without repeating the initial goal in transcript history | `npm run verify:tui-structure`, `npm run verify:v1-requirements` | Covered |
@@ -34,6 +34,8 @@ This audit records what is currently proven, what is covered by automated checks
 | Planner uses native tool availability; no WiCi allowlist/denylist | `npm run verify:tool-commands` | Covered |
 | Planner prompt permits native planning-time web research and remote discovery while leaving execution outcomes to Codex | `npm run verify:tool-commands`, `npm run verify:v1-requirements` | Covered |
 | Planner output is markdown artifacts, not JSON-as-plan | `npm run verify:tool-commands`, `npm run verify:v1-requirements` | Covered |
+| Planner self-interrogates 2-3 approaches, records `ASSUMPTIONS.md`, and asks `## QUESTION` only for essential unresolvable unknowns | `npm run verify:self-interrogation` report `assumptions_materialized` and `question_gate_narrowed` | Covered |
+| Planner diff treats user steering as an assumption override and maintains `ASSUMPTIONS.md` when assumptions change | `npm run verify:self-interrogation` report `planner_diff_maintains_assumptions` | Covered |
 | Planner `PLAN.md` prose is not parsed into a supervisor benchmark schema | `npm run verify:tool-commands` report `no_markdown_benchmark_inference`, `npm run verify:v1-requirements` | Covered |
 | Fresh V1 planner prompt does not force `.opt/measure.sh` to emit a WiCi metric schema | `npm run verify:v1-requirements` | Covered |
 | `PLAN.md` exists before Codex starts | `npm run verify:v1-slice`, `npm run verify:planner-clarification` | Covered |
@@ -60,6 +62,7 @@ This audit records what is currently proven, what is covered by automated checks
 | Chat, planner, and executor agent/effort can be selected while models stay fixed to claude-opus-4-8 or gpt-5.5 | `npm run verify:tool-commands` | Covered |
 | `codex exec resume` avoids unsupported `-C` | `npm run verify:executor-contract`, `npm run verify:tool-commands` | Covered |
 | Existing `GOAL.md` / `PLAN.md` can continue without passing a new `--goal` | `npm run verify:existing-goal` report `continued_without_new_goal` and `reused_goal_run_id` | Covered |
+| Exhausted direct plans pass through a continue-biased completion gate before planner continuation | `npm run verify:direct-plan-continuation`; `npm run verify:continuation-verdict` reports `explicit_complete_stops`, `explicit_continue_continues`, and `ambiguous_falls_back_to_continue` | Covered |
 | Executor failures and timeouts are recoverable long-goal events, not immediate whole-goal blockers | `npm run verify:direct-recovery` report `recoverable_failure`, `ledger_rows: 2`, and `resumed_executor`; code emits `EXECUTE_RECOVERABLE_FAILURE` and continues with `codex exec resume --last` | Covered |
 | Codex may diagnose failures, update `PLAN.md` / `.opt`, and continue the same goal | `npm run verify:direct-recovery` asserts the recovery prompt includes previous failure context and authorizes PLAN updates; `npm run verify:executor-contract` covers resume command shape | Covered |
 
@@ -131,6 +134,9 @@ npm run verify:resume-iteration
 npm run verify:goal-doc
 npm run verify:direct-no-scripts
 npm run verify:direct-recovery
+npm run verify:direct-plan-continuation
+npm run verify:self-interrogation
+npm run verify:continuation-verdict
 npm run verify:existing-goal
 npm run verify:v1-requirements
 npm run verify:docs-sync

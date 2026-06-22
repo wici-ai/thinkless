@@ -21,7 +21,6 @@ async function main(): Promise<void> {
   const paths = runPaths(target);
   assert(!(await exists(paths.goalDoc)), 'fresh real-mode fake TUI target should start without GOAL.md');
   assert(!(await exists(paths.plan)), 'fresh real-mode fake TUI target should start without PLAN.md');
-
   const result = await execa('expect', ['-c', expectScript()], {
     cwd: resolve('.'),
     env: {
@@ -32,6 +31,8 @@ async function main(): Promise<void> {
       WICI_PLANNER_AGENT: 'claude',
       WICI_NODE: process.execPath,
       WICI_FAKE_TARGET: target,
+      WICI_FAKE_STATE_DIR: paths.wici,
+      WICI_CODEX_EXECUTOR_BACKEND: 'exec',
       WICI_PTY_CHAT: firstChat,
       WICI_PTY_TARGET: target
     },
@@ -61,7 +62,9 @@ async function main(): Promise<void> {
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as { args: string[] });
-  const execCall = argsLog.find((entry) => entry.args[0] === 'exec');
+  const plannerCall = argsLog.find((entry) => entry.args.some((arg) => arg.includes('Run as the Thinkless planner through Codex.')));
+  assert(plannerCall, `fake Codex did not receive a planner call: ${JSON.stringify(argsLog)}`);
+  const execCall = argsLog.find((entry) => entry.args[0] === 'exec' && entry.args.includes('--dangerously-bypass-approvals-and-sandbox'));
   assert(execCall, `fake Codex did not receive an exec call: ${JSON.stringify(argsLog)}`);
   assert(execCall.args.includes('--dangerously-bypass-approvals-and-sandbox'), `Codex exec missing autonomy flag: ${JSON.stringify(execCall.args)}`);
   assert(execCall.args.includes('--json'), `Codex exec missing json flag: ${JSON.stringify(execCall.args)}`);
@@ -81,7 +84,7 @@ async function main(): Promise<void> {
         target,
         pty_chat_first_real_mode_fake_clis: true,
         goal_source: checkpoint.goal_source,
-        planner_materialized: true,
+        codex_planner: true,
         execute_progress: true,
         ledger_rows: ledger.length
       },
@@ -184,18 +187,33 @@ if (!target) {
   console.error('WICI_FAKE_TARGET missing');
   process.exit(2);
 }
-const wici = join(target, '.thinkless');
+const wici = process.env.WICI_FAKE_STATE_DIR || join(target, '.wici');
 mkdirSync(wici, { recursive: true });
 const outIndex = args.indexOf('--output-last-message');
 const out = outIndex >= 0 ? args[outIndex + 1] : join(wici, 'artifacts', 'iter-1.txt');
 mkdirSync(dirname(out), { recursive: true });
-if (!args.includes('--output-schema')) {
+const prompt = args.at(-1) || '';
+appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args }) + '\\n');
+if (prompt.includes('Run as the Thinkless planner through Codex.')) {
   writeFileSync(out, [
     '## GOAL.md',
     '',
     '# GOAL',
     '',
     '${firstChat}',
+    '',
+    '## ASSUMPTIONS.md',
+    '',
+    '# Assumptions',
+    '',
+    '## Approaches considered',
+    '- Use the fake real-mode Codex executor path from the PTY TUI.',
+    '',
+    '## Assumptions adopted',
+    '- The verifier controls both fake CLIs and can prove subprocess execution from events.',
+    '',
+    '## Open risks',
+    '- If the fake executor is not invoked, the TUI real-mode path is broken.',
     '',
     '## PLAN.md',
     '',
@@ -204,11 +222,10 @@ if (!args.includes('--output-schema')) {
     '- [ ] S1 Run fake real-mode Codex execution from the Chat-first TUI',
     '  - Action: prove WiCi invoked real-mode Codex through the TUI path.',
     '  - Validation: fake Codex writes the required thin receipt and token stream.'
-  ].join('\\n') + '\\n');
-  console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 41, output_tokens: 13 } }));
+  ].join('\\n'));
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-real-tui-planner-codex' }));
   process.exit(0);
 }
-appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args }) + '\\n');
 const result = {
   step_done: true,
   tests_pass: true,

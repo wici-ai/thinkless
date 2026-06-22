@@ -1,4 +1,4 @@
-import { chmod } from 'node:fs/promises';
+import { chmod, readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
@@ -30,7 +30,7 @@ import {
   updateBaselineAfterKeep
 } from './evaluate.js';
 import { commitAll, commitAllWithKey, currentCommit, ensureGitIdentity, ensureGitRepo, hasChanges, tagBest, tagPerf, revertToBest, resetToCommit } from './gitgate.js';
-import { shouldStop } from './stop.js';
+import { directContinuationVerdict, shouldStop } from './stop.js';
 import {
   assertRealToolsReady,
   checkToolHealth,
@@ -1130,7 +1130,7 @@ async function continueDirectExhaustedPlan(
   events: EventWriter,
   plan: string
 ): Promise<{ goal: GoalFile; checkpoint: Checkpoint; continued: boolean; stop?: SupervisorResult }> {
-  await events.emit('PLAN_EXHAUSTED', 'PLAN.md has no pending executable steps; asking planner for the next concrete step.', {
+  await events.emit('PLAN_EXHAUSTED', 'PLAN.md has no pending executable steps; checking completion before asking planner for the next concrete step.', {
     iter: checkpoint.iter,
     mode: 'direct'
   });
@@ -1144,7 +1144,29 @@ async function continueDirectExhaustedPlan(
   };
   await saveCheckpoint(paths, checkpoint);
 
-  const steerText = await buildDirectPlanContinuationSteerText(paths, goal, plan);
+  const verdict = await directContinuationVerdict(paths, goal, await readLedger(paths), config);
+  await events.emit(
+    'DIRECT_CONTINUATION_VERDICT',
+    `Direct completion gate chose ${verdict.decision}: ${verdict.reason}`,
+    { verdict, mode: 'direct' }
+  );
+  if (verdict.decision === 'complete') {
+    const reason = `PLAN.md exhausted and completion gate marked the goal complete: ${verdict.reason}`;
+    checkpoint = {
+      ...checkpoint,
+      supervisor_state: 'STOP',
+      next_step: null,
+      ledger_seq: await lineCount(paths.ledger),
+      events_seq: events.seq,
+      plan_hash: await hashFile(paths.plan)
+    };
+    await saveCheckpoint(paths, checkpoint);
+    await writeOutbox(paths, { kind: 'info', text: reason });
+    await events.emit('STOP', reason, { mode: 'direct', verdict });
+    return { goal, checkpoint, continued: false, stop: { state: 'STOP', reason, iter: checkpoint.iter } };
+  }
+
+  const steerText = await buildDirectPlanContinuationSteerText(paths, goal, plan, verdict.reason);
   const diff = await runPlanDiff(
     paths,
     goal,
@@ -1215,7 +1237,12 @@ async function continueDirectExhaustedPlan(
   return { goal, checkpoint, continued: true };
 }
 
-async function buildDirectPlanContinuationSteerText(paths: ReturnType<typeof runPaths>, goal: GoalFile, plan: string): Promise<string> {
+async function buildDirectPlanContinuationSteerText(
+  paths: ReturnType<typeof runPaths>,
+  goal: GoalFile,
+  plan: string,
+  continuationReason: string
+): Promise<string> {
   const ledger = await readLedger(paths);
   const recentLedger = ledger.slice(-5).map((entry) => ({
     iter: entry.iter,
@@ -1226,21 +1253,35 @@ async function buildDirectPlanContinuationSteerText(paths: ReturnType<typeof run
     reflection: entry.reflection
   }));
   const contextText = await readContextForPrompt(paths);
+  const assumptionsText = await readOptionalText(paths.assumptions);
+  const lessonsText = formatLessonsForPrompt(await readRecentLessons(paths));
   return [
     'The direct executor exhausted the current PLAN.md: there are no pending or active executable steps, but the user has not explicitly stopped the run.',
     'Do not mark the overall run complete solely because the current plan is exhausted.',
-    'Read GOAL.md, PLAN.md, the recent ledger/context below, and derive the next concrete high-value executable step that advances the active goal.',
+    `The continue-biased completion gate chose to continue: ${continuationReason}`,
+    'Read GOAL.md, PLAN.md, ASSUMPTIONS.md, lessons, and recent ledger/context below, then derive the next concrete high-value executable step that advances the active goal.',
+    'Deepen quality within the fixed user scope. You may refine acceptance evidence, quality thresholds, validation rigor, boundary statements, and goal wording that remain within the existing requirement.',
+    'Do not invent new product scope, features, deployments, benchmarks, or user requirements. New scope may only come from user Chat or hot-reload injections.',
     'Append or update PLAN.md with that next step and leave it pending. Keep prior completed steps intact.',
+    'Update ASSUMPTIONS.md when new evidence changes an assumption, a risk has been retired, or a user steer overrides planner reasoning. If assumptions do not change, preserve the existing file.',
     'Only produce no executable step if the goal is concretely blocked and PLAN.md should explain the blocker.',
     '',
     `Active requirement summary: ${requirementText(goal) || 'see GOAL.md'}`,
+    '',
+    `Current ASSUMPTIONS.md:\n${assumptionsText || '(missing)'}`,
     '',
     `Current PLAN.md:\n${plan}`,
     '',
     `Recent ledger rows:\n${JSON.stringify(recentLedger, null, 2)}`,
     '',
+    `Lessons:\n${lessonsText || '(none)'}`,
+    '',
     `Context:\n${contextText}`
   ].join('\n');
+}
+
+async function readOptionalText(path: string): Promise<string> {
+  return (await exists(path)) ? readFile(path, 'utf8') : '';
 }
 
 function requirementText(goal: GoalFile): string {

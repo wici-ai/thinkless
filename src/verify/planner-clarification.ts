@@ -18,7 +18,9 @@ const diffAnswerText = 'Use a non-production validation window and keep all depl
 async function main(): Promise<void> {
   await installFakeClaude();
   const originalPath = process.env.PATH ?? '';
+  const originalPlannerAgent = process.env.WICI_PLANNER_AGENT;
   process.env.PATH = `${fakeBin}:${originalPath}`;
+  process.env.WICI_PLANNER_AGENT = 'claude';
   try {
     const initial = await verifyInitialPlannerClarification();
     const diff = await verifyPlanDiffPlannerClarification();
@@ -41,6 +43,8 @@ async function main(): Promise<void> {
     );
   } finally {
     process.env.PATH = originalPath;
+    if (originalPlannerAgent === undefined) delete process.env.WICI_PLANNER_AGENT;
+    else process.env.WICI_PLANNER_AGENT = originalPlannerAgent;
   }
 }
 

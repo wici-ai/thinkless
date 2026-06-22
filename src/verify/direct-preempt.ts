@@ -30,8 +30,10 @@ async function main(): Promise<void> {
       env: {
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        WICI_FAKE_TARGET: target,
+        WICI_FAKE_STATE_DIR: paths.wici,
         WICI_PLANNER_AGENT: 'claude',
-        WICI_FAKE_TARGET: target
+        WICI_CODEX_EXECUTOR_BACKEND: 'exec'
       },
       stdio: ['ignore', 'pipe', 'pipe']
     }
@@ -157,7 +159,7 @@ if (args[0] === 'doctor') {
   process.exit(0);
 }
 const target = process.env.WICI_FAKE_TARGET;
-const wici = join(target, '.thinkless');
+const wici = process.env.WICI_FAKE_STATE_DIR || join(target, '.thinkless');
 mkdirSync(wici, { recursive: true });
 appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args }) + '\\n');
 const countPath = join(wici, 'fake-codex-count.txt');

@@ -73,6 +73,7 @@ async function main(): Promise<void> {
   assert(!simplifiedPlan.includes('metaproductivity'), 'Simplified_PLAN should not carry old metaproductivity design into V1');
   assert(!schemas.includes('plan.schema.json') && !schemas.includes('plan-diff.schema.json'), 'planner schemas should not exist as a second markdown plan format');
   assert(!plannerSource.includes('structured_output') && !plannerSource.includes('parseJsonObjectFromText'), 'planner path should not parse JSON-as-plan payloads');
+  assert(plannerSource.includes('assumptionsMarkdown') && plannerSource.includes('paths.assumptions'), 'planner path should parse and materialize ASSUMPTIONS.md');
   assert(
     plannerPrompt.includes('- [ ] S1 Short imperative step title') &&
       plannerPrompt.includes('### S1') &&
@@ -80,6 +81,10 @@ async function main(): Promise<void> {
       plannerDiffPrompt.includes('### S3'),
     'planner prompts should require WiCi-discoverable executable step lines without introducing a plan schema'
   );
+  assert(plannerPrompt.includes('## ASSUMPTIONS.md'), 'planner prompt must request markdown ASSUMPTIONS.md artifacts');
+  assert(plannerPrompt.includes('Brainstorm 2-3') && plannerPrompt.includes('Self-grill'), 'planner prompt must require AI-led self-interrogation');
+  assert(plannerPrompt.includes('unresolvable by repository evidence'), 'planner prompt must narrow QUESTION to essential unresolvable unknowns');
+  assert(plannerDiffPrompt.includes('living self-interrogation artifact') && plannerDiffPrompt.includes('override an adopted assumption'), 'planner-diff prompt must maintain assumption overrides');
   assert(readme.includes('Legacy optimizer compatibility checks'), 'README should explicitly separate legacy verifiers from core V1 checks');
   assert(readme.includes('WICI_LEGACY_OPTIMIZER=1'), 'README should document explicit opt-in for legacy optimizer behavior');
   assert(readme.includes('npm run verify:legacy-optimizer'), 'README should document the legacy optimizer aggregate verifier');
@@ -220,11 +225,23 @@ async function main(): Promise<void> {
     'README should document executable runnable planner scripts when they are present'
   );
   assert(
+    readme.includes('ASSUMPTIONS.md') &&
+      readme.includes('self-grill its assumptions') &&
+      readme.includes('essential and unresolvable by evidence or discovery'),
+    'README should document planner self-interrogation and the assumptions artifact'
+  );
+  assert(
     readme.includes('recoverable crash ledger rows') &&
       readme.includes('Codex is allowed to inspect logs and remote state') &&
       readme.includes('update `PLAN.md`') &&
       readme.includes('continue the same `GOAL.md`'),
     'README should document long-goal executor recovery instead of one-shot blocking'
+  );
+  assert(
+    readme.includes('continue-biased completion gate') &&
+      readme.includes('only an explicit `complete` verdict stops cleanly') &&
+      readme.includes('without inventing new scope'),
+    'README should document direct exhausted-plan completion gate behavior'
   );
   assert(
     readme.includes('TUI header displays the current rollback checkpoint') &&
@@ -323,7 +340,13 @@ async function main(): Promise<void> {
   );
   assert(completionAudit.includes('npm run verify:legacy-optimizer'), 'completion audit should list the legacy optimizer aggregate verification command');
   assert(completionAudit.includes('planning-time web research and remote discovery'), 'completion audit should include native planner tool availability evidence');
+  assert(completionAudit.includes('npm run verify:self-interrogation') && completionAudit.includes('assumptions_materialized'), 'completion audit should include self-interrogation evidence');
   assert(completionAudit.includes('npm run verify:direct-no-scripts'), 'completion audit should include direct no-script verification evidence');
+  assert(
+    completionAudit.includes('npm run verify:continuation-verdict') &&
+      completionAudit.includes('ambiguous_falls_back_to_continue'),
+    'completion audit should include direct continuation verdict evidence'
+  );
   assert(
     completionAudit.includes('npm run verify:direct-recovery') &&
       completionAudit.includes('recoverable_failure') &&
@@ -406,6 +429,7 @@ async function main(): Promise<void> {
   assert(completionAudit.includes('npm run verify:canary-evidence'), 'completion audit should include canary evidence recorder verification');
   assert(supervisorIndex.includes("waitReason: 'PLAN_READY'"), 'fresh V1 path should be able to return PLAN_READY without a baseline');
   assert(supervisorIndex.includes('return runDirectPlanExecution'), 'fresh V1 path should feed PLAN.md directly to Codex execution');
+  assert(supervisorIndex.includes('directContinuationVerdict') && supervisorIndex.includes('DIRECT_CONTINUATION_VERDICT'), 'direct V1 path should gate exhausted plans with a continuation verdict');
   assert(supervisorIndex.includes('LEGACY_BASELINE_IGNORED') && supervisorIndex.includes('legacy_optimizer === true'), 'fresh V1 should ignore historical baseline files unless the legacy optimizer is enabled');
   assert(supervisorIndex.includes("phase: 'direct_plan_diff'"), 'fresh V1 hot reload should emit planner diff token usage');
   assert(!supervisorIndex.includes('PREBASELINE'), 'fresh V1 supervisor should not expose pre-baseline setup events');
@@ -415,6 +439,9 @@ async function main(): Promise<void> {
   assert(!curriculumSource.includes('locked eval scripts'), 'curriculum wording must not assume locked eval scripts for generic V1 runs');
   assert(pkg.scripts['verify:legacy-optimizer']?.includes('verify:benchmark-manifest'), 'package should expose a legacy optimizer aggregate verifier');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:existing-goal'), 'fresh V1 core gate must include existing-goal continuation');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:direct-plan-continuation'), 'fresh V1 core gate must include exhausted direct plan continuation');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:self-interrogation'), 'fresh V1 core gate must include self-interrogation coverage');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:continuation-verdict'), 'fresh V1 core gate must include continuation verdict coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:tui-real-fake-chat'), 'fresh V1 core gate must include real-mode fake CLI Chat-first TUI coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:app-server-hotreload'), 'fresh V1 core gate must include Codex app-server steering after hot reload');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:hotreload-resume'), 'fresh V1 core gate must include Codex exec resume fallback after hot reload');
