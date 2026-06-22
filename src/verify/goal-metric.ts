@@ -4,12 +4,14 @@ import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import type { GoalFile } from '../shared/types.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/goal-metric-target');
 const goalText = '听说diffussionGemma很快，在wici@192.168.1.222试试，要求达到700token/s以上';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
+  await ignoreFixturePlannerOpt(target);
   const paths = runPaths(target);
   const result = await execa(
     process.execPath,

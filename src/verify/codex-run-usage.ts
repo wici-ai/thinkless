@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import type { LedgerEntry, RunEvent } from '../shared/types.js';
 import { CodexRunError, assertCodexRunSucceeded, parseCodexRunEvents } from '../supervisor/codexRun.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/codex-run-target');
 
@@ -42,6 +43,9 @@ async function verifyParser(): Promise<void> {
 async function verifyLedgerCost(): Promise<void> {
   await createSampleTarget(target, true);
   await writeDeterministicMeasure();
+  await git(['add', 'measure.mjs']);
+  await git(['commit', '-m', 'test: add deterministic measure fixture']);
+  await ignoreFixturePlannerOpt(target);
   const paths = runPaths(target);
 
   const result = await execa(

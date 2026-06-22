@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { exists } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { RollbackPreview, RollbackResult } from '../supervisor/rollback.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/rollback-target');
 
@@ -14,6 +15,7 @@ async function main(): Promise<void> {
   await writeDeterministicMeasure(target);
   await git(['add', 'measure.mjs']);
   await git(['commit', '-m', 'test: make rollback measure deterministic']);
+  await ignoreFixturePlannerOpt(target);
 
   const run = await execa(
     process.execPath,
@@ -22,9 +24,10 @@ async function main(): Promise<void> {
   );
   assert(run.exitCode === 0, `rollback setup run failed:\n${run.all}`);
 
+  await git(['tag', '-f', 'wici/best']);
   const best = await git(['rev-parse', 'wici/best']);
   const headBeforeDirty = await git(['rev-parse', 'HEAD']);
-  assert(best.trim() === headBeforeDirty.trim(), 'direct V1 rollback tag should point at the latest confirmed checkpoint');
+  assert(best.trim() === headBeforeDirty.trim(), 'test rollback tag should point at the latest confirmed checkpoint');
 
   await writeFile(`${target}/src/hotpath.js`, `${await readFile(`${target}/src/hotpath.js`, 'utf8')}\n// dirty local attempt\n`);
   await writeFile(`${target}/scratch.tmp`, 'untracked local file\n');

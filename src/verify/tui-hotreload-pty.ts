@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/tui-hotreload-pty-target');
 const firstChat = 'Improve the fixture implementation from a PTY Chat-first TUI run.';
@@ -13,6 +14,7 @@ const followupChat = 'Also require PTY hot reload to preserve the public uniqueS
 async function main(): Promise<void> {
   await requireExpect();
   await createSampleTarget(target, true);
+  await ignoreFixturePlannerOpt(target);
   const paths = runPaths(target);
   assert(!(await exists(paths.goalDoc)), 'fresh PTY hot-reload target should start without GOAL.md');
 

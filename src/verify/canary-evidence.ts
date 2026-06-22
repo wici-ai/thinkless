@@ -6,6 +6,7 @@ import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import { runSupervisor } from '../supervisor/index.js';
 import { recordCanaryEvidence } from '../release/record-canary.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/canary-evidence-target');
 const outDir = resolve('fixture/canary-evidence-docs');
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
   await rm(nonTuiPassedTarget, { recursive: true, force: true });
   await rm(nonTuiPassedOutDir, { recursive: true, force: true });
   await createSampleTarget(target, true);
+  await ignoreFixturePlannerOpt(target);
   const firstChat = '听说diffusionGemma很快，在ssh -p 23276 root@116.127.115.18 -L 8080:localhost:8080试试，要求达到700 token/s以上';
   const run = await runSupervisor({
     target,
@@ -225,6 +227,7 @@ async function verifyTagGateHandlesNonSshPassedCanary(): Promise<void> {
   const firstChat = 'Build a tiny local CLI and verify the generated artifact works from the terminal.';
   try {
     await createSampleTarget(nonSshPassedTarget, true);
+    await ignoreFixturePlannerOpt(nonSshPassedTarget);
     const run = await runSupervisor({
       target: nonSshPassedTarget,
       goal: firstChat,
@@ -360,6 +363,7 @@ async function setCheckpointGoalSource(root: string, goalSource: string): Promis
 async function verifyTagGateRejectsPassedDirtyTarget(firstChat: string): Promise<void> {
   try {
     await createSampleTarget(passedDirtyTarget, true);
+    await ignoreFixturePlannerOpt(passedDirtyTarget);
     const run = await runSupervisor({
       target: passedDirtyTarget,
       goal: firstChat,
@@ -439,6 +443,7 @@ async function verifyTagGateRejectsPassedDirtyTarget(firstChat: string): Promise
 async function verifyNonTuiPassedCanaryRejected(firstChat: string): Promise<void> {
   try {
     await createSampleTarget(nonTuiPassedTarget, true);
+    await ignoreFixturePlannerOpt(nonTuiPassedTarget);
     const run = await runSupervisor({
       target: nonTuiPassedTarget,
       goal: firstChat,
@@ -620,6 +625,7 @@ async function appendFakeSshTranscript(root: string): Promise<void> {
 async function verifyRecorderRejectsUnsupportedSshAttestation(firstChat: string): Promise<void> {
   try {
     await createSampleTarget(noSshTarget, true);
+    await ignoreFixturePlannerOpt(noSshTarget);
     const run = await runSupervisor({
       target: noSshTarget,
       goal: firstChat,
@@ -659,6 +665,7 @@ async function verifyRecorderRejectsUnsupportedSshAttestation(firstChat: string)
 async function verifyRecorderRejectsWrongSshTarget(firstChat: string): Promise<void> {
   try {
     await createSampleTarget(wrongSshTarget, true);
+    await ignoreFixturePlannerOpt(wrongSshTarget);
     const run = await runSupervisor({
       target: wrongSshTarget,
       goal: firstChat,
@@ -699,6 +706,7 @@ async function verifyRecorderRejectsWrongSshTarget(firstChat: string): Promise<v
 async function verifyRecorderRejectsSourceSecrets(firstChat: string): Promise<void> {
   try {
     await createSampleTarget(secretTarget, true);
+    await ignoreFixturePlannerOpt(secretTarget);
     const run = await runSupervisor({
       target: secretTarget,
       goal: firstChat,

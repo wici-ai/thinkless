@@ -4,12 +4,14 @@ import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import type { CheckpointSnapshot, GoalFile } from '../shared/types.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/goal-doc-target');
 const goalText = 'Use a generic markdown goal contract; planner and executor decide any deployment details.';
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
+  await ignoreFixturePlannerOpt(target);
   const paths = runPaths(target);
 
   const result = await execa(

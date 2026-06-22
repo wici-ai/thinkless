@@ -4,6 +4,7 @@ import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import type { GoalInterrogationEntry, LedgerEntry, RunEvent } from '../shared/types.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/goal-interrogation-target');
 
@@ -11,6 +12,9 @@ async function main(): Promise<void> {
   await createSampleTarget(target, true);
   await writeDirectPlanFixture();
   await writeDeterministicMeasure();
+  await git(['add', 'measure.mjs']);
+  await git(['commit', '-m', 'test: add deterministic goal interrogation measure']);
+  await ignoreFixturePlannerOpt(target);
   const paths = runPaths(target);
 
   const result = await execa(

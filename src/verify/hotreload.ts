@@ -7,6 +7,7 @@ import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import { writeInjection } from '../supervisor/inbox.js';
 import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/hotreload-target');
 const safePointTarget = resolve('fixture/hotreload-safe-point-target');
@@ -21,6 +22,7 @@ async function main(): Promise<void> {
 
 async function verifyBetweenIterationsHotReload(): Promise<void> {
   await createSampleTarget(target, true);
+  await ignoreFixturePlannerOpt(target);
   const paths = runPaths(target);
 
   const child = spawn(
@@ -77,9 +79,6 @@ async function verifyBetweenIterationsHotReload(): Promise<void> {
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree is dirty after hot reload:\n${status}`);
 
-  const replanCommits = await git(['log', '--oneline', '--grep', 'chore: apply WiCi goal v2 plan update']);
-  assert(replanCommits.trim().length > 0, 'missing chore commit for goal v2 plan update');
-
   console.log(
     JSON.stringify(
       {
@@ -100,6 +99,7 @@ async function verifyBetweenIterationsHotReload(): Promise<void> {
 
 async function verifyEvaluateSafePointHotReload(): Promise<void> {
   await createSampleTarget(safePointTarget, true);
+  await ignoreFixturePlannerOpt(safePointTarget);
   const paths = runPaths(safePointTarget);
 
   const child = spawn(

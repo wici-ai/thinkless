@@ -5,12 +5,16 @@ import { createSampleTarget } from '../sample.js';
 import { iterationSnapshotPath } from '../supervisor/checkpoint.js';
 import { runPaths } from '../shared/paths.js';
 import type { CheckpointSnapshot, CurriculumEntry, RunEvent } from '../shared/types.js';
+import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/curriculum-target');
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
   await writeDeterministicMeasure();
+  await git(['add', 'measure.mjs']);
+  await git(['commit', '-m', 'test: add deterministic curriculum measure']);
+  await ignoreFixturePlannerOpt(target);
   const paths = runPaths(target);
 
   const result = await execa(
