@@ -49,6 +49,7 @@ npm run verify:tui-resume-interrupted-blocked
 npm run verify:tui-resume-empty-selector
 npm run verify:tui-resume-many-candidates
 npm run verify:tui-resume-stale-candidate
+npm run verify:tui-resume-stale-agent-state
 npm run verify:tui-resume-cross-target
 npm run verify:resume-rerunnable
 npm run verify:tui-chat-pty

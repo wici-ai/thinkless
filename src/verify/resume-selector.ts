@@ -17,7 +17,9 @@ async function main(): Promise<void> {
   await atomicWriteJson(current.runtimeSelection, { chat: { agent: 'codex', model: 'gpt-5' } });
 
   const numbered = join(target, '.thinkless2');
-  await writeRun(runPaths(target, numbered), checkpoint('PLAN', { planner: 'planner-session' }), true);
+  const numberedPaths = runPaths(target, numbered);
+  await writeRun(numberedPaths, checkpoint('PLAN', { planner: 'planner-session' }), true);
+  await writePlannerTranscript(numberedPaths);
 
   const legacy = join(target, '.wici');
   await writeRun(runPaths(target, legacy), checkpoint('EXECUTE', {}, 'S1'), true);
@@ -74,6 +76,11 @@ async function writeRun(paths: ReturnType<typeof runPaths>, checkpointFile: Chec
 async function writeOutbox(paths: ReturnType<typeof runPaths>, message: OutboxMessage): Promise<void> {
   await ensureDir(paths.outbox);
   await atomicWriteJson(join(paths.outbox, `${message.id}.json`), message);
+}
+
+async function writePlannerTranscript(paths: ReturnType<typeof runPaths>): Promise<void> {
+  await ensureDir(paths.artifacts);
+  await writeFile(join(paths.artifacts, 'planner-initial.stdout.jsonl'), `${JSON.stringify({ type: 'result', session_id: 'planner-session' })}\n`);
 }
 
 function goal(): GoalFile {

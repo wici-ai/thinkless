@@ -114,7 +114,7 @@ async function numberedSessionDirs(target: string): Promise<string[]> {
 }
 
 async function candidateFromPaths(paths: RunPaths, sessionDir?: string): Promise<ResumeCandidate> {
-  const [goal, checkpoint, goalDoc, plan, ledger, chat, runtimeSelection, events, outbox] = await Promise.all([
+  const [goal, checkpoint, goalDoc, plan, ledger, chat, runtimeSelection, events, outbox, plannerTranscript, executorTranscript] = await Promise.all([
     readJsonFileMaybe<GoalFile>(paths.goal),
     readJsonFileMaybe<Checkpoint>(paths.checkpoint),
     exists(paths.goalDoc),
@@ -123,10 +123,12 @@ async function candidateFromPaths(paths: RunPaths, sessionDir?: string): Promise
     exists(paths.chat),
     exists(paths.runtimeSelection),
     exists(paths.events),
-    readOutbox(paths.outbox)
+    readOutbox(paths.outbox),
+    hasPlannerTranscript(paths.artifacts),
+    hasNonEmptyFile(paths.codexRun)
   ]);
   const updatedAt = await latestUpdatedAt([paths.checkpoint, paths.events, paths.chat, paths.goal, paths.plan, paths.goalDoc]);
-  const preflight = buildPreflight({ paths, goal, checkpoint, goalDoc, plan, ledger, events, outbox });
+  const preflight = buildPreflight({ paths, goal, checkpoint, goalDoc, plan, ledger, events, outbox, plannerTranscript, executorTranscript });
   const label = sessionDir ? `${basename(paths.target)} ${basename(sessionDir)}` : basename(paths.target);
   return {
     id: `${paths.target}::${sessionDir ?? paths.stateDir}`,
@@ -160,6 +162,8 @@ function buildPreflight(input: {
   ledger: boolean;
   events: boolean;
   outbox: OutboxMessage[];
+  plannerTranscript: boolean;
+  executorTranscript: boolean;
 }): Pick<ResumeCandidate, 'runnable' | 'status' | 'reason' | 'fallback'> {
   const { goal, checkpoint } = input;
   if (!goal && (input.events || input.outbox.length > 0 || input.ledger)) return blocked('missing durable GOAL context');
@@ -171,12 +175,18 @@ function buildPreflight(input: {
   if (checkpoint.supervisor_state === 'PLAN') {
     const pendingPlannerQuestion = input.outbox.some((message) => message.kind === 'question' && !message.answered && message.reply_key?.startsWith(PLANNER_CLARIFY_REPLY_PREFIX));
     if (pendingPlannerQuestion && !checkpoint.sessions.planner) return blocked('planner clarification is pending but no planner session was persisted');
-    if (checkpoint.sessions.planner) return runnable('planner session is available for continuation');
+    if (checkpoint.sessions.planner) {
+      if (!input.plannerTranscript) return blocked('planner session is missing durable transcript state');
+      return runnable('planner session is available for continuation');
+    }
     return input.goalDoc ? runnable('planner can rerun from durable GOAL.md state', 'planner_rerun') : blocked('planner cannot rerun without GOAL.md');
   }
   if (checkpoint.supervisor_state === 'EXECUTE' || checkpoint.supervisor_state === 'REFLECT') {
     if (!input.plan) return blocked('executor resume needs PLAN.md');
-    if (checkpoint.sessions.executor || checkpoint.sessions.executorApp?.threadId) return runnable('executor session is available for continuation');
+    if (checkpoint.sessions.executor || checkpoint.sessions.executorApp?.threadId) {
+      if (!input.executorTranscript) return blocked('executor session is missing durable transcript state');
+      return runnable('executor session is available for continuation');
+    }
     if (checkpoint.next_step || input.ledger) return runnable('executor can replay from checkpointed PLAN/ledger state', 'executor_rerun');
     return blocked('executor has no session and no replayable PLAN step');
   }
@@ -199,6 +209,23 @@ async function readOutbox(path: string): Promise<OutboxMessage[]> {
     return messages.filter((message): message is OutboxMessage => Boolean(message));
   } catch {
     return [];
+  }
+}
+
+async function hasPlannerTranscript(path: string): Promise<boolean> {
+  try {
+    const names = await readdir(path);
+    return names.some((name) => /^planner-.+\.stdout\.jsonl$/.test(name));
+  } catch {
+    return false;
+  }
+}
+
+async function hasNonEmptyFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).size > 0;
+  } catch {
+    return false;
   }
 }
 
