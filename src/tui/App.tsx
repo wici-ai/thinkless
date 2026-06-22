@@ -63,7 +63,7 @@ export function App({
   const workspaceViewportHeight = Math.max(4, height - 9);
   const chatViewportHeight = Math.max(4, height - 10);
   const startedRef = useRef(false);
-  const pendingSupervisorLaunchRef = useRef<{ goal?: string; goalSource?: RunOptions['goalSource']; planningContext?: string } | null>(null);
+  const pendingSupervisorLaunchRef = useRef<{ goal?: string; goalSource?: RunOptions['goalSource']; planningContext?: string; resumePreflight?: boolean } | null>(null);
   const pendingWorkspaceFocusRef = useRef(false);
   const [started, setStarted] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -113,10 +113,10 @@ export function App({
   }, [activeSessionDir, activeTarget, runtimeHydrated, runtimeSelection]);
 
   const launchSupervisor = useCallback(
-    (goal?: string, goalSource?: RunOptions['goalSource'], planningContext?: string, resumeTarget = activeTarget, resumeSessionDir = activeSessionDir) => {
+    (goal?: string, goalSource?: RunOptions['goalSource'], planningContext?: string, resumeTarget = activeTarget, resumeSessionDir = activeSessionDir, resumePreflight = false) => {
       if (!supervisor.enabled) return;
       if (startedRef.current) {
-        pendingSupervisorLaunchRef.current = { goal, goalSource, planningContext };
+        pendingSupervisorLaunchRef.current = { goal, goalSource, planningContext, resumePreflight };
         return;
       }
       startedRef.current = true;
@@ -129,6 +129,7 @@ export function App({
         goalSource,
         maxIters: supervisor.maxIters,
         resumeIteration: supervisor.resumeIteration,
+        resumePreflight,
         mode: supervisor.mode,
         lockMode: supervisor.lockMode,
         runtime: runtimeSelection,
@@ -143,7 +144,7 @@ export function App({
         setStarted(false);
         const pending = pendingSupervisorLaunchRef.current;
         pendingSupervisorLaunchRef.current = null;
-        if (pending) setTimeout(() => launchSupervisor(pending.goal, pending.goalSource, pending.planningContext), 0);
+        if (pending) setTimeout(() => launchSupervisor(pending.goal, pending.goalSource, pending.planningContext, activeTarget, activeSessionDir, pending.resumePreflight), 0);
       });
     },
     [activeSessionDir, activeTarget, runtimeSelection, supervisor.enabled, supervisor.lockMode, supervisor.maxIters, supervisor.mode, supervisor.resumeIteration]
@@ -156,7 +157,7 @@ export function App({
 
   useEffect(() => {
     if (!runtimeHydrated || !supervisor.enabled || supervisor.initialGoal || !supervisor.resumeOnOpen || !shouldAutoStartExistingRun(state, true)) return;
-    launchSupervisor(undefined);
+    launchSupervisor(undefined, undefined, undefined, activeTarget, activeSessionDir, true);
   }, [launchSupervisor, runtimeHydrated, state.goal, state.checkpoint?.supervisor_state, supervisor.enabled, supervisor.initialGoal, supervisor.resumeOnOpen]);
 
   const openResumeSelector = useCallback(() => {
@@ -183,7 +184,7 @@ export function App({
     setActiveSessionDir(candidate.sessionDir);
     setWorkspaceTab('execution');
     setChatLocalStatus(`resume: ${candidate.label}`);
-    launchSupervisor(undefined, undefined, undefined, candidate.target, candidate.sessionDir);
+    launchSupervisor(undefined, undefined, undefined, candidate.target, candidate.sessionDir, true);
   }, [launchSupervisor]);
 
   useEffect(() => {

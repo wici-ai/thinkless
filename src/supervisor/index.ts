@@ -4,6 +4,7 @@ import { atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, tru
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.js';
+import { preflightResumeCandidate, type ResumeCandidate } from '../shared/resume.js';
 import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, IterResult, LedgerEntry, RunOptions, ToolInvocationResult, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
 import { hashFile, iterationSnapshotPath, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
@@ -87,6 +88,22 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     await ensureGitIdentity(paths, config);
     await ensureTargetGitignore(paths);
 
+    let resumePreflight: ResumeCandidate | null = null;
+    if (options.resumePreflight && !options.goal) {
+      resumePreflight = await preflightResumeCandidate(paths.target, options.sessionDir);
+      if (!resumePreflight.runnable) {
+        await events.init();
+        await events.emit('RESUME_CONTEXT_BLOCKED', `Resume blocked: ${resumePreflight.reason}`, {
+          target: resumePreflight.target,
+          session_dir: resumePreflight.sessionDir ?? null,
+          state_dir: resumePreflight.stateDir,
+          supervisor_state: resumePreflight.supervisorState,
+          reason: resumePreflight.reason
+        }, 'warn');
+        return { state: 'STOP', reason: resumePreflight.reason, iter: 0 };
+      }
+    }
+
     const hadGoalBeforeStart = await exists(paths.goal);
     let goal = await ensureGoal(paths, options.goal, config, options.planningContext);
     const maxIters = resolveMaxIters(options.maxIters, goal.budget.max_iters ?? config.budget.max_iters);
@@ -129,6 +146,26 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       };
     }
     await saveCheckpoint(paths, checkpoint);
+    if (resumePreflight) {
+      await events.emit('RESUME_CONTEXT_VALIDATED', `Resume context validated: ${resumePreflight.reason}`, {
+        target: resumePreflight.target,
+        session_dir: resumePreflight.sessionDir ?? null,
+        state_dir: resumePreflight.stateDir,
+        supervisor_state: resumePreflight.supervisorState,
+        planner_session: resumePreflight.plannerSessionId ?? null,
+        executor_session: resumePreflight.executorSessionId ?? null,
+        executor_app_thread: resumePreflight.executorAppThreadId ?? null,
+        fallback: resumePreflight.fallback ?? null
+      });
+      if (resumePreflight.fallback === 'executor_rerun') {
+        await events.emit('EXECUTOR_RESUME_FALLBACK', 'Executor will replay from checkpointed PLAN/ledger state', {
+          target: resumePreflight.target,
+          session_dir: resumePreflight.sessionDir ?? null,
+          state_dir: resumePreflight.stateDir,
+          supervisor_state: resumePreflight.supervisorState
+        }, 'warn');
+      }
+    }
 
     const didAutoUpdateTools = shouldAutoUpdateToolsAtBoundary(config, checkpoint);
     const toolHealth =

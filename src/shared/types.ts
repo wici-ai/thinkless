@@ -439,6 +439,7 @@ export interface RunOptions {
   mode?: ToolMode;
   lockMode?: 'auto' | 'manual';
   resumeIteration?: number;
+  resumePreflight?: boolean;
   runtime?: RuntimeSelection;
   planningContext?: string;
 }

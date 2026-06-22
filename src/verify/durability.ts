@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   await waitForExit(first);
 
   const killedStatus = await git(['status', '--short']);
-  assert(killedStatus.includes('src/hotpath.js') || killedStatus.includes('PLAN.md'), `expected unconfirmed dirty state after kill, got: ${killedStatus}`);
+  assert(killedStatus.includes('src/hotpath.js') || killedStatus.includes('PLAN.md') || killedStatus.includes('.opt/'), `expected unconfirmed dirty state after kill, got: ${killedStatus}`);
 
   const second = await execa(process.execPath, ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--goal', goal, '--max-iters', '1', '--mode', 'stub'], {
     cwd: resolve('.'),

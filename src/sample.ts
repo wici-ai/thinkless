@@ -93,7 +93,7 @@ const p99 = percentile(samples, 0.99);
 console.log(\`METRIC p50=\${p50.toFixed(3)} p95=\${p95.toFixed(3)} p99=\${p99.toFixed(3)} unit=ms n=\${samples.length} warmup_discarded=2 samples=\${samples.map((item) => item.toFixed(3)).join(',')}\`);
 `
     ],
-    ['.gitignore', `.wici/\nnode_modules/\n`]
+    ['.gitignore', `.thinkless/\n.thinkless*/\n.wici/\nGOAL.md\nPLAN.md\nASSUMPTIONS.md\nledger.jsonl\nbaseline.json\nnode_modules/\n`]
   ]);
 
   for (const [name, content] of files) {

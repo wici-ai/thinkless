@@ -206,7 +206,7 @@ export async function ensureTargetGitignore(paths: RunPaths): Promise<void> {
   if (!(await exists(gitDir))) return;
 
   const gitignore = join(paths.target, '.gitignore');
-  const lines = ['.thinkless/', '.thinkless*/', '.wici/'];
+  const lines = ['.thinkless/', '.thinkless*/', '.wici/', 'GOAL.md', 'PLAN.md', 'ASSUMPTIONS.md', 'ledger.jsonl', 'baseline.json'];
   if (await exists(gitignore)) {
     const current = await readFile(gitignore, 'utf8');
     const currentLines = new Set(current.split('\n'));
