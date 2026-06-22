@@ -267,8 +267,30 @@ install_thinkless_launcher() {
 #!/usr/bin/env bash
 set -e
 THINKLESS_CLI=$quoted_cli
+thinkless_default_target() {
+  local repo source slug stamp suffix
+  repo="\$(git -C "\$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -n "\$repo" ]]; then
+    printf '%s\n' "\$repo"
+    return
+  fi
+  source="\$(basename "\$PWD")"
+  slug="\$(printf '%s' "\$source" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+//; s/-+\$//')"
+  if [[ -z "\$slug" ]]; then
+    slug="workspace"
+  fi
+  stamp="\$(date -u '+%Y-%m-%dT%H-%M-%SZ')"
+  suffix="\$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 6 || true)"
+  if [[ -z "\$suffix" ]]; then
+    suffix="\$\$"
+  fi
+  printf '%s\n' "\$HOME/thinkless-workspaces/\${stamp}-\${slug}-\${suffix}"
+}
+
 if [[ "\$#" -eq 0 ]]; then
-  exec node "\$THINKLESS_CLI" tui
+  target="\$(thinkless_default_target)"
+  mkdir -p "\$target"
+  exec node "\$THINKLESS_CLI" tui --target "\$target"
 fi
 exec node "\$THINKLESS_CLI" "\$@"
 EOF

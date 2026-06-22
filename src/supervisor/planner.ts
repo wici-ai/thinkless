@@ -98,10 +98,10 @@ export async function runInitialPlanner(
     const goalText = await readPlannerGoalText(paths, goal);
     if (plannerAgent === 'codex' && available) {
       try {
-        const result = await runCodexInitialPlanner(paths, goalText, config, systemPrompt, safetyText, resume);
+        const result = await runCodexInitialPlanner(paths, goalText, config, systemPrompt, safetyText, resume, undefined, config.tools.planner.command, onRetry);
         if (result) return result;
       } catch (error) {
-        if (config.tools.mode === 'real') throw error;
+        throw error;
       }
     }
     try {
@@ -180,10 +180,10 @@ export async function runPlanDiff(
     const goalText = await readPlannerGoalText(paths, goal);
     if (plannerAgent === 'codex' && available) {
       try {
-        const result = await runCodexPlanDiff(paths, goalText, plan, assumptions, newText, plannerSessionId, config, systemPrompt, safetyText);
+        const result = await runCodexPlanDiff(paths, goalText, plan, assumptions, newText, plannerSessionId, config, systemPrompt, safetyText, undefined, config.tools.planner.command, onRetry);
         if (result) return result;
       } catch (error) {
-        if (config.tools.mode === 'real') throw error;
+        throw error;
       }
     }
     try {
@@ -396,9 +396,10 @@ async function runCodexInitialPlanner(
   systemPrompt: string,
   safetyText: string,
   resume?: PlannerClarificationResume,
-  previousError?: unknown
+  previousError?: unknown,
+  command = 'codex',
+  onRetry?: (retry: PlannerRetryProgress) => Promise<void>
 ): Promise<PlannerInvocationResult | null> {
-  const command = 'codex';
   if (!(await commandExists(command))) return null;
   const label = resume ? 'initial-resume-codex' : 'initial-codex';
   const prompt = buildCodexInitialPlannerPrompt({ goalText, systemPrompt, safetyText, resume, previousError });
@@ -406,7 +407,8 @@ async function runCodexInitialPlanner(
   return runCodexPlannerProcess(paths, command, label, prompt, {
     model: codexPlannerModel(config),
     effort: codexPlannerEffort(config),
-    sessionId: resumeSessionId && resumeSessionId !== 'stub-planner' ? resumeSessionId : undefined
+    sessionId: resumeSessionId && resumeSessionId !== 'stub-planner' ? resumeSessionId : undefined,
+    onRetry
   });
 }
 
@@ -420,15 +422,17 @@ async function runCodexPlanDiff(
   config: WiCiConfig,
   systemPrompt: string,
   safetyText: string,
-  previousError?: unknown
+  previousError?: unknown,
+  command = 'codex',
+  onRetry?: (retry: PlannerRetryProgress) => Promise<void>
 ): Promise<PlannerInvocationResult | null> {
-  const command = 'codex';
   if (!(await commandExists(command))) return null;
   const prompt = buildCodexPlanDiffPrompt({ goalText, currentPlan, currentAssumptions, newText, systemPrompt, safetyText, previousError });
   return runCodexPlannerProcess(paths, command, `diff-codex-${Date.now()}`, prompt, {
     model: codexPlannerModel(config),
     effort: codexPlannerEffort(config),
-    sessionId: plannerSessionId && plannerSessionId !== 'stub-planner' ? plannerSessionId : undefined
+    sessionId: plannerSessionId && plannerSessionId !== 'stub-planner' ? plannerSessionId : undefined,
+    onRetry
   });
 }
 
@@ -437,44 +441,54 @@ async function runCodexPlannerProcess(
   command: string,
   label: string,
   prompt: string,
-  runtime: { model?: string; effort?: string; sessionId?: string }
+  runtime: { model?: string; effort?: string; sessionId?: string; onRetry?: (retry: PlannerRetryProgress) => Promise<void> }
 ): Promise<PlannerInvocationResult | null> {
   const outputLastMessage = join(paths.artifacts, `${label}.last-message.md`);
-  const result = await runClaudeStreamProcess(
-    command,
-    buildCodexPlannerArgs({
-      target: paths.target,
-      prompt,
-      outputLastMessage,
-      model: runtime.model,
-      effort: runtime.effort,
-      resumeSessionId: runtime.sessionId
-    }),
-    {
-      cwd: paths.target,
-      idleTimeoutMs: PLANNER_IDLE_TIMEOUT_MS,
-      hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS
-    }
-  );
-  await persistPlannerRaw(paths, label, result);
-  if (result.timeoutReason || result.exitCode !== 0) {
+  for (let attempt = 1; ; attempt += 1) {
+    const result = await runClaudeStreamProcess(
+      command,
+      buildCodexPlannerArgs({
+        target: paths.target,
+        prompt,
+        outputLastMessage,
+        model: runtime.model,
+        effort: runtime.effort,
+        resumeSessionId: runtime.sessionId
+      }),
+      {
+        cwd: paths.target,
+        idleTimeoutMs: PLANNER_IDLE_TIMEOUT_MS,
+        hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS
+      }
+    );
+    await persistPlannerRaw(paths, label, result);
     if (result.timeoutReason) throw new Error(`Codex planner timed out (${result.timeoutReason})`);
-    throw new Error(`Codex planner exited with code ${result.exitCode ?? `signal ${result.signal}`}`);
+    if (result.exitCode !== 0) {
+      const combined = `${result.stdout}\n${result.stderr}\n${result.all}`;
+      if (isTransientNetworkFailure(combined)) {
+        const retry = { attempt, delayMs: transientRetryDelayMs(), reason: transientFailureReason(combined) };
+        await runtime.onRetry?.(retry);
+        await delay(retry.delayMs);
+        continue;
+      }
+      const reason = transientFailureReason(combined);
+      throw new Error(`Codex planner exited with code ${result.exitCode ?? `signal ${result.signal}`}${reason ? `: ${reason}` : ''}`);
+    }
+    const finalMessage = (await readTextIfExists(outputLastMessage)) || codexPlannerTextFromJsonLines(result.stdout);
+    const response = parseCodexPlannerResponse(finalMessage, extractCodexSessionId(result.stdout) ?? runtime.sessionId);
+    if (!response) throw new Error('Codex planner output did not contain markdown planner artifacts');
+    if (response.kind === 'question') {
+      return {
+        ok: false,
+        sessionId: response.question.session_id,
+        stdout: result.all ?? result.stdout,
+        error: 'Planner requested clarification',
+        needsInput: response.question
+      };
+    }
+    await materializePlannerOutput(paths, response.output);
+    return { ok: true, sessionId: response.output.session_id, stdout: result.all ?? result.stdout };
   }
-  const finalMessage = (await readTextIfExists(outputLastMessage)) || codexPlannerTextFromJsonLines(result.stdout);
-  const response = parseCodexPlannerResponse(finalMessage, extractCodexSessionId(result.stdout) ?? runtime.sessionId);
-  if (!response) throw new Error('Codex planner output did not contain markdown planner artifacts');
-  if (response.kind === 'question') {
-    return {
-      ok: false,
-      sessionId: response.question.session_id,
-      stdout: result.all ?? result.stdout,
-      error: 'Planner requested clarification',
-      needsInput: response.question
-    };
-  }
-  await materializePlannerOutput(paths, response.output);
-  return { ok: true, sessionId: response.output.session_id, stdout: result.all ?? result.stdout };
 }
 
 function buildCodexInitialPlannerPrompt(input: {

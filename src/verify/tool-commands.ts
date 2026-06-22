@@ -348,6 +348,7 @@ async function main(): Promise<void> {
   assert(headingSteps.length === 2, `planner heading steps should be executable: ${JSON.stringify(headingSteps)}`);
   assert(headingSteps[0].id === 'S1' && headingSteps[0].status === 'pending', 'heading step S1 should default to pending');
   assert(headingSteps[1].id === 'S2' && headingSteps[1].status === 'active', 'heading step S2 should read status comments');
+  await verifyCodexPlannerDoesNotReceiveClaudeArgs();
   await verifyInitialPlannerDoesNotInferBenchmark();
   await verifyPlanDiffUsage();
   await verifyCodexChatAgent();
@@ -373,6 +374,7 @@ async function main(): Promise<void> {
         codex_output_schema_strict: true,
         forced_agent_models: true,
         default_iteration_budget_unbounded: true,
+        codex_planner_no_claude_args_after_failure: true,
         codex_resume_structured_output_flags: true
       },
       null,
@@ -427,6 +429,81 @@ process.exit(1);
   } finally {
     process.env.PATH = originalPath;
   }
+}
+
+async function verifyCodexPlannerDoesNotReceiveClaudeArgs(): Promise<void> {
+  const target = resolve('fixture/codex-planner-args-target');
+  const fakeBin = resolve('fixture/codex-planner-args-bin');
+  await rm(target, { recursive: true, force: true });
+  await rm(fakeBin, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  const fakeCodex = fakeCommandPath(fakeBin, 'codex');
+  await writeFakeNodeCommand(
+    fakeCodex,
+    `#!/usr/bin/env node
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+const args = process.argv.slice(2);
+const target = ${JSON.stringify(target)};
+const stateDir = join(target, '.thinkless');
+mkdirSync(stateDir, { recursive: true });
+appendFileSync(join(stateDir, 'fake-codex-planner-args.jsonl'), JSON.stringify({ args }) + '\\n');
+console.error('simulated codex planner failure');
+process.exit(2);
+`
+  );
+
+  const paths = runPaths(target);
+  await ensureRunDirs(paths);
+  const config = (await loadConfig('auto')) as WiCiConfig;
+  config.tools.planner.command = fakeCodex;
+  const goal: GoalFile = {
+    run_id: 'codex-planner-args',
+    version: 1,
+    requirements: [{ id: 'R1', text: 'Verify Codex planner argument routing.', source: 'initial', status: 'active' }],
+    acceptance_criteria: [],
+    constraints: [],
+    metric: { name: 'planner args', direction: 'maximize', target: null, unit: 'ok' },
+    budget: config.budget,
+    stop: config.stop
+  };
+  await atomicWriteJson(paths.goal, goal);
+  await writeFile(paths.goalDoc, '# GOAL\n\nVerify Codex planner argument routing.\n');
+
+  await expectRejectsAsync(
+    () => runInitialPlanner(paths, goal, config),
+    'simulated codex planner failure',
+    'auto Codex planner failure should expose the real Codex failure'
+  );
+  await writeFile(paths.plan, '# Plan\n\n- [ ] S1 Existing step <!-- status:pending -->\n');
+  await expectRejectsAsync(
+    () => runPlanDiff(paths, goal, 'codex-planner-session', 'Add a follow-up step.', config),
+    'simulated codex planner failure',
+    'auto Codex planner diff failure should expose the real Codex failure'
+  );
+
+  const argsLog = (await readFile(join(paths.wici, 'fake-codex-planner-args.jsonl'), 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { args: string[] });
+  assert(argsLog.length === 2, `expected initial and diff Codex planner invocations: ${JSON.stringify(argsLog)}`);
+  for (const entry of argsLog) {
+    assert(entry.args[0] === 'exec', `Codex planner should use codex exec args: ${JSON.stringify(entry.args)}`);
+    assert(!entry.args.includes('--output-format'), `Codex planner received Claude-only --output-format: ${JSON.stringify(entry.args)}`);
+    assert(!entry.args.includes('--permission-mode'), `Codex planner received Claude-only --permission-mode: ${JSON.stringify(entry.args)}`);
+  }
+}
+
+async function expectRejectsAsync(fn: () => Promise<unknown>, expected: string, message: string): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    const actual = error instanceof Error ? error.message : String(error);
+    assert(actual.includes(expected), `${message}: expected "${expected}", got "${actual}"`);
+    return;
+  }
+  throw new Error(`${message}: expected rejection containing "${expected}"`);
 }
 
 async function verifyCodexChatAgent(): Promise<void> {
