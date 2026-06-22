@@ -39,6 +39,7 @@
     "verify:tui-resume-legacy-candidate": "tsx src/verify/tui-resume-legacy-candidate.ts",
     "verify:tui-resume-current-candidate": "tsx src/verify/tui-resume-current-candidate.ts",
     "verify:tui-resume-interrupted-blocked": "tsx src/verify/tui-resume-interrupted-blocked.ts",
+    "verify:tui-resume-empty-selector": "tsx src/verify/tui-resume-empty-selector.ts",
     "verify:resume-rerunnable": "tsx src/verify/resume-rerunnable.ts",
     "verify:tui-chat-pty": "tsx src/verify/tui-chat-pty.ts",
     "verify:tui-real-fake-chat": "tsx src/verify/tui-real-fake-chat.ts",

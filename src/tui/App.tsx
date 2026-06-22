@@ -76,6 +76,7 @@ export function App({
   const [resumeSelectorOpen, setResumeSelectorOpen] = useState(false);
   const [resumeCandidates, setResumeCandidates] = useState<ResumeCandidate[]>([]);
   const [resumeIndex, setResumeIndex] = useState(0);
+  const [resumeCandidatesLoaded, setResumeCandidatesLoaded] = useState(false);
   const [runtimeField, setRuntimeField] = useState<RuntimeField>('agent');
   const [mouseReportingEnabled, setMouseReportingEnabled] = useState(mouseReporting);
   const runtimePane = runtimePaneFromWorkspace(workspaceTab);
@@ -162,14 +163,18 @@ export function App({
 
   const openResumeSelector = useCallback(() => {
     setResumeSelectorOpen(true);
+    setResumeCandidatesLoaded(false);
+    setResumeCandidates([]);
     setResumeIndex(0);
     setChatLocalStatus('resume: loading candidates');
     void discoverResumeCandidates({ currentTarget: activeTarget }).then((candidates) => {
       setResumeCandidates(candidates);
+      setResumeCandidatesLoaded(true);
       setResumeIndex(Math.max(0, candidates.findIndex((candidate) => candidate.runnable)));
       setChatLocalStatus(candidates.length > 0 ? 'resume: select a run' : 'resume: no candidates found');
     }).catch((error: unknown) => {
       setResumeCandidates([]);
+      setResumeCandidatesLoaded(true);
       setChatLocalStatus(`resume scan failed: ${error instanceof Error ? error.message : String(error)}`);
     });
   }, [activeTarget]);
@@ -314,6 +319,7 @@ export function App({
           {resumeSelectorOpen ? (
             <ResumeSelector
               candidates={resumeCandidates}
+              loaded={resumeCandidatesLoaded}
               selectedIndex={resumeIndex}
               contentWidth={workspaceContentWidth}
               onMove={setResumeIndex}
@@ -397,10 +403,12 @@ function WorkspaceTabs({ active }: { active: WorkspaceTab }) {
 
 function ResumeSelector({
   candidates,
+  loaded,
   selectedIndex,
   contentWidth
 }: {
   candidates: ResumeCandidate[];
+  loaded: boolean;
   selectedIndex: number;
   contentWidth: number;
   onMove: (updater: (current: number) => number) => void;
@@ -415,7 +423,7 @@ function ResumeSelector({
         RESUME
       </Text>
       {visible.length === 0 ? (
-        <Text color="gray">Scanning for resumable Thinkless runs...</Text>
+        <Text color="gray">{loaded ? 'No resumable Thinkless runs found.' : 'Scanning for resumable Thinkless runs...'}</Text>
       ) : (
         visible.map((candidate, index) => {
           const selected = index === selectedIndex;
