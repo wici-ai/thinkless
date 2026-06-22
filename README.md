@@ -43,6 +43,7 @@ npm run verify:tui-chat-intake
 npm run verify:resume-selector
 npm run verify:tui-resume-selector-pty
 npm run verify:tui-resume-selector-built
+npm run verify:tui-resume-legacy-candidate
 npm run verify:tui-resume-cross-target
 npm run verify:resume-rerunnable
 npm run verify:tui-chat-pty
