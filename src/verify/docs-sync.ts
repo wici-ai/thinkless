@@ -51,6 +51,7 @@ async function main(): Promise<void> {
     'verify:tui-resume-interrupted-blocked',
     'verify:tui-resume-empty-selector',
     'verify:tui-resume-many-candidates',
+    'verify:tui-resume-stale-candidate',
     'verify:tui-resume-cross-target',
     'verify:resume-rerunnable'
   ];
