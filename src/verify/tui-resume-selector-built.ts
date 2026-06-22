@@ -7,19 +7,42 @@ import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/tui-resume-selector-built-target');
+const escapeTarget = resolve('fixture/tui-resume-selector-built-escape-target');
 const selectedSession = join(target, '.thinkless2');
+const decoySession = join(target, '.thinkless3');
 const builtCli = resolve('dist/src/cli.js');
 
 async function main(): Promise<void> {
   await requireExpect();
+  await verifyArrowEnterLaunchesSelectedSession();
+  await verifyEscapeCancelsWithoutLaunch();
+}
+
+async function verifyArrowEnterLaunchesSelectedSession(): Promise<void> {
   await rm(target, { recursive: true, force: true });
   await createSampleTarget(target, true);
-  await writeChatOnly(runPaths(target, join(target, '.thinkless')));
-  await writeRunnableRun(runPaths(target, selectedSession));
+  await writeRunnableRun(runPaths(target, selectedSession), {
+    runId: 'tui-resume-selector-built',
+    requirement: 'Selected built PTY resume goal',
+    chat: 'selected built run chat',
+    planner: 'resume-selector-built-planner',
+    executor: 'resume-selector-built-executor',
+    appThread: 'resume-selector-built-app-thread'
+  });
+  await writeRunnableRun(runPaths(target, decoySession), {
+    runId: 'tui-resume-selector-built-decoy',
+    requirement: 'Decoy built PTY resume goal',
+    chat: 'decoy built run chat',
+    planner: 'resume-selector-built-decoy-planner',
+    executor: 'resume-selector-built-decoy-executor',
+    appThread: 'resume-selector-built-decoy-app-thread'
+  });
 
   const selectedPaths = runPaths(target, selectedSession);
   const before = await readJsonLines<RunEvent>(selectedPaths.events);
-  const result = await execa('expect', ['-c', expectScript()], {
+  const decoyPaths = runPaths(target, decoySession);
+  const decoyBefore = await readJsonLines<RunEvent>(decoyPaths.events);
+  const result = await execa('expect', ['-c', arrowEnterExpectScript()], {
     cwd: resolve('.'),
     env: {
       ...process.env,
@@ -36,7 +59,8 @@ async function main(): Promise<void> {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `built PTY resume selector failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('[runnable] STOP'), `built CLI runnable candidate was not visible:\n${output}`);
-  assert(output.includes('[blocked]'), `built CLI blocked candidate status was not visible:\n${output}`);
+  assert(output.includes('.thinkless3 [runnable] STOP'), `built CLI decoy runnable candidate was not visible before navigation:\n${output}`);
+  assert(output.includes('.thinkless2 [runnable] STOP'), `built CLI selected runnable candidate was not visible before navigation:\n${output}`);
 
   const events = await readJsonLines<RunEvent>(selectedPaths.events);
   const newEvents = events.slice(before.length);
@@ -64,8 +88,48 @@ async function main(): Promise<void> {
   assert(goalDoc.includes('Selected built PTY resume goal'), 'selected session GOAL.md should remain the active context');
   const chat = await readFile(selectedPaths.chat, 'utf8');
   assert(chat.includes('selected built run chat'), 'selected session chat transcript should remain available');
+  const decoyEvents = await readJsonLines<RunEvent>(decoyPaths.events);
+  assert(decoyEvents.length === decoyBefore.length, 'down-arrow selection should not launch the initial decoy runnable session');
 
-  console.log(JSON.stringify({ ok: true, target, selectedSession, builtCli, newEvents: newEvents.length, resume_validated: true }, null, 2));
+  console.log(JSON.stringify({ ok: true, case: 'arrow-enter', target, selectedSession, decoySession, builtCli, newEvents: newEvents.length, resume_validated: true }, null, 2));
+}
+
+async function verifyEscapeCancelsWithoutLaunch(): Promise<void> {
+  await rm(escapeTarget, { recursive: true, force: true });
+  await createSampleTarget(escapeTarget, true);
+  const escapeSession = join(escapeTarget, '.thinkless2');
+  await writeChatOnly(runPaths(escapeTarget, join(escapeTarget, '.thinkless')));
+  await writeRunnableRun(runPaths(escapeTarget, escapeSession), {
+    runId: 'tui-resume-selector-built-escape',
+    requirement: 'Escape built PTY resume goal',
+    chat: 'escape built run chat',
+    planner: 'resume-selector-built-escape-planner',
+    executor: 'resume-selector-built-escape-executor',
+    appThread: 'resume-selector-built-escape-app-thread'
+  });
+  const escapePaths = runPaths(escapeTarget, escapeSession);
+  const before = await readJsonLines<RunEvent>(escapePaths.events);
+  const result = await execa('expect', ['-c', escapeExpectScript()], {
+    cwd: resolve('.'),
+    env: {
+      ...process.env,
+      FORCE_COLOR: '0',
+      TERM: 'xterm-256color',
+      WICI_PTY_TARGET: escapeTarget,
+      WICI_THINKLESS_BIN: builtCli
+    },
+    reject: false,
+    all: true,
+    timeout: 35_000,
+    maxBuffer: 1024 * 1024 * 5
+  });
+  const output = stripAnsi(result.all ?? '');
+  assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `built PTY resume selector Escape path failed with code ${result.exitCode}:\n${output}`);
+  assert(output.includes('[runnable] STOP'), `built CLI Escape path did not open selector:\n${output}`);
+  assert(output.includes('resume: cancelled'), `built CLI Escape path did not report cancellation:\n${output}`);
+  const after = await readJsonLines<RunEvent>(escapePaths.events);
+  assert(after.length === before.length, 'Escape cancellation should not launch or preflight any candidate session');
+  console.log(JSON.stringify({ ok: true, case: 'escape-cancel', target: escapeTarget, selectedSession: escapeSession, noLaunch: true }, null, 2));
 }
 
 async function writeChatOnly(paths: ReturnType<typeof runPaths>): Promise<void> {
@@ -73,14 +137,23 @@ async function writeChatOnly(paths: ReturnType<typeof runPaths>): Promise<void> 
   await appendJsonLine(paths.chat, { ts: ts(), role: 'user', text: 'built chat-only candidate' });
 }
 
-async function writeRunnableRun(paths: ReturnType<typeof runPaths>): Promise<void> {
+interface RunnableFixture {
+  runId: string;
+  requirement: string;
+  chat: string;
+  planner: string;
+  executor: string;
+  appThread: string;
+}
+
+async function writeRunnableRun(paths: ReturnType<typeof runPaths>, fixture: RunnableFixture): Promise<void> {
   await ensureDir(paths.stateDir);
-  await atomicWriteJson(paths.goal, goal());
-  await atomicWriteJson(paths.checkpoint, checkpoint());
+  await atomicWriteJson(paths.goal, goal(fixture));
+  await atomicWriteJson(paths.checkpoint, checkpoint(fixture));
   await appendJsonLine(paths.events, { seq: 1, ts: ts(), type: 'STOP', level: 'info', message: 'ready to resume' });
-  await appendJsonLine(paths.chat, { ts: ts(), role: 'user', text: 'selected built run chat' });
+  await appendJsonLine(paths.chat, { ts: ts(), role: 'user', text: fixture.chat });
   await atomicWriteJson(paths.runtimeSelection, { chat: { agent: 'codex' } });
-  await writeText(paths.goalDoc, '# GOAL\n\nSelected built PTY resume goal.\n');
+  await writeText(paths.goalDoc, `# GOAL\n\n${fixture.requirement}.\n`);
   await writeText(paths.plan, '# PLAN\n\n- [x] S1 Already complete\n');
   await writeText(paths.ledger, '');
 }
@@ -90,11 +163,11 @@ async function writeText(path: string, content: string): Promise<void> {
   await import('node:fs/promises').then(({ writeFile }) => writeFile(path, content));
 }
 
-function goal(): GoalFile {
+function goal(fixture: RunnableFixture): GoalFile {
   return {
-    run_id: 'tui-resume-selector-built',
+    run_id: fixture.runId,
     version: 1,
-    requirements: [{ id: 'R1', text: 'Selected built PTY resume goal', source: 'initial', status: 'active' }],
+    requirements: [{ id: 'R1', text: fixture.requirement, source: 'initial', status: 'active' }],
     acceptance_criteria: [],
     constraints: [],
     metric: { name: 'tests', direction: 'maximize', unit: 'pass' },
@@ -103,7 +176,7 @@ function goal(): GoalFile {
   };
 }
 
-function checkpoint(): Checkpoint {
+function checkpoint(fixture: RunnableFixture): Checkpoint {
   return {
     supervisor_state: 'STOP',
     next_step: null,
@@ -114,10 +187,10 @@ function checkpoint(): Checkpoint {
     ledger_seq: 0,
     events_seq: 1,
     sessions: {
-      planner: 'resume-selector-built-planner',
-      executor: 'resume-selector-built-executor',
+      planner: fixture.planner,
+      executor: fixture.executor,
       executorApp: {
-        threadId: 'resume-selector-built-app-thread',
+        threadId: fixture.appThread,
         updatedAt: ts(),
         phase: 'idle'
       }
@@ -127,7 +200,25 @@ function checkpoint(): Checkpoint {
   };
 }
 
-function expectScript(): string {
+function arrowEnterExpectScript(): string {
+  return `
+log_user 1
+set timeout 25
+spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
+expect "CHAT"
+send -- "/resume\\r"
+expect ".thinkless3 \\[runnable\\] STOP"
+send -- "\\033\\[B"
+sleep 2
+send -- "\\n"
+sleep 3
+send -- "\\003"
+expect eof
+exit 0
+`;
+}
+
+function escapeExpectScript(): string {
   return `
 log_user 1
 set timeout 25
@@ -135,8 +226,9 @@ spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iter
 expect "CHAT"
 send -- "/resume\\r"
 expect "\\[runnable\\] STOP"
-send -- "x"
-sleep 3
+send -- "\\033"
+expect "resume: cancelled"
+sleep 1
 send -- "\\003"
 expect eof
 exit 0

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useInput, useStdout, useFocusManager, useFocus } from 'ink';
+import { Box, Text, useInput, useStdout, useFocusManager } from 'ink';
 import { basename } from 'node:path';
 import { Header } from './Header.js';
 import { ChatHistoryPane, ChatInputBox } from './ChatPane.js';
@@ -398,10 +398,7 @@ function WorkspaceTabs({ active }: { active: WorkspaceTab }) {
 function ResumeSelector({
   candidates,
   selectedIndex,
-  contentWidth,
-  onMove,
-  onSelect,
-  onCancel
+  contentWidth
 }: {
   candidates: ResumeCandidate[];
   selectedIndex: number;
@@ -410,23 +407,6 @@ function ResumeSelector({
   onSelect: (candidate: ResumeCandidate) => void;
   onCancel: () => void;
 }) {
-  const { isFocused } = useFocus({ id: 'resume-selector', isActive: true });
-  useInput((input, key) => {
-    traceInkInput('resume-selector', input, key as unknown as Record<string, unknown>);
-    if (key.upArrow) {
-      onMove((current) => Math.max(0, current - 1));
-    } else if (key.downArrow) {
-      onMove((current) => Math.min(Math.max(0, candidates.length - 1), current + 1));
-    } else if (key.return || input.includes('\r') || input.includes('\n')) {
-      const candidate = candidates[selectedIndex];
-      if (candidate) onSelect(candidate);
-    } else if (key.escape || input === '\x1b') {
-      onCancel();
-    } else if (input && !key.leftArrow && !key.rightArrow && !key.tab && !key.ctrl && !key.meta) {
-      const candidate = candidates[selectedIndex];
-      if (candidate) onSelect(candidate);
-    }
-  }, { isActive: isFocused });
   const visible = candidates.slice(0, 8);
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginTop={1}>
