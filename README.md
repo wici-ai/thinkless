@@ -40,6 +40,9 @@ npm run verify:existing-goal
 npm run verify:v1-requirements
 npm run verify:tui-structure
 npm run verify:tui-chat-intake
+npm run verify:resume-selector
+npm run verify:tui-resume-selector-pty
+npm run verify:resume-rerunnable
 npm run verify:tui-chat-pty
 npm run verify:tui-real-fake-chat
 npm run verify:tui-planner-clarification-pty
@@ -147,7 +150,7 @@ thinkless
 
 Bare `thinkless` attaches to the current git repository by default. Typing the first concrete goal creates `GOAL.md`, `PLAN.md`, `.opt/`, and `.thinkless/` in that repository; outside git, Thinkless falls back to a new isolated workspace under `~/thinkless-workspaces`. Existing `.wici/` runs are still discovered for compatibility, and `thinkless resume` can migrate an isolated legacy run back into the matching real repository as `.thinkless/` state.
 
-To continue an existing run, use `thinkless resume` or type `/resume` while viewing that run in the TUI.
+To continue an existing run, use `thinkless resume` or type `/resume` in the TUI Chat input to open the selectable resume page.
 
 Use `npx tsx src/cli.tsx demo --fresh` when you intentionally want to reset the demo target.
 
@@ -391,7 +394,7 @@ npx tsx src/cli.tsx tui \
 
 ## Resume Or Re-Run
 
-To continue an existing goal, use the explicit resume command without a new `--goal`. Thinkless reads the existing `GOAL.md`, `PLAN.md`, `.thinkless/checkpoint.json` or legacy `.wici/checkpoint.json`, `events.jsonl`, and `ledger.jsonl`, then resumes from the recorded state:
+To continue an existing goal, use the explicit resume command without a new `--goal`. Thinkless reads the existing `GOAL.md`, `PLAN.md`, `.thinkless/checkpoint.json` or legacy `.wici/checkpoint.json`, Chat transcript/session/runtime files, planner and executor session metadata, `events.jsonl`, and `ledger.jsonl`, then resumes from the recorded state:
 
 ```bash
 thinkless resume --target /workspace/target-repo --mode real
@@ -399,7 +402,9 @@ thinkless resume --target /workspace/target-repo --mode real
 
 Without `--target`, `thinkless resume` first checks the current git repository for an existing Thinkless run. If the current repo has no state but a matching legacy isolated workspace exists under `~/thinkless-workspaces`, Thinkless migrates that run into the current repo as `.thinkless/` state, resets fixture-completed plans to a real-repo replan step, and resumes there. Otherwise it falls back to the latest run under `~/thinkless-workspaces`.
 
-If you are already viewing a run in the TUI, type `/resume` in the bottom Chat input to continue it. If the current TUI is a fresh empty workspace, `/resume` prints the resume command to use instead of treating the message as a goal.
+If you are already in the TUI, type `/resume` in the bottom Chat input to open an in-TUI selector. The selector lists the current target, numbered `.thinklessN` sessions, compatible legacy `.wici` runs, and recent Thinkless workspaces. Use up/down to choose a run, Enter to launch a runnable candidate, or Escape to cancel. Each row shows whether the candidate is runnable or blocked, the supervisor state, the selected session directory when relevant, and a short reason. A candidate is runnable only when Thinkless can restore the selected full context or intentionally rerun an interrupted planner/executor path from durable `GOAL.md`, `PLAN.md`, checkpoint, ledger, and session state. Blocked read-only states, such as chat-only history or a pending planner clarification without a stored planner session, are visible but cannot be launched as resume.
+
+`npm run verify:resume-selector` covers catalog discovery and preflight labels, `npm run verify:tui-resume-selector-pty` covers the real PTY `/resume` selector flow, and `npm run verify:resume-rerunnable` covers blocked planner and executor rerun/fallback events (`RESUME_CONTEXT_VALIDATED`, `RESUME_CONTEXT_BLOCKED`, and `EXECUTOR_RESUME_FALLBACK`).
 
 Headless continuation remains available, but it is intentionally explicit about the target:
 

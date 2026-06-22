@@ -139,8 +139,11 @@ async function main(): Promise<void> {
     readme.includes('## Resume Or Re-Run') &&
       readme.includes('without a new `--goal`') &&
       readme.includes('--resume-iteration 1') &&
-      readme.includes('drained_inbox[]'),
-    'README should document continuing, rewinding, and idempotent hot-reload resume'
+      readme.includes('drained_inbox[]') &&
+      readme.includes('open an in-TUI selector') &&
+      readme.includes('runnable or blocked') &&
+      readme.includes('RESUME_CONTEXT_VALIDATED'),
+    'README should document continuing, rewinding, selectable resume, and idempotent hot-reload resume'
   );
   assert(config.budget?.max_iters === 0 && config.budget?.max_cost_usd === 0, 'default config should not impose cost or iteration hard caps');
   assert(readme.includes('default `max_iters` is `0`') && readme.includes('disable WiCi\'s own cost and iteration hard stops'), 'README should document unbounded default real-run budgets');
@@ -387,6 +390,12 @@ async function main(): Promise<void> {
     'completion audit should include TUI-visible rollback/version status evidence'
   );
   assert(completionAudit.includes('Existing goals can be continued or rewound') && completionAudit.includes('npm run verify:resume-iteration'), 'completion audit should include documented existing-goal resume evidence');
+  assert(
+    completionAudit.includes('/resume` in the TUI opens a selectable recovery page') &&
+      completionAudit.includes('npm run verify:resume-selector') &&
+      completionAudit.includes('EXECUTOR_RESUME_FALLBACK'),
+    'completion audit should include selectable resume catalog and runnable preflight evidence'
+  );
   assert(completionAudit.includes('clean checkout, build, core verification'), 'completion audit should include README deployment evidence');
   assert(completionAudit.includes('blocked_do_not_tag_or_push'), 'completion audit should include explicit tag/push blocker evidence');
   assert(completionAudit.includes('Release tags are created only through a guarded command') && completionAudit.includes('npm run verify:release-tag'), 'completion audit should include guarded release tag evidence');
@@ -443,6 +452,9 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:v1-core']?.includes('verify:self-interrogation'), 'fresh V1 core gate must include self-interrogation coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:continuation-verdict'), 'fresh V1 core gate must include continuation verdict coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:tui-real-fake-chat'), 'fresh V1 core gate must include real-mode fake CLI Chat-first TUI coverage');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:resume-selector'), 'fresh V1 core gate must include resume catalog coverage');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:tui-resume-selector-pty'), 'fresh V1 core gate must include PTY resume selector coverage');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:resume-rerunnable'), 'fresh V1 core gate must include runnable resume preflight coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:app-server-hotreload'), 'fresh V1 core gate must include Codex app-server steering after hot reload');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:hotreload-resume'), 'fresh V1 core gate must include Codex exec resume fallback after hot reload');
   assert(pkg.scripts['release:preflight'] === 'npm run verify:v1-core && npm run verify:tag-gate', 'package should expose a release preflight that runs core V1 checks before tag gate');
