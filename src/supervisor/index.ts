@@ -155,6 +155,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         planner_session: resumePreflight.plannerSessionId ?? null,
         executor_session: resumePreflight.executorSessionId ?? null,
         executor_app_thread: resumePreflight.executorAppThreadId ?? null,
+        best_commit: resumePreflight.bestCommit ?? null,
+        tool_versions: resumePreflight.toolVersions ?? null,
         fallback: resumePreflight.fallback ?? null
       });
       if (resumePreflight.fallback === 'executor_rerun') {
@@ -190,6 +192,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       goal_source: checkpoint.goal_source ?? null,
       lock_mode: config.evaluation.lock_mode,
       safety: config.safety.container_hint,
+      resume_best_commit: resumePreflight?.bestCommit ?? null,
+      resume_tool_versions: resumePreflight?.toolVersions ?? null,
       tools: toolHealth
     });
 

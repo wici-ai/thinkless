@@ -49,6 +49,7 @@ npm run verify:tui-resume-interrupted-blocked
 npm run verify:tui-resume-interrupted-runnable
 npm run verify:tui-resume-command-isolation
 npm run verify:tui-resume-planner-context
+npm run verify:tui-resume-supervisor-safety
 npm run verify:tui-resume-empty-selector
 npm run verify:tui-resume-many-candidates
 npm run verify:tui-resume-stale-candidate

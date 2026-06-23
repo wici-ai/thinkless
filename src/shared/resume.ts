@@ -29,6 +29,8 @@ export interface ResumeCandidate {
   plannerSessionId?: string;
   executorSessionId?: string;
   executorAppThreadId?: string;
+  bestCommit?: string | null;
+  toolVersions?: Checkpoint['tool_versions'];
   runnable: boolean;
   status: ResumeCandidateStatus;
   reason: string;
@@ -149,6 +151,8 @@ async function candidateFromPaths(paths: RunPaths, sessionDir?: string): Promise
     plannerSessionId: checkpoint?.sessions.planner,
     executorSessionId: checkpoint?.sessions.executor,
     executorAppThreadId: checkpoint?.sessions.executorApp?.threadId,
+    bestCommit: checkpoint?.best_commit,
+    toolVersions: checkpoint?.tool_versions,
     ...preflight
   };
 }
