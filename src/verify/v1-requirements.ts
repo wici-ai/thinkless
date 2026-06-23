@@ -41,6 +41,7 @@ async function main(): Promise<void> {
     realMode: await readFile('src/verify/real-mode.ts', 'utf8'),
     goalMetric: await readFile('src/verify/goal-metric.ts', 'utf8'),
     hotreload: await readFile('src/verify/hotreload.ts', 'utf8'),
+    appServerFallback: await readFile('src/verify/app-server-fallback.ts', 'utf8'),
     durability: await readFile('src/verify/durability.ts', 'utf8'),
     goalDoc: await readFile('src/verify/goal-doc.ts', 'utf8'),
     plannerClarification: await readFile('src/verify/planner-clarification.ts', 'utf8'),
@@ -198,8 +199,10 @@ async function main(): Promise<void> {
   assert(files.hotreload.includes('PLAN_DIFF_APPLIED'), 'hot reload verifier must cover planner diff after chat input');
   assert(files.hotreload.includes('checkpoint.drained_inbox.includes'), 'hot reload verifier must cover drained inbox idempotency');
   assert(files.hotreload.includes('goal_doc_contains_steering') && files.inbox.includes('Steering:'), 'hot reload must persist steering text into GOAL.md');
-  assert(files.packageJson.includes('verify:app-server-hotreload') && files.readme.includes('turn/steer'), 'hot reload must verify app-server active-turn steering');
-  assert(files.packageJson.includes('verify:hotreload-resume') && files.readme.includes('codex exec resume --last'), 'hot reload must keep Codex exec resume continuity as fallback');
+	  assert(files.packageJson.includes('verify:app-server-hotreload') && files.readme.includes('turn/steer'), 'hot reload must verify app-server active-turn steering');
+  assert(files.packageJson.includes('verify:app-server-fallback') && files.supervisor.includes('EXECUTE_APP_SERVER_FALLBACK'), 'executor must verify app-server reconnect fallback to codex exec');
+  assert(files.appServerFallback.includes('connection/reconnecting') && files.appServerFallback.includes('app_server_reconnect_fallback'), 'app-server fallback verifier must cover reconnect loops');
+	  assert(files.packageJson.includes('verify:hotreload-resume') && files.readme.includes('codex exec resume --last'), 'hot reload must keep Codex exec resume continuity as fallback');
   assert(files.durability.includes('direct_recovered') && files.durability.includes("mode === 'direct'"), 'durability verifier must cover direct V1 crash recovery');
   assert(files.goalDoc.includes('GOAL.md') && files.goalDoc.includes('snapshot_preserved_goal_doc'), 'goal-doc verifier must cover durable human-readable GOAL.md');
 
@@ -277,8 +280,9 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:v1-core']?.includes('verify:real-mode'), 'verify:v1-core must include real-mode target safety checks');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:demo-tui'), 'verify:v1-core must include the Chat-first demo TUI check');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:tui-real-fake-chat'), 'verify:v1-core must include the real-mode fake Chat-first TUI verifier');
-  assert(pkg.scripts['verify:v1-core']?.includes('verify:tui-live'), 'verify:v1-core must include the live TUI execution stream check');
-  assert(pkg.scripts['verify:v1-core']?.includes('verify:durability'), 'verify:v1-core must include direct V1 crash recovery');
+	  assert(pkg.scripts['verify:v1-core']?.includes('verify:tui-live'), 'verify:v1-core must include the live TUI execution stream check');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:app-server-fallback'), 'verify:v1-core must include app-server reconnect fallback');
+	  assert(pkg.scripts['verify:v1-core']?.includes('verify:durability'), 'verify:v1-core must include direct V1 crash recovery');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:goal-doc'), 'verify:v1-core must include durable GOAL.md coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:canary-evidence'), 'verify:v1-core must include canary evidence recorder checks');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:ssh-evidence'), 'verify:v1-core must include shared SSH evidence checks');

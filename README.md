@@ -67,6 +67,7 @@ npm run verify:planner-clarification
 npm run verify:hotreload
 npm run verify:hotreload-resume
 npm run verify:app-server-hotreload
+npm run verify:app-server-fallback
 npm run verify:durability
 npm run verify:goal-doc
 npm run verify:tool-commands
@@ -285,6 +286,8 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 `npm run verify:hotreload-resume` covers the legacy real-mode command shape after hot reload with fake CLIs: the first Codex call starts normally, and the next execution after `PLAN_DIFF_APPLIED` uses `codex exec resume --last` without the unsupported `-C` flag.
 
 `npm run verify:app-server-hotreload` covers the preferred medium-term path: a fake `codex app-server` keeps an active turn open, WiCi drains Chat input, updates `GOAL.md` / `PLAN.md`, sends `turn/steer`, and completes without `EXECUTE_PREEMPTED`.
+
+`npm run verify:app-server-fallback` covers app-server reconnect failure: a fake `codex app-server` accepts a turn but only emits reconnect/status notifications, so Thinkless records `EXECUTE_APP_SERVER_FALLBACK` and completes the same step through `codex exec`.
 
 ## Deployment
 

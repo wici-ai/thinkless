@@ -35,11 +35,21 @@ export interface ExecutorRunOptions {
   artifactId?: string;
   resume?: boolean;
   onProgress?: (progress: ExecutorProgress) => Promise<void>;
+  onBackendFallback?: (fallback: ExecutorBackendFallback) => Promise<void>;
   shouldPreempt?: () => Promise<boolean>;
   idleTimeoutMs?: number;
   hardTimeoutMs?: number;
   heartbeatMs?: number;
   firstMeaningfulEventTimeoutMs?: number;
+}
+
+export interface ExecutorBackendFallback {
+  from: 'app-server';
+  to: 'exec';
+  phase: 'start' | 'turn';
+  reason: string;
+  threadId?: string;
+  turnId?: string;
 }
 
 export interface ExecutorController {
@@ -160,6 +170,7 @@ export async function startExecutorStep(
         idleTimeoutMs: options.idleTimeoutMs,
         hardTimeoutMs: options.hardTimeoutMs,
         heartbeatMs: options.heartbeatMs,
+        firstMeaningfulEventTimeoutMs: options.firstMeaningfulEventTimeoutMs,
         onRawNotification: async (_line, usage, method) => {
           const now = Date.now();
           await options.onProgress?.({
@@ -176,26 +187,44 @@ export async function startExecutorStep(
         backend: 'app-server',
         threadId: turn.threadId,
         turnId: turn.turnId,
-        done: turn.done.then(async (result) => {
-          assertCodexRunSucceeded(result.usage, 'codex app-server reported failure event');
-          const iterResult = await readIterResult(paths, artifactId);
-          return {
-            ...iterResult,
-            invocation: {
-              ok: true,
-              sessionId: turn.threadId,
-              stdout: result.stdout,
-              usage: result.usage
-            }
-          };
-        }),
+        done: turn.done
+          .then(async (result) => {
+            assertCodexRunSucceeded(result.usage, 'codex app-server reported failure event');
+            const iterResult = await readIterResult(paths, artifactId);
+            return {
+              ...iterResult,
+              invocation: {
+                ok: true,
+                sessionId: turn.threadId,
+                stdout: result.stdout,
+                usage: result.usage
+              }
+            };
+          })
+          .catch(async (error) => {
+            await options.onBackendFallback?.({
+              from: 'app-server',
+              to: 'exec',
+              phase: 'turn',
+              reason: errorMessage(error),
+              threadId: turn.threadId,
+              turnId: turn.turnId
+            });
+            return runExecutorStep(paths, goal, stepId, iter, config, steerText, lessonsText, {
+              ...options,
+              resume: options.resume ?? iter > 1
+            });
+          }),
         steer: turn.steer,
         interrupt: turn.interrupt
       };
     } catch (error) {
-      if (backend === 'app-server') {
-        throw error;
-      }
+      await options.onBackendFallback?.({
+        from: 'app-server',
+        to: 'exec',
+        phase: 'start',
+        reason: errorMessage(error)
+      });
     }
   }
 
@@ -212,6 +241,10 @@ function shouldAttemptAppServerBackend(backend: NonNullable<WiCiConfig['tools'][
   if (backend === 'exec') return false;
   if (backend === 'app-server') return true;
   return !process.env.WICI_FAKE_TARGET;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function buildExecutorPrompt(

@@ -72,6 +72,7 @@ This audit records what is currently proven, what is covered by automated checks
 | --- | --- | --- |
 | Later Chat input updates the goal without restarting the TUI | `npm run verify:hotreload`, `npm run verify:tui-chat-intake` | Covered |
 | Preferred hot reload steers an active Codex app-server turn without restarting execution | `npm run verify:app-server-hotreload` reports `app_server_steer`, records `EXECUTE_STEERED`, and verifies app-server received `turn/steer` | Covered |
+| Codex app-server reconnect loops fall back to the exec executor | `npm run verify:app-server-fallback` simulates app-server reconnect/status notifications without actionable turn events, records `EXECUTE_APP_SERVER_FALLBACK`, and completes through `codex exec` | Covered |
 | Legacy `codex exec` fallback can preempt an active direct Codex run at the next executor output/heartbeat | `npm run verify:direct-preempt` report `preempted_active_executor`, `EXECUTE_PREEMPTED`, and resumed executor evidence | Covered |
 | Real pseudo-terminal follow-up Chat input hot-reloads GOAL/PLAN before the next Codex iteration | `npm run verify:tui-hotreload-pty` report `pty_hot_reload`, `goal_version: 2`, and `ledger_rows: 2` | Covered |
 | Hot reload preserves Codex execution continuity instead of starting a fresh executor context | `npm run verify:app-server-hotreload` covers active-turn steering; `npm run verify:hotreload-resume` and `npm run verify:executor-contract` cover legacy resume fallback | Covered |

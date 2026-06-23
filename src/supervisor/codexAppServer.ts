@@ -55,6 +55,7 @@ export async function startCodexAppServerTurn(input: {
   idleTimeoutMs?: number;
   hardTimeoutMs?: number;
   heartbeatMs?: number;
+  firstMeaningfulEventTimeoutMs?: number;
 }): Promise<CodexAppTurn> {
   const client = new CodexAppServerClient(input.config.tools.executor.command, input.paths, input.config.tools.executor.effort);
   await client.start();
@@ -64,6 +65,7 @@ export async function startCodexAppServerTurn(input: {
   let completed = false;
   const startedAt = Date.now();
   let lastActivityAt = startedAt;
+  let firstMeaningfulEventAt: number | null = null;
   let completionResolve: (() => void) | undefined;
   let completionReject: ((error: Error) => void) | undefined;
   const completion = new Promise<void>((resolve, reject) => {
@@ -73,6 +75,7 @@ export async function startCodexAppServerTurn(input: {
 
   client.onNotification = async (message, raw) => {
     lastActivityAt = Date.now();
+    if (isMeaningfulAppServerEvent(message.method)) firstMeaningfulEventAt ??= lastActivityAt;
     stdout = tail(stdout + `${raw}\n`, STDOUT_TAIL_CHARS);
     await appendFile(input.paths.codexRun, `${raw}\n`);
     const delta = parseCodexRunEvents(raw);
@@ -132,6 +135,7 @@ export async function startCodexAppServerTurn(input: {
   const heartbeatMs = input.heartbeatMs ?? 30_000;
   const idleTimeoutMs = input.idleTimeoutMs ?? 60 * 60_000;
   const hardTimeoutMs = input.hardTimeoutMs ?? 12 * 60 * 60_000;
+  const firstMeaningfulEventTimeoutMs = input.firstMeaningfulEventTimeoutMs ?? 5 * 60_000;
   const watchdog = setInterval(() => {
     if (completed) return;
     const now = Date.now();
@@ -141,12 +145,18 @@ export async function startCodexAppServerTurn(input: {
       completionReject?.(new CodexRunError(usage.errors.at(-1) ?? 'Codex app-server hard timeout', cloneUsageSummary(usage)));
       return;
     }
+    if (!firstMeaningfulEventAt && now - startedAt > firstMeaningfulEventTimeoutMs) {
+      usage.failed = true;
+      usage.errors.push(`Codex app-server produced no actionable turn event after ${formatDuration(now - startedAt)}`);
+      completionReject?.(new CodexRunError(usage.errors.at(-1) ?? 'Codex app-server no actionable event timeout', cloneUsageSummary(usage)));
+      return;
+    }
     if (now - lastActivityAt > idleTimeoutMs) {
       usage.failed = true;
       usage.errors.push(`Codex app-server turn stalled after ${formatDuration(now - lastActivityAt)} without progress`);
       completionReject?.(new CodexRunError(usage.errors.at(-1) ?? 'Codex app-server idle timeout', cloneUsageSummary(usage)));
     }
-  }, Math.max(250, heartbeatMs));
+  }, Math.max(250, Math.min(heartbeatMs, firstMeaningfulEventTimeoutMs)));
   watchdog.unref();
 
   return {
@@ -393,6 +403,10 @@ function recordValue(value: unknown): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function isMeaningfulAppServerEvent(method: string | undefined): boolean {
+  return Boolean(method && (method.startsWith('turn/') || method.startsWith('item/') || method === 'thread/tokenUsage/updated'));
 }
 
 function nowIso(): string {

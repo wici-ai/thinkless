@@ -1421,6 +1421,19 @@ async function runDirectExecutorWithHotReload(input: {
         await saveCheckpoint(input.paths, checkpoint);
       }
     },
+    onBackendFallback: async (fallback) => {
+      await input.events.emit(
+        'EXECUTE_APP_SERVER_FALLBACK',
+        `Codex app-server ${fallback.phase === 'start' ? 'could not start' : 'turn became unusable'}; falling back to codex exec`,
+        {
+          iter: input.iter,
+          step_id: input.stepId,
+          mode: 'direct',
+          ...fallback
+        },
+        'warn'
+      );
+    },
     shouldPreempt: () => hasPendingChatInput(input.paths, checkpoint)
   });
 
