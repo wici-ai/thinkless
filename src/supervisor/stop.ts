@@ -1,11 +1,15 @@
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { execa } from 'execa';
-import { exists } from '../shared/atomic.js';
+import { ensureDir, exists } from '../shared/atomic.js';
 import { commandExists } from '../shared/commands.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
+import { runtimeAgentFromCommand } from '../shared/runtime.js';
 import type { GoalFile, LedgerEntry, WiCiConfig } from '../shared/types.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput, parseJsonObjectFromText } from './claudeOutput.js';
+import { runClaudeStreamProcess } from './claudeProcess.js';
 import { primaryMetricValue } from './metricFormat.js';
+import { buildCodexPlannerArgs } from './planner.js';
 
 export interface StopDecision {
   stop: boolean;
@@ -90,29 +94,19 @@ export async function directContinuationVerdict(
 
   try {
     const prompt = await readFile(promptPath('continue-verdict'), 'utf8');
-    const result = await execa(
-      config.tools.planner.command,
-      [
-        '-p',
-        [
-          prompt,
-          '',
-          `GOAL.md:\n${await readGoalDocForVerdict(paths, goal)}`,
-          '',
-          `Acceptance criteria:\n${JSON.stringify(goal.acceptance_criteria, null, 2)}`,
-          '',
-          `ASSUMPTIONS.md:\n${(await readTextIfExists(paths.assumptions)) || '(missing)'}`,
-          '',
-          `Recent ledger:\n${JSON.stringify(ledger.slice(-12), null, 2)}`
-        ].join('\n'),
-        '--output-format',
-        'json',
-        '--permission-mode',
-        'plan'
-      ],
-      { cwd: paths.target, reject: true, all: true, maxBuffer: 1024 * 1024 * 5 }
-    );
-    const parsed = extractDirectContinuationVerdict(result.stdout);
+    const verdictPrompt = [
+      prompt,
+      '',
+      `GOAL.md:\n${await readGoalDocForVerdict(paths, goal)}`,
+      '',
+      `Acceptance criteria:\n${JSON.stringify(goal.acceptance_criteria, null, 2)}`,
+      '',
+      `ASSUMPTIONS.md:\n${(await readTextIfExists(paths.assumptions)) || '(missing)'}`,
+      '',
+      `Recent ledger:\n${JSON.stringify(ledger.slice(-12), null, 2)}`
+    ].join('\n');
+    const output = await runDirectContinuationVerdictTool(paths, verdictPrompt, config);
+    const parsed = extractDirectContinuationVerdict(output);
     if (parsed.decision === 'complete') {
       return { decision: 'complete', reason: parsed.reason ?? 'LLM completion verdict', source: 'llm' };
     }
@@ -124,6 +118,40 @@ export async function directContinuationVerdict(
   }
 
   return fallback;
+}
+
+async function runDirectContinuationVerdictTool(paths: RunPaths, prompt: string, config: WiCiConfig): Promise<string> {
+  const agent = runtimeAgentFromCommand(config.tools.planner.command, 'codex');
+  if (agent === 'codex') {
+    await ensureDir(paths.artifacts);
+    const outputLastMessage = join(paths.artifacts, `continue-verdict-codex-${Date.now()}.last-message.md`);
+    const result = await runClaudeStreamProcess(
+      config.tools.planner.command,
+      buildCodexPlannerArgs({
+        target: paths.target,
+        prompt,
+        outputLastMessage,
+        model: config.tools.planner.model,
+        effort: config.tools.planner.effort
+      }),
+      {
+        cwd: paths.target,
+        idleTimeoutMs: 10 * 60_000,
+        hardTimeoutMs: 30 * 60_000
+      }
+    );
+    if (result.timeoutReason || result.exitCode !== 0) {
+      throw new Error(`Codex continuation verdict failed: ${result.timeoutReason ?? result.exitCode}`);
+    }
+    return (await readTextIfExists(outputLastMessage)) || codexTextFromJsonLines(result.stdout);
+  }
+
+  const result = await execa(
+    config.tools.planner.command,
+    ['-p', prompt, '--output-format', 'json', '--permission-mode', 'plan'],
+    { cwd: paths.target, reject: true, all: true, maxBuffer: 1024 * 1024 * 5 }
+  );
+  return result.stdout;
 }
 
 export function buildStopAnalysis(goal: GoalFile, ledger: LedgerEntry[]): StopAnalysis {
@@ -287,7 +315,13 @@ async function readTextIfExists(path: string): Promise<string> {
 }
 
 function extractDirectContinuationVerdict(raw: string): { decision?: 'continue' | 'complete'; reason?: string } {
-  const parsed = parseClaudeJsonOutput(raw);
+  let parsed: unknown[];
+  try {
+    parsed = parseClaudeJsonOutput(raw);
+  } catch {
+    const fromText = parseJsonObjectFromText(raw);
+    parsed = fromText ? [fromText] : [];
+  }
   for (const item of [...parsed].reverse()) {
     const verdict = directContinuationVerdictFromCandidate(item);
     if (verdict) return verdict;
@@ -313,4 +347,33 @@ function directContinuationVerdictFromCandidate(candidate: unknown): { decision?
   if (typeof candidate.result !== 'string') return null;
   const parsed = parseJsonObjectFromText(candidate.result);
   return parsed ? directContinuationVerdictFromCandidate(parsed) : null;
+}
+
+function codexTextFromJsonLines(raw: string): string {
+  const lines = raw.trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of [...lines].reverse()) {
+    const record = parseJsonRecord(line);
+    if (!record) continue;
+    const item = recordValue(recordValue(record.params)?.item) ?? recordValue(record.item) ?? record;
+    const text = stringValue(item.text) ?? stringValue(item.message) ?? stringValue(record.message);
+    if (text) return text;
+  }
+  return raw;
+}
+
+function parseJsonRecord(line: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(line);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }

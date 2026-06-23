@@ -18,21 +18,26 @@ async function main(): Promise<void> {
     await writeFile(paths.assumptions, '# Assumptions\n\n## Approaches considered\n- Verify before stopping.\n');
 
     await writeFile(paths.goalDoc, '# complete-goal\n\nAll acceptance evidence is present.\n');
-    const complete = await directContinuationVerdict(paths, goal('complete-goal'), [], config('auto'));
+    const complete = await directContinuationVerdict(paths, goal('complete-goal'), [], config('auto', 'claude'));
     assert(complete.decision === 'complete', `expected explicit complete verdict, got ${JSON.stringify(complete)}`);
     assert(complete.source === 'llm', 'complete verdict should come from fake LLM');
 
     await writeFile(paths.goalDoc, '# continue-goal\n\nEvidence is still missing.\n');
-    const keepGoing = await directContinuationVerdict(paths, goal('continue-goal'), [], config('auto'));
+    const keepGoing = await directContinuationVerdict(paths, goal('continue-goal'), [], config('auto', 'claude'));
     assert(keepGoing.decision === 'continue', `expected explicit continue verdict, got ${JSON.stringify(keepGoing)}`);
     assert(keepGoing.source === 'llm', 'continue verdict should come from fake LLM');
 
+    await writeFile(paths.goalDoc, '# codex-complete-goal\n\nAll acceptance evidence is present.\n');
+    const codexComplete = await directContinuationVerdict(paths, goal('codex-complete-goal'), [], config('auto', 'codex'));
+    assert(codexComplete.decision === 'complete', `expected Codex explicit complete verdict, got ${JSON.stringify(codexComplete)}`);
+    assert(codexComplete.source === 'llm', 'Codex complete verdict should come from fake LLM');
+
     await writeFile(paths.goalDoc, '# ambiguous-goal\n\nThe fake LLM will return unusable output.\n');
-    const ambiguous = await directContinuationVerdict(paths, goal('ambiguous-goal'), [], config('auto'));
+    const ambiguous = await directContinuationVerdict(paths, goal('ambiguous-goal'), [], config('auto', 'claude'));
     assert(ambiguous.decision === 'continue', `ambiguous verdict must fall back to continue, got ${JSON.stringify(ambiguous)}`);
     assert(ambiguous.source === 'fallback', 'ambiguous verdict should use continue-biased fallback');
 
-    const stub = await directContinuationVerdict(paths, goal('stub-goal'), [], config('stub'));
+    const stub = await directContinuationVerdict(paths, goal('stub-goal'), [], config('stub', 'codex'));
     assert(stub.decision === 'continue' && stub.source === 'fallback', `stub mode must continue, got ${JSON.stringify(stub)}`);
 
     console.log(
@@ -41,6 +46,7 @@ async function main(): Promise<void> {
           ok: true,
           explicit_complete_stops: true,
           explicit_continue_continues: true,
+          codex_planner_verdict_supported: true,
           ambiguous_falls_back_to_continue: true,
           stub_falls_back_to_continue: true
         },
@@ -58,7 +64,7 @@ async function main(): Promise<void> {
 async function installFakeClaude(): Promise<void> {
   await rm(fakeBin, { recursive: true, force: true });
   await mkdir(fakeBin, { recursive: true });
-  const script = `#!/usr/bin/env node
+  const claudeScript = `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
   console.log('2.1.999 (Fake Claude Code)');
@@ -81,8 +87,47 @@ console.log('not json');
 process.exit(0);
 `;
   const fakeClaude = join(fakeBin, 'claude');
-  await writeFile(fakeClaude, script);
+  await writeFile(fakeClaude, claudeScript);
   await chmod(fakeClaude, 0o755);
+
+  const codexScript = `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+if (args.includes('--version')) {
+  console.log('codex-cli 9.9.9');
+  process.exit(0);
+}
+if (args[0] !== 'exec') {
+  console.error('fake Codex expected exec, got ' + args.join(' '));
+  process.exit(2);
+}
+if (args.includes('--output-format') || args.includes('--permission-mode')) {
+  console.error('fake Codex received Claude-only arguments: ' + args.join(' '));
+  process.exit(2);
+}
+const outputIndex = args.indexOf('--output-last-message');
+if (outputIndex < 0 || !args[outputIndex + 1]) {
+  console.error('fake Codex missing --output-last-message');
+  process.exit(2);
+}
+const prompt = args[args.length - 1] || '';
+if (!prompt.includes('Bias toward') || !prompt.includes('ASSUMPTIONS.md')) {
+  console.error('completion gate prompt missing required context');
+  process.exit(2);
+}
+const outputPath = args[outputIndex + 1];
+if (prompt.includes('codex-complete-goal')) {
+  writeFileSync(outputPath, '{"decision":"complete","reason":"codex path saw complete evidence"}\\n');
+  console.log(JSON.stringify({ type: 'agent_message', text: '{"decision":"complete","reason":"codex path saw complete evidence"}' }));
+  process.exit(0);
+}
+writeFileSync(outputPath, 'not json\\n');
+console.log('not json');
+process.exit(0);
+`;
+  const fakeCodex = join(fakeBin, 'codex');
+  await writeFile(fakeCodex, codexScript);
+  await chmod(fakeCodex, 0o755);
 }
 
 function goal(text: string): GoalFile {
@@ -98,11 +143,11 @@ function goal(text: string): GoalFile {
   };
 }
 
-function config(mode: WiCiConfig['tools']['mode']): WiCiConfig {
+function config(mode: WiCiConfig['tools']['mode'], plannerCommand: 'claude' | 'codex'): WiCiConfig {
   return {
     tools: {
       mode,
-      planner: { command: 'claude', effort: 'default' },
+      planner: { command: plannerCommand, effort: plannerCommand === 'codex' ? 'xhigh' : 'default', model: plannerCommand === 'codex' ? 'gpt-5.5' : undefined },
       executor: { command: 'codex', dangerouslyBypassApprovalsAndSandbox: true }
     },
     budget: { max_iters: 0, max_cost_usd: 0, deadline: null },
