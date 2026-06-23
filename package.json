@@ -40,6 +40,7 @@
     "verify:tui-resume-current-candidate": "tsx src/verify/tui-resume-current-candidate.ts",
     "verify:tui-resume-interrupted-blocked": "tsx src/verify/tui-resume-interrupted-blocked.ts",
     "verify:tui-resume-interrupted-runnable": "tsx src/verify/tui-resume-interrupted-runnable.ts",
+    "verify:tui-resume-command-isolation": "tsx src/verify/tui-resume-command-isolation.ts",
     "verify:tui-resume-empty-selector": "tsx src/verify/tui-resume-empty-selector.ts",
     "verify:tui-resume-many-candidates": "tsx src/verify/tui-resume-many-candidates.ts",
     "verify:tui-resume-stale-candidate": "tsx src/verify/tui-resume-stale-candidate.ts",
