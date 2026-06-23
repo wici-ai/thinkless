@@ -46,6 +46,7 @@ npm run verify:tui-resume-selector-built
 npm run verify:tui-resume-legacy-candidate
 npm run verify:tui-resume-current-candidate
 npm run verify:tui-resume-interrupted-blocked
+npm run verify:tui-resume-interrupted-runnable
 npm run verify:tui-resume-empty-selector
 npm run verify:tui-resume-many-candidates
 npm run verify:tui-resume-stale-candidate
