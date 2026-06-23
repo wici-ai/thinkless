@@ -78,10 +78,15 @@ export function App({
   const [resumeCandidates, setResumeCandidates] = useState<ResumeCandidate[]>([]);
   const [resumeIndex, setResumeIndex] = useState(0);
   const [resumeCandidatesLoaded, setResumeCandidatesLoaded] = useState(false);
+  const resumeCandidatesRef = useRef<ResumeCandidate[]>([]);
+  const resumeIndexRef = useRef(0);
   const [runtimeField, setRuntimeField] = useState<RuntimeField>('agent');
   const [mouseReportingEnabled, setMouseReportingEnabled] = useState(mouseReporting);
   const runtimePane = runtimePaneFromWorkspace(workspaceTab);
   const runtimeSignatureRef = useRef<string | null>(null);
+
+  resumeCandidatesRef.current = resumeCandidates;
+  resumeIndexRef.current = resumeIndex;
 
   useEffect(() => {
     let alive = true;
@@ -252,13 +257,13 @@ export function App({
       } else if (key.downArrow) {
         setResumeIndex((current) => Math.min(Math.max(0, resumeCandidates.length - 1), current + 1));
       } else if (key.return || input.includes('\r') || input.includes('\n')) {
-        const candidate = resumeCandidates[resumeIndex];
+        const candidate = resumeCandidatesRef.current[resumeIndexRef.current];
         if (candidate) void selectResumeCandidate(candidate);
       } else if (key.escape || input === '\x1b') {
         setResumeSelectorOpen(false);
         setChatLocalStatus('resume: cancelled');
       } else if (input && !key.leftArrow && !key.rightArrow && !key.tab && !key.ctrl && !key.meta) {
-        const candidate = resumeCandidates[resumeIndex];
+        const candidate = resumeCandidatesRef.current[resumeIndexRef.current];
         if (candidate) void selectResumeCandidate(candidate);
       }
       return;

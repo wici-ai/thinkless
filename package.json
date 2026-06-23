@@ -43,6 +43,7 @@
     "verify:tui-resume-many-candidates": "tsx src/verify/tui-resume-many-candidates.ts",
     "verify:tui-resume-stale-candidate": "tsx src/verify/tui-resume-stale-candidate.ts",
     "verify:tui-resume-stale-agent-state": "tsx src/verify/tui-resume-stale-agent-state.ts",
+    "verify:tui-resume-blocked-then-runnable": "tsx src/verify/tui-resume-blocked-then-runnable.ts",
     "verify:resume-rerunnable": "tsx src/verify/resume-rerunnable.ts",
     "verify:tui-chat-pty": "tsx src/verify/tui-chat-pty.ts",
     "verify:tui-real-fake-chat": "tsx src/verify/tui-real-fake-chat.ts",
