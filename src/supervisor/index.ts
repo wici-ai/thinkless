@@ -67,6 +67,7 @@ const ACCEPTANCE_SPEC_WAIT_REASON = 'awaiting acceptance criteria clarification'
 const PLANNER_CLARIFY_REPLY_PREFIX = 'planner-clarify-';
 const PLANNER_CLARIFY_WAIT_REASON = 'awaiting planner clarification';
 const STOP_ANSWER_WAIT_REASON = 'awaiting stop answer';
+const CONTINUATION_STALL_REPLY_PREFIX = 'continuation-stall-';
 
 export interface SupervisorResult {
   state: 'STOP' | 'FAILED' | 'RUNNING';
@@ -1158,12 +1159,50 @@ async function continueDirectExhaustedPlan(
     `Direct completion gate chose ${verdict.decision}: ${verdict.reason}`,
     { verdict, mode: 'direct' }
   );
+  const continuationFallbacks = verdict.source === 'fallback' ? (checkpoint.consecutive_continuation_fallbacks ?? 0) + 1 : 0;
+  checkpoint = {
+    ...checkpoint,
+    consecutive_continuation_fallbacks: continuationFallbacks,
+    events_seq: events.seq
+  };
+  await saveCheckpoint(paths, checkpoint);
+  if (verdict.source === 'fallback' && continuationFallbacks >= continuationFallbackThreshold()) {
+    const threshold = continuationFallbackThreshold();
+    const replyKey = `${CONTINUATION_STALL_REPLY_PREFIX}${checkpoint.iter}`;
+    const reason = `Continuation gate fell back ${continuationFallbacks} consecutive time(s); pausing instead of continuing to manufacture work.`;
+    const question = await writeOutbox(paths, {
+      kind: 'question',
+      text: `${reason} Reply with a steer or new requirement to resume, or answer stop to leave the run stopped.`,
+      replyKey,
+      data: { mode: 'direct', verdict, consecutive_continuation_fallbacks: continuationFallbacks, threshold }
+    });
+    checkpoint = {
+      ...checkpoint,
+      supervisor_state: 'STOP',
+      next_step: null,
+      ledger_seq: await lineCount(paths.ledger),
+      events_seq: events.seq,
+      plan_hash: await hashFile(paths.plan)
+    };
+    await saveCheckpoint(paths, checkpoint);
+    await events.emit('CONTINUATION_ESCALATED', reason, {
+      mode: 'direct',
+      verdict,
+      reply_key: replyKey,
+      outbox_id: question.id,
+      consecutive_continuation_fallbacks: continuationFallbacks,
+      threshold
+    }, 'warn');
+    await events.emit('STOP', reason, { mode: 'direct', reply_key: replyKey, outbox_id: question.id }, 'warn');
+    return { goal, checkpoint, continued: false, stop: { state: 'STOP', reason, iter: checkpoint.iter } };
+  }
   if (verdict.decision === 'complete') {
     const reason = `PLAN.md exhausted and completion gate marked the goal complete: ${verdict.reason}`;
     checkpoint = {
       ...checkpoint,
       supervisor_state: 'STOP',
       next_step: null,
+      consecutive_continuation_fallbacks: 0,
       ledger_seq: await lineCount(paths.ledger),
       events_seq: events.seq,
       plan_hash: await hashFile(paths.plan)
@@ -2022,6 +2061,7 @@ async function handlePendingStopQuestion(
   if (checkpoint.supervisor_state !== 'STOP') return { action: 'proceed', reason: 'not stopped', checkpoint };
   const pending = await pendingStopQuestion(paths);
   if (!pending?.reply_key) return { action: 'proceed', reason: 'no pending stop question', checkpoint };
+  const continuationStall = pending.reply_key.startsWith(CONTINUATION_STALL_REPLY_PREFIX);
 
   const questionTs = Date.parse(pending.ts);
   const pendingInputs = (await readPendingInjections(paths, checkpoint.drained_inbox, ['answer', 'add_requirement', 'steer']))
@@ -2051,6 +2091,7 @@ async function handlePendingStopQuestion(
     const next = {
       ...checkpoint,
       drained_inbox: [...checkpoint.drained_inbox, ...injectionIds(drained)],
+      consecutive_continuation_fallbacks: continuationStall ? 0 : checkpoint.consecutive_continuation_fallbacks,
       events_seq: events.seq
     };
     await saveCheckpoint(paths, next);
@@ -2066,7 +2107,11 @@ async function handlePendingStopQuestion(
     outbox_id: marked?.id ?? null,
     via: first.kind
   });
-  const next = { ...checkpoint, events_seq: events.seq };
+  const next = {
+    ...checkpoint,
+    consecutive_continuation_fallbacks: continuationStall ? 0 : checkpoint.consecutive_continuation_fallbacks,
+    events_seq: events.seq
+  };
   await saveCheckpoint(paths, next);
   return { action: 'proceed', reason: `resume requested via ${first.kind}`, checkpoint: next };
 }
@@ -2206,7 +2251,16 @@ async function pendingPlannerQuestion(paths: ReturnType<typeof runPaths>) {
 }
 
 async function pendingStopQuestion(paths: ReturnType<typeof runPaths>) {
-  return (await readOutbox(paths, 50)).find((message) => message.reply_key?.startsWith('stop-') && !message.answered);
+  return (await readOutbox(paths, 50)).find((message) => isStopQuestionReplyKey(message.reply_key) && !message.answered);
+}
+
+function isStopQuestionReplyKey(replyKey: string | undefined): boolean {
+  return Boolean(replyKey?.startsWith('stop-') || replyKey?.startsWith(CONTINUATION_STALL_REPLY_PREFIX));
+}
+
+function continuationFallbackThreshold(): number {
+  const parsed = Number(process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD?.trim() ?? '');
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 3;
 }
 
 function plannerQuestionData(data: unknown): { sessionId?: string; question?: string } {

@@ -333,6 +333,7 @@ export interface Checkpoint {
     selected_at: string;
     reason?: string;
   };
+  consecutive_continuation_fallbacks?: number;
   drained_inbox: string[];
   updated_at: string;
 }
