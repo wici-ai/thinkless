@@ -18,7 +18,7 @@ export function isTransientNetworkFailure(text: string | undefined): boolean {
   const normalized = text?.trim();
   if (!normalized) return false;
   return TRANSIENT_STATUS_CODES.some((status) => transientStatusPattern(status).test(normalized)) ||
-    /\b(server_error|bad gateway|gateway timeout|cloudflare.*timeout|temporarily unavailable|connection reset|socket hang up|econnreset|etimedout)\b/i.test(normalized);
+    /\b(server_error|bad gateway|gateway timeout|cloudflare.*timeout|temporarily unavailable|connection reset|socket hang up|econnreset|etimedout|at capacity|selected model is at capacity|try a different model)\b/i.test(normalized);
 }
 
 export function transientFailureReason(text: string | undefined): string {

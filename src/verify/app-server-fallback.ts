@@ -4,6 +4,8 @@ import { createSampleTarget } from '../sample.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, WiCiConfig } from '../shared/types.js';
 import { startExecutorStep, type ExecutorBackendFallback } from '../supervisor/executor.js';
+import { directContinuationVerdict } from '../supervisor/stop.js';
+import { isTransientNetworkFailure } from '../supervisor/transientRetry.js';
 
 const target = resolve('fixture/app-server-fallback-target');
 const fakeBin = resolve('fixture/app-server-fallback-bin');
@@ -43,8 +45,25 @@ async function main(): Promise<void> {
 
     const transcript = await readFile(paths.codexRun, 'utf8');
     assert(transcript.includes('connection/reconnecting'), 'app-server reconnect notifications were not recorded');
+    assert(
+      isTransientNetworkFailure('Codex app-server error: Selected model is at capacity. Please try a different model.'),
+      'capacity errors must be classified as transient failures'
+    );
 
-    console.log(JSON.stringify({ ok: true, app_server_reconnect_fallback: true, fallback: fallbacks[0] }, null, 2));
+    const originalRetryDelay = process.env.WICI_TRANSIENT_RETRY_DELAY_MS;
+    process.env.WICI_TRANSIENT_RETRY_DELAY_MS = '0';
+    try {
+      await writeFile(paths.assumptions, '# Assumptions\n\n- Capacity retries should not fall through to continuation fallback.\n');
+      await writeFile(paths.goalDoc, '# capacity-retry-goal\n\nAll acceptance evidence is present after retry.\n');
+      const verdict = await directContinuationVerdict(paths, goal('capacity-retry-goal'), [], config('codex'));
+      assert(verdict.decision === 'complete', `expected retried Codex verdict to complete, got ${JSON.stringify(verdict)}`);
+      assert(verdict.source === 'llm', `expected retried Codex verdict to be explicit, got ${JSON.stringify(verdict)}`);
+    } finally {
+      if (originalRetryDelay === undefined) delete process.env.WICI_TRANSIENT_RETRY_DELAY_MS;
+      else process.env.WICI_TRANSIENT_RETRY_DELAY_MS = originalRetryDelay;
+    }
+
+    console.log(JSON.stringify({ ok: true, app_server_reconnect_fallback: true, capacity_retry: true, fallback: fallbacks[0] }, null, 2));
   } finally {
     process.env.PATH = originalPath;
     await rm(target, { recursive: true, force: true });
@@ -57,7 +76,7 @@ async function writeFakeCodex(): Promise<void> {
   await writeFile(
     path,
     `#!/usr/bin/env node
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { dirname } from 'node:path';
 
@@ -105,6 +124,19 @@ if (args[0] === 'exec') {
     console.error('missing --output-last-message');
     process.exit(2);
   }
+  const prompt = args[args.length - 1] || '';
+  if (prompt.includes('capacity-retry-goal')) {
+    const attemptPath = outputPath + '.attempt';
+    const attempt = existsSync(attemptPath) ? Number(readFileSync(attemptPath, 'utf8')) : 0;
+    writeFileSync(attemptPath, String(attempt + 1));
+    if (attempt === 0) {
+      console.error('Codex app-server error: Selected model is at capacity. Please try a different model.');
+      process.exit(1);
+    }
+    writeFileSync(outputPath, '{"decision":"complete","reason":"capacity cleared after retry"}\\n');
+    console.log(JSON.stringify({ type: 'agent_message', text: '{"decision":"complete","reason":"capacity cleared after retry"}' }));
+    process.exit(0);
+  }
   mkdirSync(dirname(outputPath), { recursive: true });
   const resultPath = outputPath.replace(/\\.txt$/, '.json');
   writeFileSync(resultPath, JSON.stringify({ step_done: true, tests_pass: true, notes: 'exec fallback completed', changed_files: [], next: null }, null, 2) + '\\n');
@@ -122,11 +154,11 @@ process.exit(2);
   await chmod(path, 0o755);
 }
 
-function goal(): GoalFile {
+function goal(text = 'Recover when app-server reconnects forever.'): GoalFile {
   return {
     run_id: 'app-server-fallback',
     version: 1,
-    requirements: [{ id: 'R1', text: 'Recover when app-server reconnects forever.', source: 'initial', status: 'active' }],
+    requirements: [{ id: 'R1', text, source: 'initial', status: 'active' }],
     acceptance_criteria: [{ id: 'A1', text: 'executor falls back to codex exec', check: 'verify fallback result' }],
     constraints: [],
     metric: { name: 'planner selected validation', direction: 'maximize', target: null, unit: 'score' },
@@ -151,11 +183,11 @@ function checkpoint(): Checkpoint {
   };
 }
 
-function config(): WiCiConfig {
+function config(plannerCommand: 'claude' | 'codex' = 'claude'): WiCiConfig {
   return {
     tools: {
       mode: 'real',
-      planner: { command: 'claude', effort: 'default' },
+      planner: { command: plannerCommand, effort: plannerCommand === 'codex' ? 'xhigh' : 'default', model: plannerCommand === 'codex' ? 'gpt-5.5' : undefined },
       executor: { command: 'codex', effort: 'medium', backend: 'app-server', dangerouslyBypassApprovalsAndSandbox: true },
       auto_update: false
     },

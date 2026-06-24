@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { execa } from 'execa';
 import { ensureDir, exists } from '../shared/atomic.js';
 import { commandExists } from '../shared/commands.js';
@@ -10,6 +11,7 @@ import { isClaudeEnvelope, parseClaudeJsonOutput, parseJsonObjectFromText } from
 import { runClaudeStreamProcess } from './claudeProcess.js';
 import { primaryMetricValue } from './metricFormat.js';
 import { buildCodexPlannerArgs } from './planner.js';
+import { isTransientNetworkFailure, transientFailureReason, transientRetryDelayMs } from './transientRetry.js';
 
 export interface StopDecision {
   stop: boolean;
@@ -125,25 +127,34 @@ async function runDirectContinuationVerdictTool(paths: RunPaths, prompt: string,
   if (agent === 'codex') {
     await ensureDir(paths.artifacts);
     const outputLastMessage = join(paths.artifacts, `continue-verdict-codex-${Date.now()}.last-message.md`);
-    const result = await runClaudeStreamProcess(
-      config.tools.planner.command,
-      buildCodexPlannerArgs({
-        target: paths.target,
-        prompt,
-        outputLastMessage,
-        model: config.tools.planner.model,
-        effort: config.tools.planner.effort
-      }),
-      {
-        cwd: paths.target,
-        idleTimeoutMs: 10 * 60_000,
-        hardTimeoutMs: 30 * 60_000
+    for (;;) {
+      const result = await runClaudeStreamProcess(
+        config.tools.planner.command,
+        buildCodexPlannerArgs({
+          target: paths.target,
+          prompt,
+          outputLastMessage,
+          model: config.tools.planner.model,
+          effort: config.tools.planner.effort
+        }),
+        {
+          cwd: paths.target,
+          idleTimeoutMs: 10 * 60_000,
+          hardTimeoutMs: 30 * 60_000
+        }
+      );
+      if (result.timeoutReason) throw new Error(`Codex continuation verdict failed: ${result.timeoutReason}`);
+      if (result.exitCode !== 0) {
+        const combined = `${result.stdout}\n${result.stderr}\n${result.all}`;
+        if (isTransientNetworkFailure(combined)) {
+          await delay(transientRetryDelayMs());
+          continue;
+        }
+        const reason = transientFailureReason(combined);
+        throw new Error(`Codex continuation verdict failed: ${result.exitCode}${reason ? `: ${reason}` : ''}`);
       }
-    );
-    if (result.timeoutReason || result.exitCode !== 0) {
-      throw new Error(`Codex continuation verdict failed: ${result.timeoutReason ?? result.exitCode}`);
+      return (await readTextIfExists(outputLastMessage)) || codexTextFromJsonLines(result.stdout);
     }
-    return (await readTextIfExists(outputLastMessage)) || codexTextFromJsonLines(result.stdout);
   }
 
   const result = await execa(
