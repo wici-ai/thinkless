@@ -5,7 +5,7 @@ import { ensureRunDirs, runPaths } from '../shared/paths.js';
 import type { GoalFile, WiCiConfig } from '../shared/types.js';
 import { buildInitialPlannerArgs, buildPlanDiffArgs } from '../supervisor/planner.js';
 import { runExecutorStep } from '../supervisor/executor.js';
-import { formatSafetyForPrompt } from '../supervisor/safety.js';
+import { formatChatSafetyForPrompt, formatSafetyForPrompt } from '../supervisor/safety.js';
 
 const target = resolve('fixture/safety-prompts-target');
 
@@ -17,6 +17,10 @@ async function main(): Promise<void> {
   assert(safetyText.includes('Forbidden action: git push'), `safety text missing git push ban: ${safetyText}`);
   assert(safetyText.includes('Forbidden action: rm -rf outside workspace'), `safety text missing rm -rf ban: ${safetyText}`);
   assert(safetyText.includes('Forbidden action: production credentials'), `safety text missing credential ban: ${safetyText}`);
+  const chatSafetyText = formatChatSafetyForPrompt(config);
+  assert(chatSafetyText.includes('interactive agent'), `Chat safety text should identify the interactive-agent boundary: ${chatSafetyText}`);
+  assert(chatSafetyText.includes('guarded workflow'), `Chat safety text should prefer guarded workflows for risky direct actions: ${chatSafetyText}`);
+  assert(!chatSafetyText.includes('Forbidden action: git push'), `Chat safety text must not inherit autonomous git push bans: ${chatSafetyText}`);
 
   const initialArgs = buildInitialPlannerArgs({
     goalText: 'optimize safely',

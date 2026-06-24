@@ -8,7 +8,7 @@ import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
 import { runtimeAgentFromCommand } from '../shared/runtime.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
-import { appendSafety, formatSafetyForPrompt } from './safety.js';
+import { appendSafety, formatChatSafetyForPrompt } from './safety.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput } from './claudeOutput.js';
 import { runClaudeStreamProcess, type ClaudeStreamResult } from './claudeProcess.js';
 import { writeInjection } from './inbox.js';
@@ -83,7 +83,7 @@ async function conversationTurn(ctx: ChatTurnContext): Promise<ChatTurnResult> {
     }
 
     const systemPrompt = await readFile(promptPath('chat'), 'utf8');
-    const safetyText = formatSafetyForPrompt(config);
+    const safetyText = formatChatSafetyForPrompt(config);
     const userPrompt = buildChatPrompt(ctx);
     const sessionId = await readChatSession(ctx.paths, agent);
     if (agent === 'codex') return await runCodexChatTurn(ctx, command, { model: chatTool.model, effort: chatTool.effort, systemPrompt, safetyText, userPrompt, sessionId });
@@ -126,7 +126,7 @@ async function runCodexChatFallback(ctx: ChatTurnContext, config: Awaited<Return
   const command = 'codex';
   if (!(await commandExists(command))) return null;
   const systemPrompt = await readFile(promptPath('chat'), 'utf8');
-  const safetyText = formatSafetyForPrompt(config);
+  const safetyText = formatChatSafetyForPrompt(config);
   const userPrompt = `${buildChatPrompt(ctx)}\n\nClaude Chat was unavailable; answer through Codex Chat fallback. Claude failure: ${reason}`;
   const sessionId = await readChatSession(ctx.paths, 'codex');
   return runCodexChatTurn(ctx, command, {
@@ -474,8 +474,7 @@ export function buildCodexChatArgs(input: {
     'exec',
     ...codexModelArgs(input.model),
     ...codexEffortArgs(input.effort),
-    '--sandbox',
-    'danger-full-access',
+    '--dangerously-bypass-approvals-and-sandbox',
     '--json',
     '--output-last-message',
     input.outputLastMessage,
@@ -490,7 +489,7 @@ function buildCodexChatPrompt(input: { systemPrompt: string; safetyText?: string
   return [
     appendSafety(input.systemPrompt, input.safetyText ?? ''),
     '',
-    'You are running as the Chat agent through Codex exec with Chat-level permissions. Handle lightweight direct work: short inspection, bounded read-only SSH or remote code review, and small self-contained local edits are allowed. UPDATE is a planner/executor handoff, not a status note. Do not emit UPDATE just because a lightweight direct task is blocked by auth, network, sandbox, missing tools, or environment limits; explain the blocker in REPLY. Do not commit, push, deploy, run destructive commands, or start long benchmark/debug loops yourself; emit UPDATE only when planner/executor should take over.',
+    'You are running as the Chat agent through Codex exec with normal native agent permissions. Handle bounded direct work yourself: short inspection, bounded SSH or remote code review, ordinary local code changes, validation, commits, pushes, and guarded release commands are allowed when the user explicitly asks for them and the repository state supports them. UPDATE is a planner/executor handoff, not a status note. Do not emit UPDATE just because direct work is blocked by auth, network, sandbox, missing tools, or environment limits; explain the blocker in REPLY. Emit UPDATE only when planner/executor should take over long-running, risky, unattended, or iterative work.',
     '',
     input.userPrompt
   ].join('\n');

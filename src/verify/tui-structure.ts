@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
-import { buildBlankRunPlanningContext, buildChatHistory, currentGoalSummary } from '../tui/ChatPane.js';
+import { buildBlankRunPlanningContext, buildChatHistory, currentGoalSummary, isStopControlText } from '../tui/ChatPane.js';
 import { codexDisplayLines, formatEvent, visibleEvents } from '../tui/ExecPane.js';
 import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
@@ -114,6 +114,8 @@ async function main(): Promise<void> {
   assert(files.chat.includes('latestQuestion') && files.chat.includes('planner-clarify-'), 'ChatPane must route open planner questions through answer injections');
   assert(files.chat.includes("kind: 'steer'"), 'ChatPane must support steering injections');
   assert(files.chat.includes("kind: 'abort'"), 'ChatPane must support urgent abort injections');
+  assert(files.chat.includes('isStopControlText') && files.chat.includes("priority: 'urgent'"), 'ChatPane must translate natural stop requests into urgent abort injections');
+  assert(files.supervisor.includes('hasPendingUrgentAbort') && files.supervisor.includes('stopIfPlannerAborted'), 'Supervisor must let Chat urgent abort stop active planner subprocesses');
   assertNoControlWrites('ChatPane', files.chat);
   assert(!files.chat.includes('initial goal:') && !files.chat.includes('`goal: ${text}`'), 'ChatPane transcript must not repeat the initial goal as history');
 
@@ -124,11 +126,13 @@ async function main(): Promise<void> {
 
   assert(!files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && !files.chatAgent.includes('Recent Chat transcript'), 'Chat agent must not replay persisted Chat transcript into every prompt');
   assert(files.chatAgent.includes('resumeSessionId') && /'exec',\r?\n\s+'resume'/.test(files.chatAgent) && !files.chatAgent.includes("'--ephemeral'"), 'Codex Chat must persist and resume its own session instead of running ephemerally');
-  assert(files.chatAgent.includes("'--dangerously-bypass-approvals-and-sandbox'"), 'Codex Chat resume must use flags supported by codex exec resume');
-  assert(files.chatAgent.includes("'danger-full-access'") && !files.chatAgent.includes("'read-only'"), 'Codex Chat must support bounded SSH/network inspection instead of read-only-only sandboxing');
+  assert(files.chatAgent.includes("'--dangerously-bypass-approvals-and-sandbox'"), 'Codex Chat must use normal direct-work permissions for fresh and resumed turns');
+  assert(!files.chatAgent.includes("'read-only'") && !files.chatAgent.includes("'danger-full-access'"), 'Codex Chat must not run in a weaker Chat-only sandbox mode');
   assert(!files.chatAgent.includes("'--permission-mode',\n    'plan'"), 'Claude Chat must not be forced into planner-only mode');
   assert(!files.chatAgent.includes('normalizeChatTurn') && !files.chatAgent.includes('shouldKeepInChat'), 'Chat agent must not post-filter real UPDATE decisions');
-  assert(files.chatPrompt.includes('UPDATE is a handoff, not a status note') && files.chatPrompt.includes('If a lightweight direct task fails'), 'Chat prompt must raise the source UPDATE threshold instead of filtering after the fact');
+  assert(files.chatAgent.includes('normal native agent permissions') && files.chatAgent.includes('commits, pushes, and guarded release commands'), 'Codex Chat prompt must treat Chat as a normal direct-work agent');
+  assert(files.chatPrompt.includes('UPDATE is a handoff, not a status note') && files.chatPrompt.includes('If a bounded direct task fails'), 'Chat prompt must raise the source UPDATE threshold instead of filtering after the fact');
+  assert(files.chatPrompt.includes('commits, pushes, guarded release commands') && !files.chatPrompt.includes('Do not use `git push`'), 'Chat prompt must keep explicit commit/push/release work in Chat');
   assert(files.chatSession.includes('sessions?: Partial<Record<ChatSessionAgent') && files.chatSession.includes('paths.runtimeSelection') && files.chatSession.includes('readPersistedRuntimeSelection'), 'Chat sessions must store per-agent sessions and keep persisted TUI runtime in a separate file');
   assert(files.chatAgent.includes("writeChatSession(ctx.paths, 'codex'") && files.chatAgent.includes("agent: 'codex'"), 'Codex Chat must persist its session together with runtime metadata');
   assert(!files.chatAgent.includes('normalizeChatTurnResult'), 'Chat agent must trust real agent UPDATE decisions instead of normalizing them with local prompt hacks');
@@ -206,6 +210,7 @@ async function main(): Promise<void> {
   verifyRuntimeSettings();
   verifyChatFallback();
   verifyChatPlannerGuard();
+  verifyStopControlText();
   verifyBlankRunPlanningContext();
   verifyChatPromptCompression();
   verifyExecEventUsage();
@@ -345,6 +350,16 @@ function verifyChatPlannerGuard(): void {
     shouldStartPlannerFromBlankChat('可以，开始修复这个问题', { kind: 'add_requirement', text: 'Fix the discussed issue.' }),
     'blank-run planner guard must allow explicit start/fix turns'
   );
+}
+
+function verifyStopControlText(): void {
+  assert(isStopControlText('停一下'), 'Chinese stop control should be recognized');
+  assert(isStopControlText('停止执行'), 'Chinese stop execution control should be recognized');
+  assert(isStopControlText('stop'), 'English stop control should be recognized');
+  assert(isStopControlText('/abort'), 'slash abort should be recognized as stop control');
+  assert(!isStopControlText('不要停'), 'negated stop text must not stop the run');
+  assert(!isStopControlText('解释一下 stop policy'), 'discussion of stop policy must not stop the run');
+  assert(!isStopControlText('为什么停止了？'), 'questions about stopping must not stop the run');
 }
 
 function verifyBlankRunPlanningContext(): void {

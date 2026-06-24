@@ -55,3 +55,8 @@ fixture/metric-label-target/
 .wici/
 .thinkless/
 .thinkless*/
+GOAL.md
+PLAN.md
+ASSUMPTIONS.md
+ledger.jsonl
+baseline.json

@@ -1,6 +1,7 @@
 import { execa } from 'execa';
 import { readFile } from 'node:fs/promises';
 import https from 'node:https';
+import { resolve } from 'node:path';
 import { commandExists } from '../shared/commands.js';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, WiCiConfig } from '../shared/types.js';
@@ -246,6 +247,10 @@ function normalizeReleaseVersion(version: string): string {
 async function gitCheckoutStatus(runCommand: NonNullable<ThinklessSelfUpdateOptions['runCommand']>): Promise<{ isGit: boolean; dirty: boolean }> {
   const inside = await runCommand('git', ['-C', TOOL_ROOT, 'rev-parse', '--is-inside-work-tree']);
   if (inside.exitCode !== 0 || !inside.stdout.trim().includes('true')) return { isGit: false, dirty: false };
+  const topLevel = await runCommand('git', ['-C', TOOL_ROOT, 'rev-parse', '--show-toplevel']);
+  if (topLevel.exitCode !== 0 || resolve(topLevel.stdout.trim()) !== resolve(TOOL_ROOT)) {
+    return { isGit: false, dirty: false };
+  }
   const status = await runCommand('git', ['-C', TOOL_ROOT, 'status', '--porcelain']);
   return { isGit: true, dirty: status.exitCode !== 0 || status.stdout.trim().length > 0 };
 }

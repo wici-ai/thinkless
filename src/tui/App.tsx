@@ -363,6 +363,7 @@ export function App({
         contentWidth={inputContentWidth}
         inputPaused={runtimeSelectorOpen || resumeSelectorOpen}
         blankRun={blankRunChat}
+        hasExistingRun={Boolean(state.goal)}
         onPlanningRequested={(goal, planningContext) => launchSupervisor(goal, 'tui_chat', planningContext)}
         onInjection={() => launchSupervisor(undefined)}
         onResumeRequested={openResumeSelector}

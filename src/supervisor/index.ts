@@ -19,7 +19,8 @@ import {
   type PlannerClarificationResume,
   type PlannerQuestion,
   type PlannerRetryProgress,
-  type PlannerUsageProgress
+  type PlannerUsageProgress,
+  type PlannerInvocationResult
 } from './planner.js';
 import { nextExecutableStep, parsePlanSteps, readPlan, setPlanStepStatus } from './plan.js';
 import { appendLedger, lastAccepted, readLedger } from './ledger.js';
@@ -71,6 +72,7 @@ const PLANNER_CLARIFY_REPLY_PREFIX = 'planner-clarify-';
 const PLANNER_CLARIFY_WAIT_REASON = 'awaiting planner clarification';
 const STOP_ANSWER_WAIT_REASON = 'awaiting stop answer';
 const CONTINUATION_STALL_REPLY_PREFIX = 'continuation-stall-';
+const URGENT_ABORT_REASON = 'urgent abort injection';
 
 export interface SupervisorResult {
   state: 'STOP' | 'FAILED' | 'RUNNING';
@@ -217,6 +219,9 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     checkpoint = setup.checkpoint;
     let baseline = setup.baseline;
     if (!baseline) {
+      if (setup.waitReason === URGENT_ABORT_REASON) {
+        return { state: 'STOP', reason: URGENT_ABORT_REASON, iter: setup.checkpoint.iter };
+      }
       if (setup.waitReason !== 'PLAN_READY') {
         checkpoint = {
           ...checkpoint,
@@ -313,8 +318,11 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           withLessons(steerText ?? '', memoryText),
           config,
           (progress) => emitPlannerUsage(events, progress, { phase: 'plan_diff' }),
-          (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff' })
+          (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff' }),
+          () => hasPendingUrgentAbort(paths, checkpoint)
         );
+        const stoppedForAbort = await stopIfPlannerAborted(paths, goal, checkpoint, events, diff);
+        if (stoppedForAbort) return stoppedForAbort.result;
         const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
         if (waitingForPlanner) {
           return { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter };
@@ -534,8 +542,11 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           withLessons(steerText ?? '', memoryText),
           config,
           (progress) => emitPlannerUsage(events, progress, { phase: 'plan_diff', safe_point: 'evaluate' }),
-          (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff', safe_point: 'evaluate' })
+          (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff', safe_point: 'evaluate' }),
+          () => hasPendingUrgentAbort(paths, checkpoint)
         );
+        const stoppedForAbort = await stopIfPlannerAborted(paths, goal, checkpoint, events, diff);
+        if (stoppedForAbort) return stoppedForAbort.result;
         const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
         if (waitingForPlanner) {
           return { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter };
@@ -806,8 +817,11 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           replanText,
           config,
           (progress) => emitPlannerUsage(events, progress, { phase: 'stuck_replan', step_id: step.id }),
-          (retry) => emitPlannerRetry(events, retry, { phase: 'stuck_replan', step_id: step.id })
+          (retry) => emitPlannerRetry(events, retry, { phase: 'stuck_replan', step_id: step.id }),
+          () => hasPendingUrgentAbort(paths, checkpoint)
         );
+        const stoppedForAbort = await stopIfPlannerAborted(paths, goal, checkpoint, events, diff);
+        if (stoppedForAbort) return stoppedForAbort.result;
         const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
         if (waitingForPlanner) {
           return { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter };
@@ -1284,8 +1298,11 @@ async function continueDirectExhaustedPlan(
     steerText,
     config,
     (progress) => emitPlannerUsage(events, progress, { phase: 'direct_plan_continuation' }),
-    (retry) => emitPlannerRetry(events, retry, { phase: 'direct_plan_continuation' })
+    (retry) => emitPlannerRetry(events, retry, { phase: 'direct_plan_continuation' }),
+    () => hasPendingUrgentAbort(paths, checkpoint)
   );
+  const stoppedForAbort = await stopIfPlannerAborted(paths, goal, checkpoint, events, diff);
+  if (stoppedForAbort) return { goal: stoppedForAbort.goal, checkpoint: stoppedForAbort.checkpoint, continued: false, stop: stoppedForAbort.result };
   const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
   if (waitingForPlanner) {
     return { goal, checkpoint, continued: false, stop: { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter } };
@@ -1502,8 +1519,13 @@ async function applyDirectPendingInjections(
     steerText ?? '',
     config,
     (progress) => emitPlannerUsage(events, progress, { phase: 'direct_plan_diff' }),
-    (retry) => emitPlannerRetry(events, retry, { phase: 'direct_plan_diff' })
+    (retry) => emitPlannerRetry(events, retry, { phase: 'direct_plan_diff' }),
+    () => hasPendingUrgentAbort(paths, checkpoint)
   );
+  const stoppedForAbort = await stopIfPlannerAborted(paths, goal, checkpoint, events, diff);
+  if (stoppedForAbort) {
+    return { goal: stoppedForAbort.goal, checkpoint: stoppedForAbort.checkpoint, steerText, stop: stoppedForAbort.result };
+  }
   const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
   if (waitingForPlanner) {
     return { goal, checkpoint, steerText, stop: { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter } };
@@ -1839,12 +1861,17 @@ async function ensurePlanAndLegacyBaselineState(
         config,
         (progress) => emitPlannerUsage(events, progress, { phase: plannerResume ? 'initial_resume' : 'initial' }),
         (retry) => emitPlannerRetry(events, retry, { phase: plannerResume ? 'initial_resume' : 'initial' }),
-        plannerResume
+        plannerResume,
+        () => hasPendingUrgentAbort(paths, checkpoint)
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await events.emit('PLAN_FAILED', message, undefined, 'error');
       throw error;
+    }
+    if (result.aborted) {
+      const stopped = await stopForUrgentAbort(paths, goal, checkpoint, events);
+      return { baseline: null, waitReason: URGENT_ABORT_REASON, checkpoint: stopped.checkpoint, goal: stopped.goal };
     }
     if (result.needsInput) {
       checkpoint = {
@@ -1911,8 +1938,13 @@ async function ensurePlanAndLegacyBaselineState(
         `Planner clarification answer:\nQuestion: ${plannerResume.question ?? '(not recorded)'}\nAnswer:\n${plannerResume.answer}`,
         config,
         (progress) => emitPlannerUsage(events, progress, { phase: 'plan_diff_resume' }),
-        (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff_resume' })
+        (retry) => emitPlannerRetry(events, retry, { phase: 'plan_diff_resume' }),
+        () => hasPendingUrgentAbort(paths, checkpoint)
       );
+      const stoppedForAbort = await stopIfPlannerAborted(paths, goal, checkpoint, events, diff);
+      if (stoppedForAbort) {
+        return { baseline: null, waitReason: URGENT_ABORT_REASON, checkpoint: stoppedForAbort.checkpoint, goal: stoppedForAbort.goal };
+      }
       const waitingForPlanner = await stopForPlannerDiffClarification(paths, events, goal, checkpoint, diff);
       if (waitingForPlanner) {
         return { baseline: null, waitReason: PLANNER_CLARIFY_WAIT_REASON, checkpoint: waitingForPlanner, goal };
@@ -2623,6 +2655,62 @@ async function emitPlannerUsage(events: EventWriter, progress: PlannerUsageProgr
 
 async function emitPlannerRetry(events: EventWriter, retry: PlannerRetryProgress, extra: Record<string, unknown> = {}): Promise<void> {
   await events.emit('PLAN_RETRY_WAIT', transientRetryMessage('Planner', retry), { ...extra, ...retry }, 'warn');
+}
+
+async function hasPendingUrgentAbort(paths: ReturnType<typeof runPaths>, checkpoint: Checkpoint): Promise<boolean> {
+  const pending = await readPendingInjections(paths, checkpoint.drained_inbox, ['abort']);
+  return pending.some((injection) => injection.priority === 'urgent');
+}
+
+async function stopForUrgentAbort(paths: ReturnType<typeof runPaths>, goal: GoalFile, checkpoint: Checkpoint, events: EventWriter): Promise<{
+  goal: GoalFile;
+  checkpoint: Checkpoint;
+  result: SupervisorResult;
+}> {
+  const drained = await drainInbox(paths, checkpoint.drained_inbox, 8, ['abort']);
+  let nextGoal = goal;
+  let nextCheckpoint = checkpoint;
+  if (drained.length > 0) {
+    const applied = applyInjections(goal, drained);
+    nextGoal = applied.goal;
+    const drainedIds = injectionIds(drained);
+    nextCheckpoint = {
+      ...checkpoint,
+      drained_inbox: [...checkpoint.drained_inbox, ...drainedIds],
+      goal_version: nextGoal.version
+    };
+    await saveGoalFiles(paths, nextGoal);
+    await events.emit(
+      'INJECTION_DRAINED',
+      `Applied ${drainedIds.length} urgent abort injection(s)`,
+      drained.map((item) => ({ id: item.id, ids: item.coalesced_ids ?? [item.id], kind: item.kind }))
+    );
+  }
+  nextCheckpoint = {
+    ...nextCheckpoint,
+    supervisor_state: 'STOP',
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq,
+    ...(await exists(paths.plan) ? { plan_hash: await hashFile(paths.plan) } : {})
+  };
+  await saveCheckpoint(paths, nextCheckpoint);
+  await writeOutbox(paths, { kind: 'info', text: 'Urgent abort injection requested stop' });
+  await events.emit('STOP', 'Urgent abort injection requested stop', undefined, 'warn');
+  return {
+    goal: nextGoal,
+    checkpoint: nextCheckpoint,
+    result: { state: 'STOP', reason: URGENT_ABORT_REASON, iter: nextCheckpoint.iter }
+  };
+}
+
+async function stopIfPlannerAborted(
+  paths: ReturnType<typeof runPaths>,
+  goal: GoalFile,
+  checkpoint: Checkpoint,
+  events: EventWriter,
+  plannerResult: PlannerInvocationResult
+): Promise<{ goal: GoalFile; checkpoint: Checkpoint; result: SupervisorResult } | null> {
+  return plannerResult.aborted ? stopForUrgentAbort(paths, goal, checkpoint, events) : null;
 }
 
 function formatExecutorProgress(progress: ExecutorProgress): string {

@@ -71,6 +71,7 @@ async function main(): Promise<void> {
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree should be clean after direct preempt:\n${status}`);
+  await verifyDirectAbortStop();
 
   console.log(
     JSON.stringify(
@@ -79,12 +80,56 @@ async function main(): Promise<void> {
         target,
         injection_drained: injection.id,
         preempted_active_executor: true,
-        resumed_executor: true
+        resumed_executor: true,
+        urgent_abort_stops_executor: true
       },
       null,
       2
     )
   );
+}
+
+async function verifyDirectAbortStop(): Promise<void> {
+  await createSampleTarget(target, true);
+  const paths = runPaths(target);
+  const child = spawn(
+    process.execPath,
+    ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', target, '--goal', 'Verify urgent Chat abort stops an active direct Codex run.', '--max-iters', '2', '--mode', 'real'],
+    {
+      cwd: resolve('.'),
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        WICI_FAKE_TARGET: target,
+        WICI_FAKE_STATE_DIR: paths.wici,
+        WICI_PLANNER_AGENT: 'claude',
+        WICI_CODEX_EXECUTOR_BACKEND: 'exec'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  );
+
+  await waitForEvent(paths.events, 'EXECUTE_PROGRESS', 20_000);
+  await writeInjection(paths, {
+    kind: 'abort',
+    text: 'stop requested from Chat',
+    priority: 'urgent'
+  });
+
+  const exit = await waitForExit(child, 30_000);
+  assert(exit.code === 0, `direct abort run exited code=${exit.code} signal=${exit.signal}`);
+  const events = await readJsonLines<RunEvent>(paths.events);
+  assert(events.some((event) => event.type === 'EXECUTE_PREEMPTED'), 'urgent abort should preempt active executor');
+  assert(events.some((event) => event.type === 'STOP' && event.message.includes('Urgent abort')), 'urgent abort should stop the run');
+  assert(!events.some((event) => event.type === 'PLAN_DIFF_APPLIED'), 'urgent abort should not start planner diff');
+  const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
+  assert(ledger[0]?.status === 'preempted', `urgent abort should record preempted executor row: ${JSON.stringify(ledger)}`);
+  const argsLog = (await readFile(join(paths.wici, 'fake-codex-args.jsonl'), 'utf8'))
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { args: string[] });
+  const execCalls = argsLog.filter((entry) => entry.args[0] === 'exec');
+  assert(execCalls.length === 1, `urgent abort should not resume executor, got calls: ${JSON.stringify(execCalls)}`);
 }
 
 async function writeFakeClaude(): Promise<void> {

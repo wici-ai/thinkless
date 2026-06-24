@@ -7,6 +7,8 @@ export interface ClaudeStreamOptions {
   hardTimeoutMs: number;
   /** Called once per complete stdout line (newline-delimited), in order. */
   onLine?: (line: string) => void | Promise<void>;
+  /** Checked by the watchdog so callers can interrupt long planner/chat subprocesses. */
+  shouldAbort?: () => boolean | Promise<boolean>;
 }
 
 export interface ClaudeStreamResult {
@@ -15,7 +17,7 @@ export interface ClaudeStreamResult {
   all: string;
   exitCode: number | null;
   signal: NodeJS.Signals | null;
-  timeoutReason: 'idle' | 'hard' | null;
+  timeoutReason: 'idle' | 'hard' | 'aborted' | null;
 }
 
 /**
@@ -40,15 +42,16 @@ export async function runClaudeStreamProcess(
   let stdout = '';
   let stderr = '';
   let lineBuffer = '';
-  let timeoutReason: 'idle' | 'hard' | null = null;
+  let timeoutReason: 'idle' | 'hard' | 'aborted' | null = null;
   let lineChain = Promise.resolve();
+  let abortCheckChain = Promise.resolve();
   const startedAt = Date.now();
   let lastActivityAt = startedAt;
 
   const markActivity = () => {
     lastActivityAt = Date.now();
   };
-  const killForTimeout = (reason: 'idle' | 'hard') => {
+  const killForTimeout = (reason: 'idle' | 'hard' | 'aborted') => {
     if (timeoutReason) return;
     timeoutReason = reason;
     child.kill('SIGTERM');
@@ -69,6 +72,17 @@ export async function runClaudeStreamProcess(
   }, 5_000);
   watchdog.unref();
 
+  const abortWatchdog = options.shouldAbort
+    ? setInterval(() => {
+        if (options.shouldAbort && !timeoutReason) {
+          abortCheckChain = abortCheckChain.then(async () => {
+            if (!timeoutReason && await options.shouldAbort?.()) killForTimeout('aborted');
+          }).then(() => undefined, () => undefined);
+        }
+      }, 500)
+    : null;
+  abortWatchdog?.unref();
+
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => {
     markActivity();
@@ -88,6 +102,8 @@ export async function runClaudeStreamProcess(
     child.once('exit', (code, signal) => resolve({ code, signal }));
   });
   clearInterval(watchdog);
+  if (abortWatchdog) clearInterval(abortWatchdog);
+  await abortCheckChain;
 
   if (lineBuffer.length > 0) handleLine(lineBuffer);
   await lineChain;

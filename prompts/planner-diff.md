@@ -22,7 +22,9 @@ Before emitting artifacts, briefly self-interrogate the diff:
 2. Ask yourself what user questions those approaches seem to require.
 3. Resolve those questions from current `GOAL.md`, `PLAN.md`, `ASSUMPTIONS.md`, repository evidence, or a new Codex discovery step whenever possible.
 
-Return the smallest safe markdown update. Preserve existing step IDs and do not rewrite completed steps unless the new requirement explicitly makes them obsolete. Any newly added executable step must keep WiCi's discoverable step shape, preferably:
+Return the smallest safe markdown update, but do not blindly append. Treat PLAN.md as a maintainable current operating document, not an append-only chat log. If repeated updates have made it noisy, duplicated, contradictory, or hard to scan, compact it while applying the new requirement: preserve active user-facing requirements, completed-step evidence, still-relevant validation, and stable step IDs; remove superseded prose, duplicate notes, stale alternatives, and obsolete continuation chatter. Prefer one clear current path plus explicit fallback conditions over a long history of abandoned attempts.
+
+Preserve existing step IDs and do not rewrite completed steps unless the new requirement explicitly makes them obsolete or the surrounding prose is being compacted without changing their recorded meaning. Any newly added executable step must keep WiCi's discoverable step shape, preferably:
 
 ```markdown
 - [ ] S3 Short imperative step title
@@ -52,7 +54,7 @@ Use this shape:
 <the updated full PLAN.md>
 ```
 
-`PLAN.md` is required. `ASSUMPTIONS.md` is optional for small diffs that do not affect assumptions; when emitted, it must be the updated full file. `GOAL.md` is optional. If `.opt/checks.sh` or `.opt/measure.sh` must change, include those sections too. Do not emit JSON.
+`PLAN.md` is required and must be the updated full file. It may be shorter than the previous PLAN.md when compaction removes stale or duplicated material. `ASSUMPTIONS.md` is optional for small diffs that do not affect assumptions; when emitted, it must be the updated full file and should carry durable reasoning instead of stale PLAN.md history. `GOAL.md` is optional. If `.opt/checks.sh` or `.opt/measure.sh` must change, include those sections too. Do not emit JSON.
 
 If the new requirement cannot be incorporated safely without essential user information and the answer is unresolvable by current artifacts, repository evidence, planning-time tools, web or remote evidence, or a concrete Codex discovery step in `PLAN.md`, return:
 

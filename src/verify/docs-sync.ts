@@ -103,6 +103,7 @@ async function main(): Promise<void> {
   assert(plannerPrompt.includes('Brainstorm 2-3') && plannerPrompt.includes('Self-grill'), 'planner prompt must require AI-led self-interrogation');
   assert(plannerPrompt.includes('unresolvable by repository evidence'), 'planner prompt must narrow QUESTION to essential unresolvable unknowns');
   assert(plannerDiffPrompt.includes('living self-interrogation artifact') && plannerDiffPrompt.includes('override an adopted assumption'), 'planner-diff prompt must maintain assumption overrides');
+  assert(plannerDiffPrompt.includes('not blindly append') && plannerDiffPrompt.includes('compact it while applying the new requirement'), 'planner-diff prompt must govern PLAN.md bloat during updates');
   assert(readme.includes('Legacy optimizer compatibility checks'), 'README should explicitly separate legacy verifiers from core V1 checks');
   assert(readme.includes('WICI_LEGACY_OPTIMIZER=1'), 'README should document explicit opt-in for legacy optimizer behavior');
   assert(readme.includes('npm run verify:legacy-optimizer'), 'README should document the legacy optimizer aggregate verifier');
@@ -119,14 +120,18 @@ async function main(): Promise<void> {
     'README should document Chat-agent-gated blank-run planning'
   );
   assert(
-    readme.includes('bounded SSH/code-reading request can stay in Chat') &&
-      readme.includes('small self-contained edits without starting a run'),
+    readme.includes('Typing a direct stop request') && readme.includes('aborts an active planner subprocess'),
+    'README should document Chat stop control for planner/executor'
+  );
+  assert(
+    readme.includes('ordinary code changes, validation, commits, pushes, and guarded release commands can stay in Chat') &&
+      readme.includes('make ordinary code changes, validate, commit, push, or run guarded release commands without starting a run'),
     'README should document lightweight Chat work before planner/executor escalation'
   );
   assert(
-    readme.includes('Chat agents run with enough native CLI permission') &&
+    readme.includes('Chat agents run with normal native CLI permission') &&
       readme.includes('Claude Chat is not forced into plan-only mode') &&
-      readme.includes('Codex Chat uses a network-capable sandbox'),
+      readme.includes('Codex Chat bypasses approvals and sandboxing'),
     'README should document Chat direct-work permissions'
   );
   assert(

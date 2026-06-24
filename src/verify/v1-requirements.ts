@@ -169,6 +169,7 @@ async function main(): Promise<void> {
   assert(files.plannerClarification.includes('plan_diff_question') && files.plannerClarification.includes('plan_diff_resumed_session'), 'planner clarification verifier must cover hot-reload plan diff questions');
   assert(files.plannerDiffPrompt.includes('## QUESTION'), 'planner diff prompt must allow clarification through Chat');
   assert(files.plannerDiffPrompt.includes('living self-interrogation artifact') && files.plannerDiffPrompt.includes('override an adopted assumption'), 'planner diff prompt must maintain ASSUMPTIONS.md through steering');
+  assert(files.plannerDiffPrompt.includes('not blindly append') && files.plannerDiffPrompt.includes('compact it while applying the new requirement'), 'planner diff prompt must compact noisy PLAN.md updates instead of endlessly appending');
   assert(files.plannerDiffPrompt.includes('native plan-mode tools remain available'), 'planner diff prompt must preserve native Claude tools during hot reload planning');
   assert(files.plannerDiffPrompt.includes('- [ ] S3 Short imperative step title') && files.plannerDiffPrompt.includes('### S3'), 'planner diff prompt must preserve WiCi-discoverable step shape for added steps');
   assert(files.chat.includes('latestQuestion') && files.chat.includes("kind: 'answer'"), 'ChatPane must route open planner questions through chat answers');

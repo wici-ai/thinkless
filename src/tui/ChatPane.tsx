@@ -133,6 +133,7 @@ export function ChatInputBox({
   contentWidth = 80,
   inputPaused = false,
   blankRun = false,
+  hasExistingRun = false,
   onPlanningRequested,
   onInjection,
   onResumeRequested,
@@ -152,6 +153,7 @@ export function ChatInputBox({
   contentWidth?: number;
   inputPaused?: boolean;
   blankRun?: boolean;
+  hasExistingRun?: boolean;
   onPlanningRequested?: (text: string, planningContext?: string) => void;
   onInjection?: () => void;
   onResumeRequested?: () => void;
@@ -215,6 +217,16 @@ export function ChatInputBox({
 
     if (text === '/resume' || text.startsWith('/resume ')) {
       onResumeRequested?.();
+      return;
+    }
+
+    if (isStopControlText(text)) {
+      if (!hasExistingRun) {
+        return;
+      }
+      const reason = stopControlReason(text);
+      const injection = await writeInjection(paths, { kind: 'abort', text: reason, priority: 'urgent' });
+      onInjection?.();
       return;
     }
 
@@ -377,6 +389,7 @@ export function ChatPane({
         contentWidth={contentWidth}
         inputPaused={inputPaused}
         blankRun={blankRun}
+        hasExistingRun={Boolean(goal)}
         onPlanningRequested={onPlanningRequested}
         onInjection={onInjection}
         onResumeRequested={onResumeRequested}
@@ -537,4 +550,21 @@ function timestampSortKey(): string {
 
 function truncate(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, Math.max(0, limit - 3))}...` : text;
+}
+
+export function isStopControlText(text: string): boolean {
+  const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!normalized) return false;
+  if (/(不要|别|不用|不必|无需)\s*(停|停止|暂停|终止|取消|stop|abort|cancel|halt|pause)/i.test(normalized)) return false;
+  if (/(stop|abort|cancel|halt|pause)\s+(policy|word|words|reason|verdict|question|prompt|test|tests)\b/i.test(normalized)) return false;
+  if (/[?？]/.test(normalized) || /(为什么|为何|怎么|如何|是否|吗|么|how|why|what|whether)/i.test(normalized)) return false;
+  return (
+    /^\/?(stop|abort|cancel|halt|pause|quit)( now| please| this run| current run| the run| execution| planner| executor)?[.!。！]*$/i.test(normalized) ||
+    /^(停|停止|暂停|终止|取消|别跑了|不要跑了|先停|先暂停|停一下|暂停一下|停掉|中止)(吧|一下|当前任务|当前执行|执行|这个任务|这次运行|planner|executor|执行器|规划器)?[.!。！]*$/i.test(normalized)
+  );
+}
+
+function stopControlReason(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.startsWith('/') ? trimmed.slice(1).trim() || 'stop requested from Chat' : trimmed || 'stop requested from Chat';
 }

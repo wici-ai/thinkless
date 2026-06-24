@@ -124,7 +124,8 @@ async function main(): Promise<void> {
   assert(codexChatArgs[codexChatArgs.indexOf('--model') + 1] === 'gpt-5.5', 'Codex Chat must receive the fixed Codex model');
   assert(codexChatArgs.includes('-c') && codexChatArgs.includes('model_reasoning_effort="medium"'), 'Codex Chat must map effort to Codex config override');
   assert(!chatArgs.includes('--permission-mode') || chatArgs[chatArgs.indexOf('--permission-mode') + 1] !== 'plan', 'Chat agent must not be forced into Claude plan mode');
-  assert(codexChatArgs[codexChatArgs.indexOf('--sandbox') + 1] === 'danger-full-access', 'Codex Chat must allow bounded SSH/network inspection instead of sandbox-blocking it');
+  assert(codexChatArgs.includes('--dangerously-bypass-approvals-and-sandbox'), 'Codex Chat must run with normal direct-work permissions instead of approval-gated sandboxing');
+  assert(!codexChatArgs.includes('--sandbox'), 'Codex Chat must not use a weaker Chat-only sandbox mode');
   assert(!codexChatArgs.includes('-p') && !codexChatArgs.includes('--permission-mode'), 'Codex Chat must not receive Claude-only arguments');
   assert(!codexChatArgs.includes('--ephemeral'), 'Codex Chat must persist its own session instead of running ephemerally');
   assert(resumeCodexChatArgs[0] === 'exec' && resumeCodexChatArgs[1] === 'resume', `Codex Chat follow-up must resume its session: ${resumeCodexChatArgs.join(' ')}`);
@@ -151,12 +152,14 @@ async function main(): Promise<void> {
 
   const plannerPrompt = await readFile(promptPath('planner'), 'utf8');
   const chatPrompt = await readFile(promptPath('chat'), 'utf8');
-  assert(chatPrompt.includes('lightweight direct work'), 'Chat prompt must let Chat handle lightweight direct work');
-  assert(chatPrompt.includes('bounded read-only SSH or remote inspection'), 'Chat prompt must allow bounded read-only SSH or remote inspection');
-  assert(chatPrompt.includes('simple local edits'), 'Chat prompt must keep simple edits in Chat instead of forcing planner');
+  assert(chatPrompt.includes('normal native agent') && chatPrompt.includes('bounded direct work'), 'Chat prompt must treat Chat as a normal direct-work agent');
+  assert(chatPrompt.includes('bounded SSH or remote inspection'), 'Chat prompt must allow bounded SSH or remote inspection');
+  assert(chatPrompt.includes('ordinary local code edits'), 'Chat prompt must keep ordinary edits in Chat instead of forcing planner');
+  assert(chatPrompt.includes('commits, pushes, guarded release commands'), 'Chat prompt must not force explicit commit/push/release requests into planner');
   assert(chatPrompt.includes('UPDATE is a handoff, not a status note'), 'Chat prompt must raise the UPDATE threshold at the source');
   assert(chatPrompt.includes('Explicit limits like read-only'), 'Chat prompt must treat explicit read-only/no-push limits as Chat direct-work constraints');
-  assert(chatPrompt.includes('If a lightweight direct task fails'), 'Chat prompt must explain lightweight blockers without auto-handing off');
+  assert(chatPrompt.includes('If a bounded direct task fails'), 'Chat prompt must explain direct-work blockers without auto-handing off');
+  assert(!chatPrompt.includes('Do not use `git push`'), 'Chat prompt must not contain a Chat-only git push ban');
   assert(!chatPrompt.includes('do not run deployment, SSH, or benchmark work yourself'), 'Chat prompt must not route all SSH work to executor');
   assert(!plannerPrompt.includes('unit=ms n=<integer>'), 'planner prompt must not hardcode metric unit=ms');
   assert(!plannerPrompt.includes('unit=<goal metric unit>'), 'planner prompt must not require a fixed GOAL.md metric unit schema');
@@ -165,6 +168,9 @@ async function main(): Promise<void> {
   assert(!plannerPrompt.includes('WiCi treats `value` as the primary scalar'), 'planner prompt must not make WiCi value parsing part of fresh V1');
   assert(plannerPrompt.includes('## PLAN.md'), 'planner prompt must request markdown PLAN.md artifacts');
   assert(plannerPrompt.includes('## GOAL.md'), 'planner prompt must allow optional markdown GOAL.md artifacts');
+  assert(chatPrompt.includes('guarded release commands'), 'Chat prompt must keep bounded release commands in Chat instead of forcing planner');
+  const plannerDiffPrompt = await readFile(promptPath('planner-diff'), 'utf8');
+  assert(plannerDiffPrompt.includes('not blindly append') && plannerDiffPrompt.includes('compact it while applying the new requirement'), 'planner diff prompt must include PLAN.md bloat governance');
   assert(plannerPrompt.includes('Native Claude Code tools remain available in plan mode'), 'planner prompt must preserve native Claude plan-mode tools');
   assert(plannerPrompt.includes('web research or remote discovery'), 'planner prompt must allow planning-time web and remote discovery');
   assert(plannerPrompt.includes('Do not produce a second JSON representation'), 'planner prompt must prohibit JSON-as-plan');
@@ -351,6 +357,7 @@ async function main(): Promise<void> {
   await verifyCodexPlannerDoesNotReceiveClaudeArgs();
   await verifyInitialPlannerDoesNotInferBenchmark();
   await verifyPlanDiffUsage();
+  await verifyPlannerAbort();
   await verifyCodexChatAgent();
   await verifyClaudeChatFailureDetails();
 
@@ -375,12 +382,56 @@ async function main(): Promise<void> {
         forced_agent_models: true,
         default_iteration_budget_unbounded: true,
         codex_planner_no_claude_args_after_failure: true,
+        planner_abort: true,
         codex_resume_structured_output_flags: true
       },
       null,
       2
     )
   );
+}
+
+async function verifyPlannerAbort(): Promise<void> {
+  const target = resolve('fixture/planner-abort-target');
+  const fakeBin = resolve('fixture/planner-abort-bin');
+  await rm(target, { recursive: true, force: true });
+  await rm(fakeBin, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  await mkdir(fakeBin, { recursive: true });
+  const fakeClaude = fakeCommandPath(fakeBin, 'claude');
+  await writeFakeNodeCommand(
+    fakeClaude,
+    `#!/usr/bin/env node
+if (process.argv.includes('--version')) {
+  console.log('2.1.999 (Fake Claude Code)');
+  process.exit(0);
+}
+setInterval(() => undefined, 1000);
+`
+  );
+
+  const paths = runPaths(target);
+  await ensureRunDirs(paths);
+  const config = (await loadConfig('real')) as WiCiConfig;
+  config.tools.planner.command = fakeClaude;
+  const goal: GoalFile = {
+    run_id: 'planner-abort',
+    version: 1,
+    requirements: [{ id: 'R1', text: 'Verify planner abort control.', source: 'initial', status: 'active' }],
+    acceptance_criteria: [],
+    constraints: [],
+    metric: { name: 'planner-selected validation', direction: 'maximize', target: null, unit: 'score' },
+    budget: config.budget,
+    stop: config.stop
+  };
+  await atomicWriteJson(paths.goal, goal);
+  await writeFile(paths.goalDoc, '# GOAL\n\nVerify planner abort control.\n');
+  await writeFile(paths.plan, '# Plan\n\n- [ ] S1 Existing step\n');
+
+  const started = Date.now();
+  const result = await runPlanDiff(paths, goal, 'fake-planner-session', 'new requirement', config, undefined, undefined, () => true);
+  assert(result.aborted === true, `planner abort should return an aborted result: ${JSON.stringify(result)}`);
+  assert(Date.now() - started < 5_000, 'planner abort should not wait for normal planner timeouts');
 }
 
 async function verifyClaudeChatFailureDetails(): Promise<void> {
@@ -586,7 +637,8 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
       .split('\n')
       .map((line) => JSON.parse(line) as { args: string[] });
     assert(argsLog.length === 2, `Codex Chat should have two invocations: ${JSON.stringify(argsLog)}`);
-    assert(argsLog[0].args.includes('--sandbox') && argsLog[0].args.includes('danger-full-access'), `Codex Chat did not allow bounded network inspection: ${JSON.stringify(argsLog)}`);
+    assert(argsLog[0].args.includes('--dangerously-bypass-approvals-and-sandbox'), `Codex Chat did not allow normal direct work: ${JSON.stringify(argsLog)}`);
+    assert(!argsLog[0].args.includes('--sandbox'), `Codex Chat first call used a weaker Chat-only sandbox: ${JSON.stringify(argsLog[0].args)}`);
     assert(!argsLog[0].args.includes('--permission-mode') && !argsLog[1].args.includes('--permission-mode'), `Codex Chat received Claude-only args: ${JSON.stringify(argsLog)}`);
     assert(argsLog[0].args[0] === 'exec' && argsLog[0].args[1] !== 'resume', `first Codex Chat call should start a persistent session: ${JSON.stringify(argsLog[0].args)}`);
     assert(!argsLog[0].args.includes('--ephemeral'), `first Codex Chat call must not be ephemeral: ${JSON.stringify(argsLog[0].args)}`);

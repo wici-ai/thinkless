@@ -36,6 +36,7 @@ export type PlannerResponse = { kind: 'plan'; output: PlannerOutput } | { kind: 
 
 export type PlannerInvocationResult = ToolInvocationResult & {
   needsInput?: PlannerQuestion;
+  aborted?: boolean;
 };
 
 export interface PlannerUsageProgress {
@@ -46,6 +47,7 @@ export interface PlannerUsageProgress {
 }
 
 export type PlannerRetryProgress = TransientRetryInfo;
+export type PlannerAbortCheck = () => boolean | Promise<boolean>;
 
 export interface PlannerClarificationResume {
   sessionId?: string;
@@ -55,6 +57,30 @@ export interface PlannerClarificationResume {
 
 const PLANNER_IDLE_TIMEOUT_MS = 10 * 60_000;
 const PLANNER_HARD_TIMEOUT_MS = 60 * 60_000;
+const PLANNER_ABORT_MESSAGE = 'Planner stopped by urgent abort injection';
+
+class PlannerProcessAbortedError extends Error {
+  readonly stdout: string;
+
+  constructor(stdout = '') {
+    super(PLANNER_ABORT_MESSAGE);
+    this.name = 'PlannerProcessAbortedError';
+    this.stdout = stdout;
+  }
+}
+
+function isPlannerProcessAborted(error: unknown): error is PlannerProcessAbortedError {
+  return error instanceof PlannerProcessAbortedError;
+}
+
+function plannerAbortedResult(stdout = ''): PlannerInvocationResult {
+  return {
+    ok: false,
+    stdout,
+    error: PLANNER_ABORT_MESSAGE,
+    aborted: true
+  };
+}
 
 function requirementText(goal: GoalFile): string {
   return goal.requirements.filter((req) => req.status === 'active').map((req) => req.text).join('\n');
@@ -88,7 +114,8 @@ export async function runInitialPlanner(
   config: WiCiConfig,
   onProgress?: (progress: PlannerUsageProgress) => Promise<void>,
   onRetry?: (retry: PlannerRetryProgress) => Promise<void>,
-  resume?: PlannerClarificationResume
+  resume?: PlannerClarificationResume,
+  shouldAbort?: PlannerAbortCheck
 ): Promise<PlannerInvocationResult> {
   const available = await commandExists(config.tools.planner.command);
   const plannerAgent = runtimeAgentFromCommand(config.tools.planner.command, 'codex');
@@ -98,7 +125,7 @@ export async function runInitialPlanner(
     const goalText = await readPlannerGoalText(paths, goal);
     if (plannerAgent === 'codex' && available) {
       try {
-        const result = await runCodexInitialPlanner(paths, goalText, config, systemPrompt, safetyText, resume, undefined, config.tools.planner.command, onRetry);
+        const result = await runCodexInitialPlanner(paths, goalText, config, systemPrompt, safetyText, resume, undefined, config.tools.planner.command, onRetry, shouldAbort);
         if (result) return result;
       } catch (error) {
         throw error;
@@ -131,7 +158,8 @@ export async function runInitialPlanner(
         {
           cwd: paths.target,
           onProgress,
-          onRetry
+          onRetry,
+          shouldAbort
         }
       );
       await persistPlannerRaw(paths, resume ? 'initial-resume' : 'initial', result);
@@ -148,8 +176,9 @@ export async function runInitialPlanner(
       await materializePlannerOutput(paths, response.output);
       return { ok: true, sessionId: response.output.session_id, stdout: result.all ?? result.stdout };
     } catch (error) {
+      if (isPlannerProcessAborted(error)) return plannerAbortedResult(error.stdout);
       const fallback = plannerAgent === 'claude'
-        ? await runCodexInitialPlanner(paths, goalText, config, systemPrompt, safetyText, resume, error)
+        ? await runCodexInitialPlanner(paths, goalText, config, systemPrompt, safetyText, resume, error, 'codex', undefined, shouldAbort)
         : null;
       if (fallback) return fallback;
       if (config.tools.mode === 'real') throw error;
@@ -167,7 +196,8 @@ export async function runPlanDiff(
   newText: string,
   config: WiCiConfig,
   onProgress?: (progress: PlannerUsageProgress) => Promise<void>,
-  onRetry?: (retry: PlannerRetryProgress) => Promise<void>
+  onRetry?: (retry: PlannerRetryProgress) => Promise<void>,
+  shouldAbort?: PlannerAbortCheck
 ): Promise<PlannerInvocationResult> {
   const available = await commandExists(config.tools.planner.command);
   const plannerAgent = runtimeAgentFromCommand(config.tools.planner.command, 'codex');
@@ -180,7 +210,7 @@ export async function runPlanDiff(
     const goalText = await readPlannerGoalText(paths, goal);
     if (plannerAgent === 'codex' && available) {
       try {
-        const result = await runCodexPlanDiff(paths, goalText, plan, assumptions, newText, plannerSessionId, config, systemPrompt, safetyText, undefined, config.tools.planner.command, onRetry);
+        const result = await runCodexPlanDiff(paths, goalText, plan, assumptions, newText, plannerSessionId, config, systemPrompt, safetyText, undefined, config.tools.planner.command, onRetry, shouldAbort);
         if (result) return result;
       } catch (error) {
         throw error;
@@ -191,18 +221,18 @@ export async function runPlanDiff(
       if (!available) throw new Error(`Planner command not found: ${config.tools.planner.command}`);
       const result = await runPlannerProcess(
         config.tools.planner.command,
-          buildPlanDiffArgs({
-            newText,
-            currentPlan: plan,
-            currentAssumptions: assumptions,
-            goalText,
-            sessionId: plannerSessionId,
-            effort: config.tools.planner.effort,
+        buildPlanDiffArgs({
+          newText,
+          currentPlan: plan,
+          currentAssumptions: assumptions,
+          goalText,
+          sessionId: plannerSessionId,
+          effort: config.tools.planner.effort,
           model: config.tools.planner.model,
           systemPrompt,
           safetyText
         }),
-        { cwd: paths.target, onProgress, onRetry }
+        { cwd: paths.target, onProgress, onRetry, shouldAbort }
       );
       await persistPlannerRaw(paths, `diff-${Date.now()}`, result);
       const response = extractPlannerResponse(result.stdout);
@@ -218,8 +248,9 @@ export async function runPlanDiff(
       await materializePlannerOutput(paths, response.output);
       return { ok: true, sessionId: plannerSessionId, stdout: result.all ?? result.stdout };
     } catch (error) {
+      if (isPlannerProcessAborted(error)) return plannerAbortedResult(error.stdout);
       const fallback = plannerAgent === 'claude'
-        ? await runCodexPlanDiff(paths, goalText, plan, assumptions, newText, undefined, config, systemPrompt, safetyText, error)
+        ? await runCodexPlanDiff(paths, goalText, plan, assumptions, newText, undefined, config, systemPrompt, safetyText, error, 'codex', undefined, shouldAbort)
         : null;
       if (fallback) return fallback;
       if (config.tools.mode === 'real') throw error;
@@ -398,7 +429,8 @@ async function runCodexInitialPlanner(
   resume?: PlannerClarificationResume,
   previousError?: unknown,
   command = 'codex',
-  onRetry?: (retry: PlannerRetryProgress) => Promise<void>
+  onRetry?: (retry: PlannerRetryProgress) => Promise<void>,
+  shouldAbort?: PlannerAbortCheck
 ): Promise<PlannerInvocationResult | null> {
   if (!(await commandExists(command))) return null;
   const label = resume ? 'initial-resume-codex' : 'initial-codex';
@@ -408,7 +440,8 @@ async function runCodexInitialPlanner(
     model: codexPlannerModel(config),
     effort: codexPlannerEffort(config),
     sessionId: resumeSessionId && resumeSessionId !== 'stub-planner' ? resumeSessionId : undefined,
-    onRetry
+    onRetry,
+    shouldAbort
   });
 }
 
@@ -424,7 +457,8 @@ async function runCodexPlanDiff(
   safetyText: string,
   previousError?: unknown,
   command = 'codex',
-  onRetry?: (retry: PlannerRetryProgress) => Promise<void>
+  onRetry?: (retry: PlannerRetryProgress) => Promise<void>,
+  shouldAbort?: PlannerAbortCheck
 ): Promise<PlannerInvocationResult | null> {
   if (!(await commandExists(command))) return null;
   const prompt = buildCodexPlanDiffPrompt({ goalText, currentPlan, currentAssumptions, newText, systemPrompt, safetyText, previousError });
@@ -432,7 +466,8 @@ async function runCodexPlanDiff(
     model: codexPlannerModel(config),
     effort: codexPlannerEffort(config),
     sessionId: plannerSessionId && plannerSessionId !== 'stub-planner' ? plannerSessionId : undefined,
-    onRetry
+    onRetry,
+    shouldAbort
   });
 }
 
@@ -441,7 +476,7 @@ async function runCodexPlannerProcess(
   command: string,
   label: string,
   prompt: string,
-  runtime: { model?: string; effort?: string; sessionId?: string; onRetry?: (retry: PlannerRetryProgress) => Promise<void> }
+  runtime: { model?: string; effort?: string; sessionId?: string; onRetry?: (retry: PlannerRetryProgress) => Promise<void>; shouldAbort?: PlannerAbortCheck }
 ): Promise<PlannerInvocationResult | null> {
   const outputLastMessage = join(paths.artifacts, `${label}.last-message.md`);
   for (let attempt = 1; ; attempt += 1) {
@@ -458,10 +493,12 @@ async function runCodexPlannerProcess(
       {
         cwd: paths.target,
         idleTimeoutMs: PLANNER_IDLE_TIMEOUT_MS,
-        hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS
+        hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS,
+        shouldAbort: runtime.shouldAbort
       }
     );
     await persistPlannerRaw(paths, label, result);
+    if (result.timeoutReason === 'aborted') return plannerAbortedResult(result.all ?? result.stdout);
     if (result.timeoutReason) throw new Error(`Codex planner timed out (${result.timeoutReason})`);
     if (result.exitCode !== 0) {
       const combined = `${result.stdout}\n${result.stderr}\n${result.all}`;
@@ -604,6 +641,7 @@ async function runPlannerProcess(
     cwd: string;
     onProgress?: (progress: PlannerUsageProgress) => Promise<void>;
     onRetry?: (retry: PlannerRetryProgress) => Promise<void>;
+    shouldAbort?: PlannerAbortCheck;
   }
 ): Promise<{ stdout: string; all: string }> {
   for (let attempt = 1; ; attempt += 1) {
@@ -622,11 +660,15 @@ async function runPlannerProcess(
       cwd: options.cwd,
       idleTimeoutMs: PLANNER_IDLE_TIMEOUT_MS,
       hardTimeoutMs: PLANNER_HARD_TIMEOUT_MS,
-      onLine: emitProgress
+      onLine: emitProgress,
+      shouldAbort: options.shouldAbort
     });
     await progressChain;
 
     const stderr = result.stderr;
+    if (result.timeoutReason === 'aborted') {
+      throw new PlannerProcessAbortedError(result.all ?? result.stdout);
+    }
     if (result.timeoutReason === 'hard') {
       throw new Error(`Planner exceeded hard timeout after ${Math.round(PLANNER_HARD_TIMEOUT_MS / 1000)}s without producing PLAN.md artifacts`);
     }
