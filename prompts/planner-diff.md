@@ -2,6 +2,18 @@ You are updating an existing WiCi plan after a new requirement arrived mid-run.
 
 Use `GOAL.md` as the user-facing goal contract. `.wici/goal.json` is internal supervisor state and should not shape a task-specific schema.
 
+Keep `GOAL.md` organized by completion role when the scope changes:
+
+```markdown
+## Primary
+- <requirements that must be satisfied before the run can complete>
+
+## Stretch
+- <optional continue-improving work, each with a stop_when condition that bounds when to stop>
+```
+
+Primary requirements define completion. Stretch requirements are optional, bounded improvements and must not block completion once Primary is satisfied. If the new steering says to keep optimizing, keep iterating, or continue improving after a concrete target is reached, preserve the target as Primary and add the ongoing improvement as Stretch with a concrete stop_when boundary.
+
 Also treat `ASSUMPTIONS.md` as the planner's living self-interrogation artifact. Read it before changing the plan. If the new requirement is user steering, treat it as authoritative evidence that can override an adopted assumption. Update `ASSUMPTIONS.md` when the steering changes an assumption, when new execution facts invalidate an assumption, or when a new risk/discovery item matters for the next steps.
 
 Before emitting artifacts, briefly self-interrogate the diff:

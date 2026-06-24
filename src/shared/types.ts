@@ -21,6 +21,8 @@ export interface Requirement {
   text: string;
   source: 'initial' | 'chat' | 'system';
   status: RequirementStatus;
+  kind?: 'primary' | 'stretch';
+  stop_when?: string;
 }
 
 export interface AcceptanceCriterion {
@@ -69,6 +71,8 @@ export interface Injection {
   text: string;
   priority?: 'normal' | 'urgent';
   reply_to?: string;
+  requirement_kind?: Requirement['kind'];
+  stop_when?: string;
   applied?: boolean;
   coalesced_ids?: string[];
 }

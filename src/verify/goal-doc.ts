@@ -3,7 +3,9 @@ import { resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
-import type { CheckpointSnapshot, GoalFile } from '../shared/types.js';
+import type { CheckpointSnapshot, GoalFile, LedgerEntry, MetricStats } from '../shared/types.js';
+import { markSatisfiedPrimaryRequirements } from '../supervisor/goalInterrogation.js';
+import { renderGoalMarkdown } from '../supervisor/goalDoc.js';
 import { ignoreFixturePlannerOpt } from './fixture-git.js';
 
 const target = resolve('fixture/goal-doc-target');
@@ -43,6 +45,19 @@ async function main(): Promise<void> {
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree dirty after goal doc run:\n${status}`);
 
+  const modeledGoal = sampleGoal();
+  const rendered = renderGoalMarkdown(modeledGoal);
+  assert(rendered.includes('## Primary'), 'GOAL.md must render primary requirements separately');
+  assert(rendered.includes('## Stretch'), 'GOAL.md must render stretch requirements separately');
+  assert(rendered.includes('R1: Ship the fixed deliverable'), 'GOAL.md missing primary requirement text');
+  assert(rendered.includes('R2 (stop-when: no further measurable improvement): Keep polishing within bounds'), 'GOAL.md missing stretch stop_when text');
+
+  const satisfied = markSatisfiedPrimaryRequirements(modeledGoal, [ledgerEntry(1, 'keep', metric(10))]);
+  assert(satisfied, 'target-met ledger should mark active primary requirements satisfied');
+  assert(satisfied.version === modeledGoal.version + 1, 'marking requirements should bump goal version');
+  assert(satisfied.requirements.find((req) => req.id === 'R1')?.status === 'done', 'primary requirement should be marked done');
+  assert(satisfied.requirements.find((req) => req.id === 'R2')?.status === 'active', 'stretch requirement should remain active');
+
   console.log(
     JSON.stringify(
       {
@@ -50,12 +65,60 @@ async function main(): Promise<void> {
         target,
         goal_doc: 'GOAL.md',
         internal_goal_json: '.wici/goal.json',
-        snapshot_preserved_goal_doc: true
+        snapshot_preserved_goal_doc: true,
+        primary_stretch_rendered: true,
+        primary_marked_satisfied: true
       },
       null,
       2
     )
   );
+}
+
+function sampleGoal(): GoalFile {
+  return {
+    run_id: 'goal-doc-primary-stretch',
+    version: 1,
+    requirements: [
+      { id: 'R1', text: 'Ship the fixed deliverable', source: 'initial', status: 'active', kind: 'primary' },
+      {
+        id: 'R2',
+        text: 'Keep polishing within bounds',
+        source: 'chat',
+        status: 'active',
+        kind: 'stretch',
+        stop_when: 'no further measurable improvement'
+      }
+    ],
+    acceptance_criteria: [{ id: 'A1', text: 'target metric is met', check: 'read ledger' }],
+    constraints: [],
+    metric: { name: 'quality score', direction: 'maximize', target: 10, unit: 'score' },
+    budget: { max_iters: 0, max_cost_usd: 0, deadline: null },
+    stop: { tau: 0.01, K: 3, N: 4, mode: 'auto' }
+  };
+}
+
+function metric(value: number): MetricStats {
+  return { value, p50: value, p95: value, p99: value, unit: 'score', n: 5 };
+}
+
+function ledgerEntry(iter: number, status: LedgerEntry['status'], entryMetric: MetricStats): LedgerEntry {
+  return {
+    id: `iter-${iter}`,
+    ts: new Date().toISOString(),
+    iter,
+    step_id: `S${iter}`,
+    commit: null,
+    hypothesis: `step ${iter}`,
+    metric: entryMetric,
+    baseline: null,
+    delta_pct: 0,
+    confidence: 'fixture',
+    cost: { wall_ms: 1, tokens_input: 0, tokens_output: 0, usd: 0 },
+    guards: { step_done: status === 'keep', tests_pass: status === 'keep' },
+    status,
+    reflection: status
+  };
 }
 
 async function git(args: string[]): Promise<string> {

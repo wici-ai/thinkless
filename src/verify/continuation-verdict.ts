@@ -21,6 +21,12 @@ async function main(): Promise<void> {
     assert(targetMet.decision === 'complete', `expected deterministic target-met completion, got ${JSON.stringify(targetMet)}`);
     assert(targetMet.source === 'deterministic', `target-met completion should not call an LLM, got ${JSON.stringify(targetMet)}`);
 
+    const primaryDoneGoal = goal('primary-done-goal');
+    primaryDoneGoal.requirements[0].status = 'done';
+    const primaryDone = await directContinuationVerdict(paths, primaryDoneGoal, [], config('stub', 'codex'));
+    assert(primaryDone.decision === 'complete', `expected deterministic primary completion, got ${JSON.stringify(primaryDone)}`);
+    assert(primaryDone.source === 'deterministic', `primary completion should not call an LLM, got ${JSON.stringify(primaryDone)}`);
+
     const plateau = await directContinuationVerdict(
       paths,
       goal('plateau-goal', { target: null, tau: 0.01, N: 2, K: 3 }),
@@ -60,6 +66,7 @@ async function main(): Promise<void> {
           explicit_complete_stops: true,
           explicit_continue_continues: true,
           deterministic_target_met_stops: true,
+          deterministic_primary_done_stops: true,
           deterministic_plateau_escalates: true,
           codex_planner_verdict_supported: true,
           ambiguous_falls_back_to_continue: true,
@@ -86,7 +93,7 @@ if (args.includes('--version')) {
   process.exit(0);
 }
 const prompt = args[args.indexOf('-p') + 1] || '';
-if (!prompt.includes('Bias toward') || !prompt.includes('ASSUMPTIONS.md')) {
+if (!prompt.includes('Bias toward') || !prompt.includes('ASSUMPTIONS.md') || !prompt.includes('active Primary requirement')) {
   console.error('completion gate prompt missing required context');
   process.exit(2);
 }
@@ -126,7 +133,7 @@ if (outputIndex < 0 || !args[outputIndex + 1]) {
   process.exit(2);
 }
 const prompt = args[args.length - 1] || '';
-if (!prompt.includes('Bias toward') || !prompt.includes('ASSUMPTIONS.md')) {
+if (!prompt.includes('Bias toward') || !prompt.includes('ASSUMPTIONS.md') || !prompt.includes('active Primary requirement')) {
   console.error('completion gate prompt missing required context');
   process.exit(2);
 }

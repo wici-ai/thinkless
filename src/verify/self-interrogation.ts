@@ -39,8 +39,12 @@ async function main(): Promise<void> {
     assert(plannerPrompt.includes('Self-grill'), 'planner prompt must require self-grilling');
     assert(plannerPrompt.includes('ASSUMPTIONS.md'), 'planner prompt must request ASSUMPTIONS.md');
     assert(plannerPrompt.includes('unresolvable by repository evidence'), 'planner prompt must narrow QUESTION to unresolvable essentials');
+    assert(plannerPrompt.includes('## Primary') && plannerPrompt.includes('## Stretch'), 'planner prompt must model primary and stretch goal scope');
+    assert(plannerPrompt.includes('stop_when') && plannerPrompt.includes('continue improving'), 'planner prompt must bound continue-improving stretch scope');
     assert(diffPrompt.includes('living self-interrogation artifact'), 'planner-diff prompt must maintain ASSUMPTIONS.md');
     assert(diffPrompt.includes('authoritative evidence that can override an adopted assumption'), 'planner-diff prompt must treat steering as an assumption override');
+    assert(diffPrompt.includes('## Primary') && diffPrompt.includes('## Stretch'), 'planner-diff prompt must preserve primary/stretch goal scope');
+    assert(diffPrompt.includes('stop_when') && diffPrompt.includes('continue improving'), 'planner-diff prompt must bound continue-improving stretch scope');
 
     console.log(
       JSON.stringify(

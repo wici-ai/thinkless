@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { appendJsonLine, exists, readJsonLines } from '../shared/atomic.js';
 import type { GoalFile, GoalInterrogationEntry, LedgerEntry } from '../shared/types.js';
 import type { RunPaths } from '../shared/paths.js';
-import { isPlannerSelectedMetricName } from './metricFormat.js';
+import { isPlannerSelectedMetricName, primaryMetricValue } from './metricFormat.js';
 
 export function goalInterrogationPeriod(goal: GoalFile): number {
   return Math.max(2, goal.stop.N || 0);
@@ -21,6 +21,17 @@ export async function maybeInterrogateGoal(paths: RunPaths, goal: GoalFile, ledg
   const entry = buildGoalInterrogation(goal, ledger, iter, validationChecks);
   await appendJsonLine(paths.goalInterrogations, entry);
   return entry;
+}
+
+export function markSatisfiedPrimaryRequirements(goal: GoalFile, ledger: LedgerEntry[]): GoalFile | null {
+  if (!isGoalTargetMet(goal, ledger)) return null;
+  let changed = false;
+  const requirements = goal.requirements.map((requirement) => {
+    if ((requirement.kind ?? 'primary') !== 'primary' || requirement.status !== 'active') return requirement;
+    changed = true;
+    return { ...requirement, status: 'done' as const };
+  });
+  return changed ? { ...goal, version: goal.version + 1, requirements } : null;
 }
 
 export async function readGoalInterrogations(paths: RunPaths): Promise<GoalInterrogationEntry[]> {
@@ -89,4 +100,11 @@ function goalConcerns(active: GoalFile['requirements'], recent: LedgerEntry[], v
     concerns.push('safety: recent public attempt was rejected by hidden validation; do not optimize against hidden details');
   }
   return concerns;
+}
+
+function isGoalTargetMet(goal: GoalFile, ledger: LedgerEntry[]): boolean {
+  const metric = [...ledger].reverse().find((entry) => entry.status === 'keep' && entry.metric)?.metric;
+  if (!metric || goal.metric.target === undefined || goal.metric.target === null) return false;
+  const value = primaryMetricValue(metric);
+  return goal.metric.direction === 'minimize' ? value <= goal.metric.target : value >= goal.metric.target;
 }

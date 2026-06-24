@@ -92,6 +92,13 @@ export async function directContinuationVerdict(
   };
 
   const analysis = buildStopAnalysis(goal, ledger);
+  if (allPrimaryRequirementsSatisfied(goal)) {
+    return {
+      decision: 'complete',
+      reason: 'Deterministic completion: all primary requirements are satisfied.',
+      source: 'deterministic'
+    };
+  }
   if (analysis.target_met) {
     return {
       decision: 'complete',
@@ -374,6 +381,11 @@ function directContinuationVerdictFromCandidate(candidate: unknown): { decision?
   if (typeof candidate.result !== 'string') return null;
   const parsed = parseJsonObjectFromText(candidate.result);
   return parsed ? directContinuationVerdictFromCandidate(parsed) : null;
+}
+
+function allPrimaryRequirementsSatisfied(goal: GoalFile): boolean {
+  const primary = goal.requirements.filter((requirement) => (requirement.kind ?? 'primary') === 'primary');
+  return primary.length > 0 && primary.every((requirement) => requirement.status === 'done' || requirement.status === 'dropped');
 }
 
 function codexTextFromJsonLines(raw: string): string {

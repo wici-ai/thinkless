@@ -29,8 +29,11 @@ export function renderGoalMarkdown(goal: GoalFile): string {
     `Version: v${goal.version}`,
     `Run: ${goal.run_id}`,
     '',
-    '## Requirements',
-    ...goal.requirements.map((req) => `- [${req.status}] ${req.id}: ${req.text}`),
+    '## Primary',
+    ...renderRequirements(goal.requirements.filter((req) => (req.kind ?? 'primary') === 'primary')),
+    '',
+    '## Stretch',
+    ...renderRequirements(goal.requirements.filter((req) => req.kind === 'stretch')),
     ...acceptanceLines,
     '',
     '## Validation',
@@ -54,6 +57,14 @@ export function renderGoalMarkdown(goal: GoalFile): string {
     '- WiCi keeps .wici/goal.json only as internal derived state for durable execution.',
     '- Deployment, SSH, model discovery, benchmark setup, and validation belong in PLAN.md and optional .opt scripts, then Codex executes them inside the loop.'
   ].join('\n')}\n`;
+}
+
+function renderRequirements(requirements: GoalFile['requirements']): string[] {
+  if (requirements.length === 0) return ['- none'];
+  return requirements.map((req) => {
+    const stopWhen = req.stop_when ? ` (stop-when: ${req.stop_when})` : '';
+    return `- [${req.status}] ${req.id}${stopWhen}: ${req.text}`;
+  });
 }
 
 function renderConstraintMarkdown(constraint: string): string {

@@ -21,6 +21,11 @@ async function main(): Promise<void> {
     planner: await readFile('src/supervisor/planner.ts', 'utf8'),
     plannerPrompt: await readFile('prompts/planner.md', 'utf8'),
     plannerDiffPrompt: await readFile('prompts/planner-diff.md', 'utf8'),
+    continueVerdictPrompt: await readFile('prompts/continue-verdict.md', 'utf8'),
+    sharedTypes: await readFile('src/shared/types.ts', 'utf8'),
+    goalDocSource: await readFile('src/supervisor/goalDoc.ts', 'utf8'),
+    goalInterrogation: await readFile('src/supervisor/goalInterrogation.ts', 'utf8'),
+    stopPolicy: await readFile('src/supervisor/stop.ts', 'utf8'),
     executor: await readFile('src/supervisor/executor.ts', 'utf8'),
     supervisor: await readFile('src/supervisor/index.ts', 'utf8'),
     selfupdate: await readFile('src/supervisor/selfupdate.ts', 'utf8'),
@@ -143,6 +148,15 @@ async function main(): Promise<void> {
   assert(files.plannerPrompt.includes('Treat research, debugging, and fallback strategy as planner/executor responsibilities'), 'planner prompt must own research/debug/fallback behavior instead of requiring Chat boilerplate');
   assert(files.plannerPrompt.includes('## ASSUMPTIONS.md') && files.plannerPrompt.includes('Self-grill'), 'planner prompt must require self-interrogation and ASSUMPTIONS.md');
   assert(files.plannerPrompt.includes('unresolvable by repository evidence'), 'planner prompt must reserve QUESTION for essential unresolvable unknowns');
+  assert(files.plannerPrompt.includes('## Primary') && files.plannerPrompt.includes('## Stretch'), 'planner prompt must ask for primary/stretch goal sections');
+  assert(files.plannerPrompt.includes('stop_when') && files.plannerPrompt.includes('continue improving'), 'planner prompt must bound continuing improvement as stretch scope');
+  assert(files.plannerDiffPrompt.includes('## Primary') && files.plannerDiffPrompt.includes('## Stretch'), 'planner-diff prompt must preserve primary/stretch goal sections');
+  assert(files.continueVerdictPrompt.includes('every active Primary requirement') && files.continueVerdictPrompt.includes('Stretch requirements as optional bounded improvement work'), 'continuation verdict must complete on primary requirements and bound stretch work');
+  assert(files.sharedTypes.includes("kind?: 'primary' | 'stretch'") && files.sharedTypes.includes('stop_when?: string'), 'requirements must support primary/stretch kind and stop_when');
+  assert(files.sharedTypes.includes("requirement_kind?: Requirement['kind']") && files.sharedTypes.includes('stop_when?: string'), 'injections must carry requirement kind and stop_when');
+  assert(files.goalDocSource.includes("'## Primary'") && files.goalDocSource.includes("'## Stretch'") && files.goalDocSource.includes('stop-when:'), 'GOAL.md rendering must separate primary and stretch requirements with stop-when');
+  assert(files.goalInterrogation.includes('markSatisfiedPrimaryRequirements') && files.goalInterrogation.includes("status: 'done' as const"), 'goal interrogation must mark satisfied primary requirements done');
+  assert(files.stopPolicy.includes('allPrimaryRequirementsSatisfied') && files.stopPolicy.includes('all primary requirements are satisfied'), 'direct completion gate must stop when primary requirements are satisfied');
   assert(files.plannerPrompt.includes('- [ ] S1 Short imperative step title') && files.plannerPrompt.includes('### S1'), 'planner prompt must require WiCi-discoverable executable step lines');
   assert(files.plannerPrompt.includes('Do not create scripts just to satisfy WiCi'), 'planner prompt must keep validation scripts optional');
   assert(files.plannerPrompt.includes('Fresh V1 does not require `.opt/measure.sh` to follow a WiCi metric schema'), 'planner prompt must not force a fresh V1 measurement schema');

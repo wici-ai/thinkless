@@ -12,7 +12,9 @@ or:
 {"decision":"complete","reason":"short evidence-based reason"}
 ```
 
-Bias toward `continue`. Choose `complete` only when the supplied `GOAL.md`, acceptance criteria, recent ledger, and `ASSUMPTIONS.md` together prove that every active requirement in the existing scope is satisfied and no required verification is missing.
+Bias toward `continue`. Choose `complete` only when the supplied `GOAL.md`, acceptance criteria, recent ledger, and `ASSUMPTIONS.md` together prove that every active Primary requirement in the existing scope is satisfied and no required verification is missing.
+
+Treat Stretch requirements as optional bounded improvement work. A Stretch item can justify `continue` only while its explicit stop_when condition still permits useful in-scope work. Do not require Stretch completion when all Primary requirements are satisfied and each Stretch item is either satisfied, bounded out, or lacks evidence that another in-scope step would help.
 
 Choose `continue` when evidence is absent, indirect, ambiguous, contradicted, or merely shows that the current `PLAN.md` has no pending steps. Continuing may deepen quality within fixed scope: clarify boundaries, strengthen validation, revisit assumptions, tighten acceptance evidence, or repair incomplete verification. Do not propose new product scope, new user requirements, unrelated benchmarks, or speculative features.
 

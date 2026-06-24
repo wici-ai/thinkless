@@ -47,7 +47,7 @@ import { markOutboxAnswered, readOutbox, writeOutbox } from './outbox.js';
 import { appendLessonFromLedger, formatLessonsForPrompt, readRecentLessons } from './lessons.js';
 import { runScorerSelftest } from './scorerSelftest.js';
 import { combinePromptMemory, readContextForPrompt, writeContextSummary } from './context.js';
-import { maybeInterrogateGoal } from './goalInterrogation.js';
+import { markSatisfiedPrimaryRequirements, maybeInterrogateGoal } from './goalInterrogation.js';
 import { ensureGoalDoc, saveGoalFiles } from './goalDoc.js';
 import { readBenchmarkForPrompt, readBenchmarkManifest } from './benchmark.js';
 import {
@@ -713,6 +713,18 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       await saveCheckpoint(paths, checkpoint);
 
       const ledger = await readLedger(paths);
+      const satisfiedGoal = markSatisfiedPrimaryRequirements(goal, ledger);
+      if (satisfiedGoal) {
+        const requirementIds = goal.requirements
+          .filter((requirement) => (requirement.kind ?? 'primary') === 'primary' && requirement.status === 'active')
+          .map((requirement) => requirement.id);
+        goal = satisfiedGoal;
+        await saveGoalFiles(paths, goal);
+        await events.emit('GOAL_REQUIREMENTS_SATISFIED', 'Marked primary requirements done after target metric was met', {
+          goal_version: goal.version,
+          requirement_ids: requirementIds
+        });
+      }
       const goalCheck = await maybeInterrogateGoal(paths, goal, ledger);
       if (goalCheck) {
         await events.emit('GOAL_INTERROGATION', `Checked iteration ${goalCheck.iter} behavior against GOAL.md`, {
@@ -1031,6 +1043,18 @@ async function runDirectPlanExecution(
       });
       await appendLedger(paths, ledgerEntry);
       const ledgerAfterIteration = await readLedger(paths);
+      const satisfiedGoal = markSatisfiedPrimaryRequirements(goal, ledgerAfterIteration);
+      if (satisfiedGoal) {
+        const requirementIds = goal.requirements
+          .filter((requirement) => (requirement.kind ?? 'primary') === 'primary' && requirement.status === 'active')
+          .map((requirement) => requirement.id);
+        goal = satisfiedGoal;
+        await saveGoalFiles(paths, goal);
+        await events.emit('GOAL_REQUIREMENTS_SATISFIED', 'Marked primary requirements done after target metric was met', {
+          goal_version: goal.version,
+          requirement_ids: requirementIds
+        });
+      }
       const goalCheck = await maybeInterrogateGoal(paths, goal, ledgerAfterIteration);
       if (goalCheck) {
         await events.emit('GOAL_INTERROGATION', 'Periodic direct-path check compared GOAL.md with recent execution history', goalCheck, goalCheck.aligned ? 'info' : 'warn');

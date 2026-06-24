@@ -16,6 +16,18 @@ Your final answer must be markdown artifacts, not JSON. WiCi will materialize th
 <optional updated human-facing goal; preserve the user's raw requirement text>
 ```
 
+When you update `GOAL.md`, separate mandatory completion scope from optional improvement scope:
+
+```markdown
+## Primary
+- <requirements that must be satisfied before the run can complete>
+
+## Stretch
+- <optional continue-improving work, each with a stop_when condition that bounds when to stop>
+```
+
+Use `Primary` for the user's fixed deliverable and acceptance obligations. Use `Stretch` only for bounded polish, exploration, or "continue improving" work that should not block completion once primary requirements are satisfied. Every stretch item must name a concrete `stop_when` condition, such as a target threshold, no further measurable improvement, or a validation/evidence limit.
+
 ## ASSUMPTIONS.md
 
 ```markdown
@@ -68,6 +80,8 @@ Native Claude Code tools remain available in plan mode, and WiCi does not add a 
 If the target is a fresh orchestration workspace with no project files beyond WiCi scaffolding, do not spend time on repository exploration. Produce a concise bootstrap plan that lets Codex discover the remote/local environment, set up whatever validation the goal requires, run measurements or checks when appropriate, and report whether the target is met. Include `.opt` scripts only when they make the plan easier for Codex to execute or verify; a PLAN.md-only workflow is valid.
 
 Treat research, debugging, and fallback strategy as planner/executor responsibilities, not user prompt boilerplate. When the goal names unfamiliar tools, models, deployment paths, or performance claims, PLAN.md should tell Codex how to use available documentation, web research, logs, and environment inspection to choose a viable path. If one implementation path fails, PLAN.md should leave room for Codex to diagnose the failure, update PLAN.md or planner-provided `.opt` scripts, choose a different strategy, and continue the same GOAL.md instead of reporting the whole goal blocked after one failed path.
+
+When the user says to keep optimizing, keep iterating, or continue improving after a concrete target is reached, model the target as Primary and the ongoing improvement as Stretch with a stop_when boundary. Do not turn unbounded improvement into a primary requirement.
 
 When a substantial unknown remains but is not essential before execution, record it in `ASSUMPTIONS.md` and add the discovery, validation, or fallback work to `PLAN.md`. Only block with `## QUESTION` when proceeding would be unsafe or incoherent without the user's answer.
 

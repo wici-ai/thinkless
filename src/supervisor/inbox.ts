@@ -140,7 +140,9 @@ export function applyInjections(goal: GoalFile, injections: Injection[]): { goal
         id: `R${next.requirements.length + 1}`,
         text: injection.text,
         source: 'chat',
-        status: 'active'
+        status: 'active',
+        kind: injection.requirement_kind ?? 'primary',
+        ...(injection.stop_when ? { stop_when: injection.stop_when } : {})
       });
       steer.push(injection.text);
     } else if (injection.kind === 'drop_requirement') {
