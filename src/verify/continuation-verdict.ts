@@ -2,7 +2,7 @@ import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
-import type { GoalFile, WiCiConfig } from '../shared/types.js';
+import type { GoalFile, LedgerEntry, MetricStats, WiCiConfig } from '../shared/types.js';
 import { directContinuationVerdict } from '../supervisor/stop.js';
 
 const target = resolve('fixture/continuation-verdict-target');
@@ -16,6 +16,19 @@ async function main(): Promise<void> {
     await createSampleTarget(target, true);
     const paths = runPaths(target);
     await writeFile(paths.assumptions, '# Assumptions\n\n## Approaches considered\n- Verify before stopping.\n');
+
+    const targetMet = await directContinuationVerdict(paths, goal('target-met-goal', { target: 10 }), [ledgerEntry(1, 'keep', metric(12), 0.2)], config('stub', 'codex'));
+    assert(targetMet.decision === 'complete', `expected deterministic target-met completion, got ${JSON.stringify(targetMet)}`);
+    assert(targetMet.source === 'deterministic', `target-met completion should not call an LLM, got ${JSON.stringify(targetMet)}`);
+
+    const plateau = await directContinuationVerdict(
+      paths,
+      goal('plateau-goal', { target: null, tau: 0.01, N: 2, K: 3 }),
+      [ledgerEntry(1, 'keep', metric(5), 0), ledgerEntry(2, 'reject', null, null), ledgerEntry(3, 'reject', null, null)],
+      config('stub', 'codex')
+    );
+    assert(plateau.decision === 'continue' && plateau.source === 'fallback', `expected deterministic plateau to route through escalation fallback, got ${JSON.stringify(plateau)}`);
+    assert(plateau.reason.includes('Deterministic continuation stall'), `unexpected plateau reason: ${plateau.reason}`);
 
     await writeFile(paths.goalDoc, '# complete-goal\n\nAll acceptance evidence is present.\n');
     const complete = await directContinuationVerdict(paths, goal('complete-goal'), [], config('auto', 'claude'));
@@ -46,6 +59,8 @@ async function main(): Promise<void> {
           ok: true,
           explicit_complete_stops: true,
           explicit_continue_continues: true,
+          deterministic_target_met_stops: true,
+          deterministic_plateau_escalates: true,
           codex_planner_verdict_supported: true,
           ambiguous_falls_back_to_continue: true,
           stub_falls_back_to_continue: true
@@ -130,16 +145,39 @@ process.exit(0);
   await chmod(fakeCodex, 0o755);
 }
 
-function goal(text: string): GoalFile {
+function goal(text: string, options: { target?: number | null; tau?: number; K?: number; N?: number } = {}): GoalFile {
   return {
     run_id: `continuation-${text}`,
     version: 1,
     requirements: [{ id: 'R1', text, source: 'initial', status: 'active' }],
     acceptance_criteria: [{ id: 'A1', text: 'evidence recorded', check: 'inspect ledger and artifacts' }],
     constraints: [],
-    metric: { name: 'planner selected validation', direction: 'maximize', target: null, unit: 'score' },
+    metric: { name: 'planner selected validation', direction: 'maximize', target: options.target ?? null, unit: 'score' },
     budget: { max_iters: 0, max_cost_usd: 0, deadline: null },
-    stop: { tau: 0.01, K: 3, N: 4, mode: 'auto' }
+    stop: { tau: options.tau ?? 0.01, K: options.K ?? 3, N: options.N ?? 4, mode: 'auto' }
+  };
+}
+
+function metric(value: number): MetricStats {
+  return { value, p50: value, p95: value, p99: value, unit: 'score', n: 5 };
+}
+
+function ledgerEntry(iter: number, status: LedgerEntry['status'], entryMetric: MetricStats | null, deltaPct: number | null): LedgerEntry {
+  return {
+    id: `iter-${iter}`,
+    ts: new Date().toISOString(),
+    iter,
+    step_id: `S${iter}`,
+    commit: null,
+    hypothesis: `step ${iter}`,
+    metric: entryMetric,
+    baseline: null,
+    delta_pct: deltaPct,
+    confidence: 'fixture',
+    cost: { wall_ms: 1, tokens_input: 0, tokens_output: 0, usd: 0 },
+    guards: { step_done: status === 'keep', tests_pass: status === 'keep' },
+    status,
+    reflection: status
   };
 }
 

@@ -54,7 +54,7 @@ export interface StopAnalysis {
 export interface DirectContinuationVerdict {
   decision: 'continue' | 'complete';
   reason: string;
-  source: 'llm' | 'fallback';
+  source: 'llm' | 'fallback' | 'deterministic';
 }
 
 export async function shouldStop(paths: RunPaths, goal: GoalFile, ledger: LedgerEntry[], config: WiCiConfig): Promise<StopDecision> {
@@ -90,6 +90,22 @@ export async function directContinuationVerdict(
     reason: 'Continue-biased fallback: the completion gate did not produce an explicit complete verdict.',
     source: 'fallback'
   };
+
+  const analysis = buildStopAnalysis(goal, ledger);
+  if (analysis.target_met) {
+    return {
+      decision: 'complete',
+      reason: 'Deterministic completion: the latest kept metric satisfies the goal target.',
+      source: 'deterministic'
+    };
+  }
+  if (analysis.no_recent_keep && analysis.ewma_marginal_value < analysis.tau) {
+    return {
+      decision: 'continue',
+      reason: `Deterministic continuation stall: no keep in the last ${analysis.N} ledger row(s) and marginal value ${formatNumber(analysis.ewma_marginal_value)} is below tau ${formatNumber(analysis.tau)}.`,
+      source: 'fallback'
+    };
+  }
 
   if (config.tools.mode === 'stub') return fallback;
   if (!(await commandExists(config.tools.planner.command))) return fallback;

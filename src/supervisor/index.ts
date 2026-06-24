@@ -5,7 +5,7 @@ import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.js';
 import { preflightResumeCandidate, type ResumeCandidate } from '../shared/resume.js';
-import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, IterResult, LedgerEntry, RunOptions, ToolInvocationResult, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
+import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, IterResult, LedgerEntry, MetricStats, RunOptions, ToolInvocationResult, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
 import { hashFile, iterationSnapshotPath, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
 import { applyInjections, drainInbox, drainPendingInjectionsById, injectionIds, readPendingInjections } from './inbox.js';
@@ -28,6 +28,7 @@ import {
   initializeBaseline,
   ledgerFromEvaluation,
   loadBaseline,
+  runMeasure,
   updateBaselineAfterKeep
 } from './evaluate.js';
 import { commitAll, commitAllWithKey, currentCommit, ensureGitIdentity, ensureGitRepo, hasChanges, tagBest, tagPerf, revertToBest, resetToCommit } from './gitgate.js';
@@ -979,6 +980,20 @@ async function runDirectPlanExecution(
         }, 'warn');
       }
       const directStatus: LedgerEntry['status'] = iterResult.step_done && iterResult.tests_pass ? 'keep' : 'reject';
+      const measurement = directStatus === 'keep' && (await exists(paths.measure)) ? await runMeasure(paths, config) : null;
+      const directMetric = measurement?.metric ?? null;
+      const directBaseline = directMetric ? previousKeepMetric(await readLedger(paths)) : null;
+      const directDeltaPct = directMetric && directBaseline ? directMetricDeltaPct(directBaseline, directMetric, goal.metric.direction) : null;
+      if (directMetric) {
+        await events.emit('DIRECT_MEASURE', `Measured direct ${step.id}: ${primaryMetricTag(goal, directMetric)}`, {
+          iter: nextIter,
+          step_id: step.id,
+          metric: directMetric,
+          baseline: directBaseline,
+          delta_pct: directDeltaPct,
+          mode: 'direct'
+        });
+      }
       const ledgerEntry = directLedgerEntry({
         iter: nextIter,
         stepId: step.id,
@@ -989,7 +1004,10 @@ async function runDirectPlanExecution(
         notes: iterResult.notes,
         stepDone: iterResult.step_done,
         testsPass: iterResult.tests_pass,
-        changedFiles: iterResult.changed_files
+        changedFiles: iterResult.changed_files,
+        metric: directMetric,
+        baseline: directBaseline,
+        deltaPct: directDeltaPct
       });
       await appendLedger(paths, ledgerEntry);
       const ledgerAfterIteration = await readLedger(paths);
@@ -1594,6 +1612,9 @@ function directLedgerEntry(args: {
   stepDone: boolean;
   testsPass: boolean;
   changedFiles: string[];
+  metric?: MetricStats | null;
+  baseline?: MetricStats | null;
+  deltaPct?: number | null;
 }): LedgerEntry {
   return {
     id: `iter-${args.iter}`,
@@ -1602,10 +1623,10 @@ function directLedgerEntry(args: {
     step_id: args.stepId,
     commit: args.commit,
     hypothesis: `Execute PLAN.md step ${args.stepId}`,
-    metric: null,
-    baseline: null,
-    delta_pct: null,
-    confidence: 'direct-executor-receipt',
+    metric: args.metric ?? null,
+    baseline: args.baseline ?? null,
+    delta_pct: args.deltaPct ?? null,
+    confidence: args.metric ? 'direct-measure' : 'direct-executor-receipt',
     ci_low: null,
     ci_high: null,
     p_value: null,
@@ -1626,6 +1647,17 @@ function directLedgerEntry(args: {
     reflection: args.notes,
     parent_id: null
   };
+}
+
+function previousKeepMetric(ledger: LedgerEntry[]): MetricStats | null {
+  return [...ledger].reverse().find((entry) => entry.status === 'keep' && entry.metric)?.metric ?? null;
+}
+
+function directMetricDeltaPct(base: MetricStats, next: MetricStats, direction: GoalFile['metric']['direction']): number {
+  const before = primaryMetricValue(base);
+  const after = primaryMetricValue(next);
+  if (before === 0) return after === 0 ? 0 : direction === 'minimize' ? -1 : 1;
+  return direction === 'minimize' ? (before - after) / before : (after - before) / Math.abs(before);
 }
 
 async function ensureGoal(paths: ReturnType<typeof runPaths>, text: string | undefined, config: WiCiConfig, planningContext?: string): Promise<GoalFile> {
