@@ -111,7 +111,13 @@ async function main(): Promise<void> {
   assert(publicInstaller.includes('THINKLESS_AUTH_ONBOARDING') && publicInstaller.includes('true 2>/dev/null < /dev/tty > /dev/tty') && publicInstaller.includes('gh auth login') && publicInstaller.includes('run_tty "$codex_cmd"') && publicInstaller.includes('run_tty "claude"') && authPrompts.every((prompt) => publicInstaller.includes(prompt)), 'public installer must offer terminal-backed auth onboarding for Codex, Claude, and GitHub CLI');
   assert(publicInstaller.includes('auth onboarding status') && publicInstaller.includes('setup command: gh auth login') && publicInstaller.includes('auth onboarding skipped') && publicInstaller.includes('THINKLESS_AUTH_PENDING=1') && publicInstaller.includes('auth is pending') && publicInstaller.includes('OPENAI_API_KEY') && publicInstaller.includes('ANTHROPIC_API_KEY'), 'public installer must distinguish installed commands from pending auth and print setup commands');
   assert(publicInstaller.includes('require_sudo_access') && publicInstaller.includes('npm global install failed') && !publicInstaller.includes(forbiddenSudoNpm), 'public installer must verify sudo without running npm under elevated privileges');
-  assert(publicInstaller.includes('https://github.com/wici-ai/thinkless/releases/latest/download'), 'public installer must default to the public thinkless release repo');
+  assert(
+    publicInstaller.includes('THINKLESS_RELEASE_REPO') &&
+      publicInstaller.includes('api.github.com/repos/$release_repo/releases/latest') &&
+      publicInstaller.includes('releases/download/%s') &&
+      publicInstaller.includes('releases/latest/download'),
+    'public installer must resolve the latest public release tag through the GitHub API before falling back to latest/download'
+  );
   assert(docsInstaller === publicInstaller, 'GitHub Pages docs/install.sh must stay identical to the public installer script');
   assert(publicReleaseWorkflow.includes('workflow_dispatch:'), 'public release workflow must be manually triggered');
   assert(!publicReleaseWorkflow.includes('push:') && !publicReleaseWorkflow.includes('pull_request:'), 'public release workflow must not run on pushes or pull requests');

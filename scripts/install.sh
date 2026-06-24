@@ -1,7 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-release_base="${THINKLESS_RELEASE_BASE:-https://github.com/wici-ai/thinkless/releases/latest/download}"
+release_repo="${THINKLESS_RELEASE_REPO:-wici-ai/thinkless}"
+
+resolve_release_base() {
+  if [[ -n "${THINKLESS_RELEASE_BASE:-}" ]]; then
+    printf '%s\n' "$THINKLESS_RELEASE_BASE"
+    return
+  fi
+  local tag
+  tag="$(
+    curl -fsSL "https://api.github.com/repos/$release_repo/releases/latest" 2>/dev/null \
+      | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
+      | head -n 1
+  )"
+  if [[ -n "$tag" ]]; then
+    printf 'https://github.com/%s/releases/download/%s\n' "$release_repo" "$tag"
+    return
+  fi
+  printf 'https://github.com/%s/releases/latest/download\n' "$release_repo"
+}
+
+release_base="$(resolve_release_base)"
 tarball_url="${THINKLESS_TARBALL_URL:-$release_base/thinkless.tgz}"
 
 command_exists() {
