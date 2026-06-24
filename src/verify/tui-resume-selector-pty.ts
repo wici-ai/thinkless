@@ -22,6 +22,7 @@ async function main(): Promise<void> {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(target, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: target
     },
@@ -103,7 +104,9 @@ spawn env FORCE_COLOR=0 TERM=xterm-256color node --import tsx src/cli.tsx tui --
 expect "CHAT"
 send -- "/resume\\r"
 expect "\\[runnable\\] STOP"
-send -- "x"
+send -- "\\033\\[B"
+expect "Selected runnable: stopped run can be explicitly resumed"
+send -- "\\r"
 sleep 3
 send -- "\\003"
 expect eof

@@ -8,7 +8,7 @@ import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/tui-resume-selector-built-target');
 const escapeTarget = resolve('fixture/tui-resume-selector-built-escape-target');
-const chatOnlyTarget = resolve('fixture/tui-resume-selector-built-chat-only-target');
+const chatOnlyTarget = resolve('fixture/trsb-chat-only-target');
 const selectedSession = join(target, '.thinkless2');
 const decoySession = join(target, '.thinkless3');
 const builtCli = resolve('dist/src/cli.js');
@@ -49,6 +49,7 @@ async function verifyArrowEnterLaunchesSelectedSession(): Promise<void> {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(target, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: target,
       WICI_THINKLESS_BIN: builtCli
@@ -116,6 +117,7 @@ async function verifyEscapeCancelsWithoutLaunch(): Promise<void> {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(escapeTarget, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: escapeTarget,
       WICI_THINKLESS_BIN: builtCli
@@ -158,6 +160,7 @@ async function verifyChatOnlyCandidateResumesWithoutSupervisor(): Promise<void> 
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(chatOnlyTarget, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: chatOnlyTarget,
       WICI_THINKLESS_BIN: builtCli

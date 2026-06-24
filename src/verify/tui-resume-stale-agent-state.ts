@@ -87,6 +87,7 @@ async function assertStaleSelection(input: {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(input.target, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: input.target,
       WICI_THINKLESS_BIN: builtCli,

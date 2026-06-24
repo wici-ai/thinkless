@@ -28,6 +28,7 @@ async function verifyOpenSelectorDoesNotLaunchCurrentRun(): Promise<void> {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(openOnlyTarget, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: openOnlyTarget,
       WICI_THINKLESS_BIN: builtCli
@@ -62,6 +63,7 @@ async function verifyEnterSelectsCurrentRun(): Promise<void> {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(selectTarget, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: selectTarget,
       WICI_THINKLESS_BIN: builtCli

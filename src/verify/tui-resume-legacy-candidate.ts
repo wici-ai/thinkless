@@ -40,6 +40,7 @@ async function verifyRunnableLegacyCandidate(): Promise<void> {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(runnableTarget, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: runnableTarget,
       WICI_THINKLESS_BIN: builtCli
@@ -119,6 +120,7 @@ async function verifyChatOnlyLegacyCandidate(): Promise<void> {
     env: {
       ...process.env,
       FORCE_COLOR: '0',
+      HOME: join(blockedTarget, '.home'),
       TERM: 'xterm-256color',
       WICI_PTY_TARGET: blockedTarget,
       WICI_THINKLESS_BIN: builtCli
