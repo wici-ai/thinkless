@@ -133,7 +133,7 @@ async function verifyChatOnlyLegacyCandidate(): Promise<void> {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `legacy chat-only PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes(`${basename(blockedTarget)} .wici [runnable]`), `legacy chat-only candidate was not visible as runnable:\n${output}`);
-  assert(output.includes('chat session can be') && output.includes('without supervisor'), `legacy chat-only reason was not visible:\n${output}`);
+  assert(output.includes('session can be resumed as Chat without GOAL.md'), `legacy chat-only reason was not visible:\n${output}`);
   assert(output.includes('legacy chat-only candidate can resume chat'), `legacy chat-only candidate did not restore chat transcript:\n${output}`);
 
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);

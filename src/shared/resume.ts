@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { exists, readJsonFileMaybe, readJsonLines } from './atomic.js';
 import { isNumberedSessionDirName, runPaths, type RunPaths } from './paths.js';
-import type { Checkpoint, GoalFile, OutboxMessage, RunEvent } from './types.js';
+import type { ChatLogEntry, Checkpoint, GoalFile, OutboxMessage, RunEvent } from './types.js';
 
 const WORKSPACE_ROOT = join(homedir(), 'thinkless-workspaces');
 const PLANNER_CLARIFY_REPLY_PREFIX = 'planner-clarify-';
@@ -101,7 +101,17 @@ async function candidatesForTarget(target: string): Promise<ResumeCandidate[]> {
   }
   const legacy = join(root, '.wici');
   if (await hasStateDir(legacy)) candidates.push(await candidateFromPaths(runPaths(root, legacy), legacy));
-  return candidates.filter((candidate) => candidate.hasGoal || candidate.hasChat || candidate.hasEvents || candidate.hasRuntimeSelection);
+  return candidates.filter(
+    (candidate) =>
+      candidate.hasGoal ||
+      candidate.hasGoalDoc ||
+      candidate.hasPlan ||
+      candidate.hasLedger ||
+      candidate.hasChat ||
+      candidate.hasEvents ||
+      candidate.hasRuntimeSelection ||
+      candidate.supervisorState !== 'NO_CHECKPOINT'
+  );
 }
 
 async function numberedSessionDirs(target: string): Promise<string[]> {
@@ -138,7 +148,7 @@ async function candidateFromPaths(paths: RunPaths, sessionDir?: string): Promise
     sessionDir,
     stateDir: paths.stateDir,
     label,
-    goalSummary: goal ? summarizeGoal(goal) : await summarizeGoalDoc(paths.goalDoc),
+    goalSummary: goal ? summarizeGoal(goal) : goalDoc ? await summarizeGoalDoc(paths.goalDoc) : await summarizeChat(paths.chat),
     updatedAt: checkpoint?.updated_at ?? updatedAt,
     supervisorState: checkpoint?.supervisor_state ?? 'NO_CHECKPOINT',
     hasChat: chat,
@@ -172,32 +182,40 @@ function buildPreflight(input: {
   executorTranscript: boolean;
 }): Pick<ResumeCandidate, 'runnable' | 'status' | 'reason' | 'fallback'> {
   const { goal, checkpoint } = input;
-  if (!goal && (input.events || input.outbox.length > 0 || input.ledger)) return blocked('missing durable GOAL context');
-  if (!goal && !checkpoint && (input.chat || input.runtimeSelection)) return runnable('chat session can be resumed without supervisor context', 'chat_only');
-  if (!goal && !checkpoint) return blocked('no resumable Thinkless context');
-  if (!checkpoint) return blocked('missing checkpoint context');
-  if (!input.goalDoc) return blocked('missing GOAL.md context');
-  if (checkpoint.supervisor_state === 'FAILED') return blocked('failed run requires manual inspection');
+  const hasAnyContext =
+    Boolean(goal) ||
+    Boolean(checkpoint) ||
+    input.goalDoc ||
+    input.plan ||
+    input.ledger ||
+    input.chat ||
+    input.runtimeSelection ||
+    input.events ||
+    input.outbox.length > 0;
+  if (!hasAnyContext) return blocked('no resumable Thinkless context');
+  if (!goal) return runnable('session can be resumed as Chat without GOAL.md or supervisor context', 'chat_only');
+  if (!checkpoint) return runnable('goal context can resume by rerunning planner from durable goal state', 'planner_rerun');
+  if (checkpoint.supervisor_state === 'FAILED') return runnable('failed run can be reopened as Chat without starting supervisor', 'chat_only');
   if (checkpoint.supervisor_state === 'STOP') return runnable('stopped run can be explicitly resumed');
   if (checkpoint.supervisor_state === 'PLAN') {
     const pendingPlannerQuestion = input.outbox.some((message) => message.kind === 'question' && !message.answered && message.reply_key?.startsWith(PLANNER_CLARIFY_REPLY_PREFIX));
-    if (pendingPlannerQuestion && !checkpoint.sessions.planner) return blocked('planner clarification is pending but no planner session was persisted');
     if (checkpoint.sessions.planner) {
-      if (!input.plannerTranscript) return blocked('planner session is missing durable transcript state');
+      if (!input.plannerTranscript) return runnable('planner can rerun from durable goal state because transcript state is missing', 'planner_rerun');
       return runnable('planner session is available for continuation');
     }
-    return input.goalDoc ? runnable('planner can rerun from durable GOAL.md state', 'planner_rerun') : blocked('planner cannot rerun without GOAL.md');
+    if (pendingPlannerQuestion) return runnable('planner can rerun from durable goal state because the clarification session was not persisted', 'planner_rerun');
+    return runnable('planner can rerun from durable goal state', 'planner_rerun');
   }
   if (checkpoint.supervisor_state === 'EXECUTE' || checkpoint.supervisor_state === 'REFLECT') {
-    if (!input.plan) return blocked('executor resume needs PLAN.md');
+    if (!input.plan) return runnable('execution context can be reopened as Chat because PLAN.md is missing', 'chat_only');
     if (checkpoint.sessions.executor || checkpoint.sessions.executorApp?.threadId) {
-      if (!input.executorTranscript) return blocked('executor session is missing durable transcript state');
+      if (!input.executorTranscript) return runnable('executor context can be reopened as Chat because durable transcript state is missing', 'chat_only');
       return runnable('executor session is available for continuation');
     }
     if (checkpoint.next_step || input.ledger) return runnable('executor can replay from checkpointed PLAN/ledger state', 'executor_rerun');
-    return blocked('executor has no session and no replayable PLAN step');
+    return runnable('executor context can be reopened as Chat because no replayable PLAN step exists', 'chat_only');
   }
-  if (!input.plan && checkpoint.supervisor_state !== 'INTAKE') return blocked('missing PLAN.md context');
+  if (!input.plan && checkpoint.supervisor_state !== 'INTAKE') return runnable('supervisor context can be reopened as Chat because PLAN.md is missing', 'chat_only');
   return runnable('supervisor state can be resumed from durable context');
 }
 
@@ -264,6 +282,21 @@ async function summarizeGoalDoc(path: string): Promise<string> {
   } catch {
     return '(no goal summary)';
   }
+}
+
+async function summarizeChat(path: string): Promise<string> {
+  try {
+    const entries = await readJsonLines<ChatLogEntry>(path);
+    const lastUser = [...entries].reverse().find((entry) => entry.role === 'user' && entry.text.trim());
+    const text = lastUser?.text.trim();
+    return text ? truncate(text, 96) : '(chat-only session)';
+  } catch {
+    return '(chat-only session)';
+  }
+}
+
+function truncate(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, Math.max(0, limit - 3))}...` : text;
 }
 
 function dedupeCandidates(candidates: ResumeCandidate[]): ResumeCandidate[] {

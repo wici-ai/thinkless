@@ -17,6 +17,7 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
     "build": "tsc -p tsconfig.json",
+    "postbuild": "node scripts/chmod-bin.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/cli.tsx demo",
     "run": "tsx src/cli.tsx run --target fixture/slow-target --goal \"Improve the fixture implementation while preserving exact output correctness\"",

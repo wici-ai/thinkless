@@ -1,4 +1,4 @@
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
@@ -10,8 +10,7 @@ const target = resolve('fixture/rbt-target');
 const staleSession = join(target, '.thinkless2');
 const runnableSession = join(target, '.thinkless3');
 const builtCli = resolve('dist/src/cli.js');
-const staleReason = 'planner session is missing durable transcript state';
-const forbiddenTypes = new Set(['RESUME_CONTEXT_VALIDATED', 'SUPERVISOR_START', 'EXECUTOR_RESUME_FALLBACK']);
+const staleReason = 'planner can rerun from durable goal state because transcript state is missing';
 
 async function main(): Promise<void> {
   await requireExpect();
@@ -44,57 +43,38 @@ async function main(): Promise<void> {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `blocked-then-runnable PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('.thinkless2 [runnable] PLAN'), `stale candidate was not initially visible as runnable:\n${output}`);
-  assert(output.includes(staleReason), `blocked reason was not visible:\n${output}`);
   assert(output.includes('Runnable decoy after blocked selection'), `runnable decoy was not visible after blocked selection:\n${output}`);
 
   const staleAfter = await readJsonLines<RunEvent>(stalePaths.events);
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);
   const staleNewEvents = staleAfter.slice(staleBefore.length);
   const runnableNewEvents = runnableAfter.slice(runnableBefore.length);
-  const blocked = staleNewEvents.find((event) => event.type === 'RESUME_CONTEXT_BLOCKED');
-  assert(blocked, `stale candidate should emit RESUME_CONTEXT_BLOCKED: ${JSON.stringify(staleNewEvents)}`);
-  assert((blocked.data as { reason?: string } | undefined)?.reason === staleReason, `stale candidate blocked reason mismatch: ${JSON.stringify(blocked)}`);
-  assert(!staleNewEvents.some((event) => forbiddenTypes.has(event.type)), `stale candidate emitted launch events: ${JSON.stringify(staleNewEvents)}`);
-
-  const validated = runnableNewEvents.find((event) => event.type === 'RESUME_CONTEXT_VALIDATED');
-  assert(validated, `runnable decoy should validate after blocked selection recovery: ${JSON.stringify(runnableNewEvents)}\n${output}`);
-  assert(runnableNewEvents.some((event) => event.type === 'SUPERVISOR_START'), `runnable decoy should launch supervisor: ${JSON.stringify(runnableNewEvents)}\n${output}`);
-  assert(!runnableNewEvents.some((event) => event.type === 'RESUME_CONTEXT_BLOCKED' || event.type === 'EXECUTOR_RESUME_FALLBACK'), `runnable decoy emitted unexpected events: ${JSON.stringify(runnableNewEvents)}`);
+  const validated = staleNewEvents.find((event) => event.type === 'RESUME_CONTEXT_VALIDATED');
+  assert(validated, `stale candidate should validate degraded resume context: ${JSON.stringify(staleNewEvents)}\n${output}`);
+  assert(validated.message.includes(staleReason), `stale candidate validated reason mismatch: ${JSON.stringify(validated)}`);
+  assert(staleNewEvents.some((event) => event.type === 'SUPERVISOR_START'), `stale candidate should launch supervisor: ${JSON.stringify(staleNewEvents)}\n${output}`);
+  assert(!staleNewEvents.some((event) => event.type === 'RESUME_CONTEXT_BLOCKED' || event.type === 'EXECUTOR_RESUME_FALLBACK'), `stale candidate emitted unexpected events: ${JSON.stringify(staleNewEvents)}`);
+  assert(runnableNewEvents.length === 0, `runnable decoy should not be selected or mutated: ${JSON.stringify(runnableNewEvents)}`);
   const validation = validated.data as {
     target?: string;
     session_dir?: string | null;
     planner_session?: string | null;
     executor_session?: string | null;
     executor_app_thread?: string | null;
+    fallback?: string | null;
   } | undefined;
   assert(validation?.target === target, `validated target mismatch: ${JSON.stringify(validation)}`);
-  assert(validation?.session_dir === runnableSession, `validated session dir mismatch: ${JSON.stringify(validation)}`);
-  assert(validation?.planner_session === 'blocked-then-runnable-planner', `validated planner session missing: ${JSON.stringify(validation)}`);
-  assert(validation?.executor_session === 'blocked-then-runnable-executor', `validated executor session missing: ${JSON.stringify(validation)}`);
-  assert(validation?.executor_app_thread === 'blocked-then-runnable-app-thread', `validated executor app thread missing: ${JSON.stringify(validation)}`);
-
-  const checkpoint = await readFile(runnablePaths.checkpoint, 'utf8');
-  assert(checkpoint.includes('blocked-then-runnable-planner'), 'runnable checkpoint should preserve planner session');
-  assert(checkpoint.includes('blocked-then-runnable-executor'), 'runnable checkpoint should preserve executor session');
-  assert(checkpoint.includes('blocked-then-runnable-app-thread'), 'runnable checkpoint should preserve executor app thread');
-  const chat = await readFile(runnablePaths.chat, 'utf8');
-  assert(chat.includes('blocked then runnable selected chat'), 'runnable chat transcript should remain available');
-  const runtime = await readFile(runnablePaths.runtimeSelection, 'utf8');
-  assert(runtime.includes('blocked-then-runnable-chat-model'), 'runnable runtime selection should remain available');
-  const goalDoc = await readFile(runnablePaths.goalDoc, 'utf8');
-  assert(goalDoc.includes('Runnable decoy after blocked selection'), 'runnable GOAL.md should remain active context');
-  const plan = await readFile(runnablePaths.plan, 'utf8');
-  assert(plan.includes('Resume after blocked selector step'), 'runnable PLAN.md should remain available');
-  const ledger = await readFile(runnablePaths.ledger, 'utf8');
-  assert(ledger.includes('blocked-then-runnable-ledger'), 'runnable ledger should remain available');
+  assert(validation?.session_dir === staleSession, `validated session dir mismatch: ${JSON.stringify(validation)}`);
+  assert(validation?.planner_session === 'blocked-then-runnable-stale-planner', `validated planner session should preserve stale planner id for audit: ${JSON.stringify(validation)}`);
+  assert(validation?.fallback === 'planner_rerun', `validated fallback mismatch: ${JSON.stringify(validation)}`);
 
   console.log(JSON.stringify({
     ok: true,
     target,
     staleSession,
     runnableSession,
-    staleBlocked: true,
-    runnableLaunchedAfterBlock: true,
+    staleRerun: true,
+    runnableDecoyUnchanged: true,
     resume_validated: true
   }, null, 2));
 }
@@ -166,12 +146,6 @@ send -- "/resume\\r"
 expect -ex ".thinkless2 \\[runnable\\] PLAN"
 file delete -force "$env(STALE_PLANNER_TRANSCRIPT)"
 send -- "\\n"
-expect -ex "${staleReason}"
-expect -ex ".thinkless3 \\[runnable\\] STOP"
-send -- "\\033\\[B"
-expect -ex "Selected runnable: stopped run can be explicitly resumed"
-sleep 1
-send -- "\\r"
 sleep 2
 send -- "\\003"
 expect eof

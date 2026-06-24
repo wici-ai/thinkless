@@ -213,7 +213,9 @@ export function ChatInputBox({
     }
 
     const paths = runPaths(target, sessionDir);
-    const latestQuestion = [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered);
+    const latestQuestion = hasExistingRun
+      ? [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered)
+      : undefined;
 
     if (text === '/resume' || text.startsWith('/resume ')) {
       onResumeRequested?.();

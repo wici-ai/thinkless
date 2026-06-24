@@ -92,7 +92,7 @@ function checkpoint(): Checkpoint {
     events_seq: 1,
     sessions: { planner: 'resume-selector-planner', executor: 'resume-selector-executor' },
     drained_inbox: [],
-    updated_at: ts()
+    updated_at: new Date(Date.now() + 60_000).toISOString()
   };
 }
 
@@ -104,7 +104,6 @@ spawn env FORCE_COLOR=0 TERM=xterm-256color node --import tsx src/cli.tsx tui --
 expect "CHAT"
 send -- "/resume\\r"
 expect "\\[runnable\\] STOP"
-send -- "\\033\\[B"
 expect "Selected runnable: stopped run can be explicitly resumed"
 send -- "\\r"
 sleep 3

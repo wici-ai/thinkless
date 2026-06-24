@@ -10,7 +10,6 @@ const target = resolve('fixture/tui-resume-stale-candidate-target');
 const staleSession = join(target, '.thinkless2');
 const decoySession = join(target, '.thinkless3');
 const builtCli = resolve('dist/src/cli.js');
-const forbiddenTypes = new Set(['RESUME_CONTEXT_VALIDATED', 'SUPERVISOR_START', 'EXECUTOR_RESUME_FALLBACK']);
 
 async function main(): Promise<void> {
   await requireExpect();
@@ -56,19 +55,19 @@ async function main(): Promise<void> {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `stale resume candidate PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('.thinkless2 [runnable] STOP'), `stale candidate was not initially visible as runnable:\n${output}`);
-  assert(output.includes('missing checkpoint context'), `stale candidate block reason was not visible:\n${output}`);
 
   const staleAfter = await readJsonLines<RunEvent>(stalePaths.events);
   const decoyAfter = await readJsonLines<RunEvent>(decoyPaths.events);
   const staleNewEvents = staleAfter.slice(staleBefore.length);
   const decoyNewEvents = decoyAfter.slice(decoyBefore.length);
-  const blocked = staleNewEvents.find((event) => event.type === 'RESUME_CONTEXT_BLOCKED');
-  assert(blocked, `stale candidate should emit RESUME_CONTEXT_BLOCKED: ${JSON.stringify(staleNewEvents)}`);
-  assert((blocked.data as { reason?: string } | undefined)?.reason === 'missing checkpoint context', `stale candidate blocked reason mismatch: ${JSON.stringify(blocked)}`);
-  assert(!staleNewEvents.some((event) => forbiddenTypes.has(event.type)), `stale candidate emitted launch events: ${JSON.stringify(staleNewEvents)}`);
+  const validated = staleNewEvents.find((event) => event.type === 'RESUME_CONTEXT_VALIDATED');
+  assert(validated, `stale candidate should validate degraded resume context: ${JSON.stringify(staleNewEvents)}`);
+  assert((validated.data as { fallback?: string | null } | undefined)?.fallback === 'planner_rerun', `stale candidate fallback mismatch: ${JSON.stringify(validated)}`);
+  assert(staleNewEvents.some((event) => event.type === 'SUPERVISOR_START'), `stale candidate should launch supervisor through planner rerun: ${JSON.stringify(staleNewEvents)}`);
+  assert(!staleNewEvents.some((event) => event.type === 'RESUME_CONTEXT_BLOCKED'), `stale candidate should not block after checkpoint loss: ${JSON.stringify(staleNewEvents)}`);
   assert(decoyNewEvents.length === 0, `stale candidate selection should not mutate runnable decoy events: ${JSON.stringify(decoyNewEvents)}`);
 
-  console.log(JSON.stringify({ ok: true, target, staleSession, decoySession, staleBlocked: true, decoyUnchanged: true }, null, 2));
+  console.log(JSON.stringify({ ok: true, target, staleSession, decoySession, staleRerun: true, decoyUnchanged: true }, null, 2));
 }
 
 async function writeRunnableRun(paths: ReturnType<typeof runPaths>, fixture: RunnableFixture): Promise<void> {
@@ -98,8 +97,7 @@ send -- "/resume\\r"
 expect ".thinkless2 \\[runnable\\] STOP"
 file delete -force "$env(STALE_CHECKPOINT)"
 send -- "\\n"
-expect "missing checkpoint context"
-sleep 1
+sleep 2
 send -- "\\003"
 expect eof
 exit 0

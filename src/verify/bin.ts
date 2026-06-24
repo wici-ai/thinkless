@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { execa } from 'execa';
 import { exists } from '../shared/atomic.js';
 
@@ -10,7 +10,9 @@ async function main(): Promise<void> {
 
   for (const [name, bin] of Object.entries(pkg.bin)) {
     assert(await exists(bin), `package bin target does not exist after build: ${bin}`);
-    const version = await execa(process.execPath, [bin, '--version'], { all: true, reject: false });
+    const info = await stat(bin);
+    assert((info.mode & 0o111) !== 0, `${name} built CLI is not executable: ${bin}`);
+    const version = await execa(bin, ['--version'], { all: true, reject: false });
     assert(version.exitCode === 0, `${name} built CLI --version failed:\n${version.all}`);
     assert((version.stdout || version.all || '').trim() === pkg.version, `${name} built CLI version mismatch: expected ${pkg.version}, got ${version.stdout || version.all}`);
   }

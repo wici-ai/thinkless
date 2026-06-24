@@ -8,7 +8,6 @@ import { ExecPane } from './ExecPane.js';
 import { useRunState, type RunState } from './useRunState.js';
 import { runSupervisor } from '../supervisor/index.js';
 import type { RunOptions, ToolMode } from '../shared/types.js';
-import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { readPersistedRuntimeSelection, writePersistedRuntimeSelection } from '../shared/chatSession.js';
 import { runPaths } from '../shared/paths.js';
 import { disablePointerInput, enableMouseReporting, parseMouseInput } from './input.js';
@@ -549,17 +548,7 @@ export function shouldUseChatAgentForBlankRun(input: {
   state: ReturnType<typeof useRunState>;
 }): boolean {
   if (!input.supervisorEnabled || input.supervisorStarted) return false;
-  return !hasRunBlackboard(input.state);
-}
-
-function hasRunBlackboard(state: ReturnType<typeof useRunState>): boolean {
-  if (state.goal || state.checkpoint || state.ledger.length > 0) return true;
-  if (state.outbox.some((message) => !isInitialGoalRequiredText(message.text))) return true;
-  return state.events.some((event) => !isInitialGoalRequiredText(event.message));
-}
-
-function isInitialGoalRequiredText(text: string | undefined): boolean {
-  return Boolean(text?.includes(INITIAL_GOAL_REQUIRED_MESSAGE));
+  return !input.state.goal;
 }
 
 function truncate(text: string, limit: number): string {

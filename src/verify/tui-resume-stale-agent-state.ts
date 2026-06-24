@@ -38,8 +38,10 @@ async function verifyPlannerTranscriptRevalidated(): Promise<void> {
     decoySession,
     staleFile: join(stalePaths.artifacts, 'planner-initial.stdout.jsonl'),
     visibleState: 'PLAN',
-    visibleReason: 'planner session is missing durable transcript state',
-    caseName: 'stale-planner-transcript'
+    revalidatedReason: 'planner can rerun from durable goal state because transcript state is missing',
+    caseName: 'stale-planner-transcript',
+    expectedMode: 'supervisor',
+    expectedFallback: 'planner_rerun'
   });
 }
 
@@ -64,8 +66,11 @@ async function verifyExecutorTranscriptRevalidated(): Promise<void> {
     decoySession,
     staleFile: stalePaths.codexRun,
     visibleState: 'EXECUTE',
-    visibleReason: 'executor session is missing durable transcript state',
-    caseName: 'stale-executor-transcript'
+    revalidatedReason: 'executor context can be reopened as Chat because durable transcript state is missing',
+    caseName: 'stale-executor-transcript',
+    expectedMode: 'chat_only',
+    expectedFallback: 'chat_only',
+    expectedChat: 'stale executor selected chat'
   });
 }
 
@@ -75,14 +80,17 @@ async function assertStaleSelection(input: {
   decoySession: string;
   staleFile: string;
   visibleState: string;
-  visibleReason: string;
+  revalidatedReason: string;
   caseName: string;
+  expectedMode: 'supervisor' | 'chat_only';
+  expectedFallback: string;
+  expectedChat?: string;
 }): Promise<void> {
   const stalePaths = runPaths(input.target, input.staleSession);
   const decoyPaths = runPaths(input.target, input.decoySession);
   const staleBefore = await readJsonLines<RunEvent>(stalePaths.events);
   const decoyBefore = await readJsonLines<RunEvent>(decoyPaths.events);
-  const result = await execa('expect', ['-c', staleExpectScript(input.visibleState, input.visibleReason)], {
+  const result = await execa('expect', ['-c', staleExpectScript(input.visibleState, input.expectedChat)], {
     cwd: resolve('.'),
     env: {
       ...process.env,
@@ -101,18 +109,24 @@ async function assertStaleSelection(input: {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `${input.caseName} PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes(`.thinkless2 [runnable] ${input.visibleState}`), `${input.caseName} candidate was not initially visible as runnable:\n${output}`);
-  assert(output.includes(input.visibleReason), `${input.caseName} block reason was not visible:\n${output}`);
+  if (input.expectedChat) assert(output.includes(input.expectedChat), `${input.caseName} did not restore selected chat transcript:\n${output}`);
 
   const staleAfter = await readJsonLines<RunEvent>(stalePaths.events);
   const decoyAfter = await readJsonLines<RunEvent>(decoyPaths.events);
   const staleNewEvents = staleAfter.slice(staleBefore.length);
   const decoyNewEvents = decoyAfter.slice(decoyBefore.length);
-  const blocked = staleNewEvents.find((event) => event.type === 'RESUME_CONTEXT_BLOCKED');
-  assert(blocked, `${input.caseName} should emit RESUME_CONTEXT_BLOCKED: ${JSON.stringify(staleNewEvents)}`);
-  assert((blocked.data as { reason?: string } | undefined)?.reason === input.visibleReason, `${input.caseName} blocked reason mismatch: ${JSON.stringify(blocked)}`);
-  assert(!staleNewEvents.some((event) => forbiddenTypes.has(event.type)), `${input.caseName} emitted launch events: ${JSON.stringify(staleNewEvents)}`);
+  if (input.expectedMode === 'supervisor') {
+    const validated = staleNewEvents.find((event) => event.type === 'RESUME_CONTEXT_VALIDATED');
+    assert(validated, `${input.caseName} should validate degraded resume context: ${JSON.stringify(staleNewEvents)}`);
+    assert(validated.message.includes(input.revalidatedReason), `${input.caseName} validated reason mismatch: ${JSON.stringify(validated)}`);
+    assert((validated.data as { fallback?: string | null } | undefined)?.fallback === input.expectedFallback, `${input.caseName} fallback mismatch: ${JSON.stringify(validated)}`);
+    assert(staleNewEvents.some((event) => event.type === 'SUPERVISOR_START'), `${input.caseName} should launch supervisor: ${JSON.stringify(staleNewEvents)}`);
+    assert(!staleNewEvents.some((event) => event.type === 'RESUME_CONTEXT_BLOCKED'), `${input.caseName} should not block resume: ${JSON.stringify(staleNewEvents)}`);
+  } else {
+    assert(!staleNewEvents.some((event) => forbiddenTypes.has(event.type)), `${input.caseName} emitted supervisor events: ${JSON.stringify(staleNewEvents)}`);
+  }
   assert(decoyNewEvents.length === 0, `${input.caseName} should not mutate runnable decoy events: ${JSON.stringify(decoyNewEvents)}`);
-  console.log(JSON.stringify({ ok: true, case: input.caseName, target: input.target, staleSession: input.staleSession, decoyUnchanged: true }, null, 2));
+  console.log(JSON.stringify({ ok: true, case: input.caseName, target: input.target, staleSession: input.staleSession, mode: input.expectedMode, decoyUnchanged: true }, null, 2));
 }
 
 async function writeRunnableStopRun(paths: ReturnType<typeof runPaths>, fixture: RunnableFixture): Promise<void> {
@@ -169,7 +183,7 @@ async function writeText(path: string, content: string): Promise<void> {
   await writeFile(path, content);
 }
 
-function staleExpectScript(visibleState: string, visibleReason: string): string {
+function staleExpectScript(visibleState: string, expectedChat?: string): string {
   return `
 log_user 1
 set timeout 25
@@ -182,8 +196,8 @@ send -- "/resume\\r"
 expect ".thinkless2 \\[runnable\\] ${visibleState}"
 file delete -force "$env(STALE_AGENT_FILE)"
 send -- "\\n"
-expect "${visibleReason}"
 sleep 1
+${expectedChat ? `expect "${expectedChat}"` : ''}
 send -- "\\003"
 expect eof
 exit 0

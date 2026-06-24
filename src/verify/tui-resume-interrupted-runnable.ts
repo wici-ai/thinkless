@@ -37,7 +37,7 @@ async function verifyPlannerRerunLaunches(): Promise<void> {
     selectedSession,
     decoySession,
     visibleState: 'PLAN',
-    visibleReason: 'planner can rerun from durable GOAL.md state',
+    visibleReason: 'planner can rerun from durable goal state',
     caseName: 'planner-rerun',
     expectedFallback: 'planner_rerun',
     expectedPlanner: null,

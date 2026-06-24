@@ -13,11 +13,11 @@ const forbiddenTypes = new Set(['RESUME_CONTEXT_VALIDATED', 'SUPERVISOR_START', 
 
 async function main(): Promise<void> {
   await requireExpect();
-  await verifyPlannerClarificationWithoutSessionRefusesLaunch();
-  await verifyExecutorWithoutReplayStateRefusesLaunch();
+  await verifyPlannerClarificationWithoutSessionReruns();
+  await verifyExecutorWithoutReplayStateRestoresChat();
 }
 
-async function verifyPlannerClarificationWithoutSessionRefusesLaunch(): Promise<void> {
+async function verifyPlannerClarificationWithoutSessionReruns(): Promise<void> {
   await rm(plannerTarget, { recursive: true, force: true });
   await createSampleTarget(plannerTarget, true);
   const runnableSession = join(plannerTarget, '.thinkless2');
@@ -32,17 +32,19 @@ async function verifyPlannerClarificationWithoutSessionRefusesLaunch(): Promise<
   });
   await writeInterruptedPlannerRun(runPaths(plannerTarget, blockedSession));
 
-  await assertBlockedSelection({
+  await assertSelection({
     target: plannerTarget,
-    caseName: 'planner-clarification-blocked',
-    blockedSession,
+    caseName: 'planner-clarification-rerun',
+    selectedSession: blockedSession,
     runnableSession,
-    blockedState: 'PLAN',
-    visibleReason: 'planner clarification is pending but no planner session was persisted'
+    selectedState: 'PLAN',
+    visibleReason: 'planner can rerun from durable goal state because the clarification session was not persisted',
+    expectedMode: 'supervisor',
+    expectedFallback: 'planner_rerun'
   });
 }
 
-async function verifyExecutorWithoutReplayStateRefusesLaunch(): Promise<void> {
+async function verifyExecutorWithoutReplayStateRestoresChat(): Promise<void> {
   await rm(executorTarget, { recursive: true, force: true });
   await createSampleTarget(executorTarget, true);
   const runnableSession = join(executorTarget, '.thinkless2');
@@ -57,29 +59,35 @@ async function verifyExecutorWithoutReplayStateRefusesLaunch(): Promise<void> {
   });
   await writeInterruptedExecutorRun(runPaths(executorTarget, blockedSession));
 
-  await assertBlockedSelection({
+  await assertSelection({
     target: executorTarget,
-    caseName: 'executor-unreplayable-blocked',
-    blockedSession,
+    caseName: 'executor-unreplayable-chat-only',
+    selectedSession: blockedSession,
     runnableSession,
-    blockedState: 'EXECUTE',
-    visibleReason: 'executor resume needs PLAN.md'
+    selectedState: 'EXECUTE',
+    visibleReason: 'execution context can be reopened as Chat because PLAN.md is missing',
+    expectedMode: 'chat_only',
+    expectedFallback: 'chat_only',
+    expectedChat: 'interrupted executor candidate chat'
   });
 }
 
-async function assertBlockedSelection(input: {
+async function assertSelection(input: {
   target: string;
   caseName: string;
-  blockedSession: string;
+  selectedSession: string;
   runnableSession: string;
-  blockedState: string;
+  selectedState: string;
   visibleReason: string;
+  expectedMode: 'supervisor' | 'chat_only';
+  expectedFallback: string;
+  expectedChat?: string;
 }): Promise<void> {
   const runnablePaths = runPaths(input.target, input.runnableSession);
-  const blockedPaths = runPaths(input.target, input.blockedSession);
+  const selectedPaths = runPaths(input.target, input.selectedSession);
   const runnableBefore = await readJsonLines<RunEvent>(runnablePaths.events);
-  const blockedBefore = await readJsonLines<RunEvent>(blockedPaths.events);
-  const result = await execa('expect', ['-c', blockedExpectScript(input.blockedState, input.visibleReason)], {
+  const selectedBefore = await readJsonLines<RunEvent>(selectedPaths.events);
+  const result = await execa('expect', ['-c', selectionExpectScript(input.selectedState, input.visibleReason, input.expectedChat)], {
     cwd: resolve('.'),
     env: {
       ...process.env,
@@ -96,17 +104,26 @@ async function assertBlockedSelection(input: {
   });
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `${input.caseName} PTY path failed with code ${result.exitCode}:\n${output}`);
-  assert(output.includes('.thinkless3 [blocked]'), `${input.caseName} candidate was not visible:\n${output}`);
+  assert(output.includes(`.thinkless3 [runnable] ${input.selectedState}`), `${input.caseName} candidate was not visible as runnable:\n${output}`);
   assert(output.includes(input.visibleReason), `${input.caseName} reason was not visible:\n${output}`);
   assert(!output.includes('QUEUED COMMAND'), `${input.caseName} should not render a queued command block:\n${output}`);
+  if (input.expectedChat) assert(output.includes(input.expectedChat), `${input.caseName} did not restore selected chat transcript:\n${output}`);
 
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);
-  const blockedAfter = await readJsonLines<RunEvent>(blockedPaths.events);
+  const selectedAfter = await readJsonLines<RunEvent>(selectedPaths.events);
   const runnableNewEvents = runnableAfter.slice(runnableBefore.length);
-  const blockedNewEvents = blockedAfter.slice(blockedBefore.length);
+  const selectedNewEvents = selectedAfter.slice(selectedBefore.length);
   assert(runnableNewEvents.length === 0, `${input.caseName} should not mutate runnable decoy events: ${JSON.stringify(runnableNewEvents)}`);
-  assert(!blockedNewEvents.some((event) => forbiddenTypes.has(event.type)), `${input.caseName} emitted launch/preflight events: ${JSON.stringify(blockedNewEvents)}`);
-  console.log(JSON.stringify({ ok: true, case: input.caseName, target: input.target, blockedSession: input.blockedSession, runnableSession: input.runnableSession, noLaunch: true, blockedReasonVisible: true }, null, 2));
+  if (input.expectedMode === 'supervisor') {
+    const validated = selectedNewEvents.find((event) => event.type === 'RESUME_CONTEXT_VALIDATED');
+    assert(validated, `${input.caseName} should validate resume context: ${JSON.stringify(selectedNewEvents)}`);
+    assert((validated.data as { fallback?: string | null } | undefined)?.fallback === input.expectedFallback, `${input.caseName} fallback mismatch: ${JSON.stringify(validated)}`);
+    assert(selectedNewEvents.some((event) => event.type === 'SUPERVISOR_START'), `${input.caseName} should launch supervisor: ${JSON.stringify(selectedNewEvents)}`);
+    assert(!selectedNewEvents.some((event) => event.type === 'RESUME_CONTEXT_BLOCKED'), `${input.caseName} should not block resume: ${JSON.stringify(selectedNewEvents)}`);
+  } else {
+    assert(!selectedNewEvents.some((event) => forbiddenTypes.has(event.type)), `${input.caseName} emitted supervisor events: ${JSON.stringify(selectedNewEvents)}`);
+  }
+  console.log(JSON.stringify({ ok: true, case: input.caseName, target: input.target, selectedSession: input.selectedSession, runnableSession: input.runnableSession, mode: input.expectedMode, reasonVisible: true }, null, 2));
 }
 
 async function writeRunnableRun(paths: ReturnType<typeof runPaths>, fixture: RunnableFixture): Promise<void> {
@@ -168,7 +185,7 @@ async function writeText(path: string, content: string): Promise<void> {
   await writeFile(path, content);
 }
 
-function blockedExpectScript(blockedState: string, visibleReason: string): string {
+function selectionExpectScript(selectedState: string, visibleReason: string, expectedChat?: string): string {
   return `
 log_user 1
 set timeout 25
@@ -178,12 +195,11 @@ set env(LINES) 40
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".thinkless3 \\[blocked\\] ${blockedState}"
-send -- "\\033\\[A"
+expect ".thinkless3 \\[runnable\\] ${selectedState}"
 expect "${visibleReason}"
-sleep 1
 send -- "\\n"
 sleep 1
+${expectedChat ? `expect "${expectedChat}"` : ''}
 send -- "\\003"
 expect eof
 exit 0

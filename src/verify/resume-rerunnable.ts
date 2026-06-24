@@ -12,21 +12,24 @@ async function main(): Promise<void> {
   await mkdir(target, { recursive: true });
   await initGit(target);
 
-  const blockedSession = join(target, '.thinkless-blocked');
-  const blockedPaths = runPaths(target, blockedSession);
-  await writeRun(blockedPaths, checkpoint('PLAN'));
-  await writeOutbox(blockedPaths, {
+  const plannerSession = join(target, '.thinkless-planner');
+  const plannerPaths = runPaths(target, plannerSession);
+  await writeRun(plannerPaths, checkpoint('PLAN'));
+  await writeOutbox(plannerPaths, {
     id: 'out-planner',
     ts: ts(),
     kind: 'question',
     text: 'Need planner clarification',
     reply_key: 'planner-clarify-rerunnable'
   });
-  const blocked = await runSupervisor({ target, sessionDir: blockedSession, resumePreflight: true, mode: 'stub', maxIters: 0 });
-  assert(blocked.state === 'STOP', `blocked resume should stop without attaching read-only: ${JSON.stringify(blocked)}`);
-  const blockedEvents = await readJsonLines<RunEvent>(blockedPaths.events);
-  assert(blockedEvents.some((event) => event.type === 'RESUME_CONTEXT_BLOCKED'), 'blocked planner resume should emit RESUME_CONTEXT_BLOCKED');
-  assert(!blockedEvents.some((event) => event.type === 'RESUME_CONTEXT_VALIDATED'), 'blocked planner resume must not emit validated');
+  const planner = await runSupervisor({ target, sessionDir: plannerSession, resumePreflight: true, mode: 'stub', maxIters: 0 });
+  assert(planner.state === 'STOP' || planner.state === 'RUNNING', `planner rerun resume should not fail: ${JSON.stringify(planner)}`);
+  const plannerEvents = await readJsonLines<RunEvent>(plannerPaths.events);
+  const plannerValidated = plannerEvents.find((event) => event.type === 'RESUME_CONTEXT_VALIDATED');
+  assert(plannerValidated, 'planner rerun resume should emit RESUME_CONTEXT_VALIDATED');
+  assert((plannerValidated.data as { fallback?: string | null } | undefined)?.fallback === 'planner_rerun', `planner rerun fallback mismatch: ${JSON.stringify(plannerValidated)}`);
+  assert(plannerEvents.some((event) => event.type === 'SUPERVISOR_START'), 'planner rerun resume should actually launch the supervisor');
+  assert(!plannerEvents.some((event) => event.type === 'RESUME_CONTEXT_BLOCKED'), 'planner rerun resume must not emit blocked');
 
   const executorSession = join(target, '.thinkless-executor');
   const executorPaths = runPaths(target, executorSession);
@@ -38,7 +41,7 @@ async function main(): Promise<void> {
   assert(executorEvents.some((event) => event.type === 'EXECUTOR_RESUME_FALLBACK'), 'executor fallback resume should emit EXECUTOR_RESUME_FALLBACK');
   assert(executorEvents.some((event) => event.type === 'SUPERVISOR_START'), 'executor fallback resume should actually launch the supervisor');
 
-  console.log(JSON.stringify({ ok: true, blockedEvents: blockedEvents.length, executorEvents: executorEvents.length }, null, 2));
+  console.log(JSON.stringify({ ok: true, plannerEvents: plannerEvents.length, executorEvents: executorEvents.length }, null, 2));
 }
 
 async function initGit(root: string): Promise<void> {

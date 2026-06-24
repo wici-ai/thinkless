@@ -58,6 +58,8 @@ Resume an existing run:
 thinkless resume
 ```
 
+If a saved session is missing `GOAL.md`, `PLAN.md`, or persisted planner/executor state, Thinkless opens the Chat transcript instead of blocking; the next concrete request can start a new planner/execution path from that restored conversation.
+
 Run headlessly over a target:
 
 ```bash

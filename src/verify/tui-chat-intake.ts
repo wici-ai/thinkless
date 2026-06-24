@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     'stale initial-goal startup errors must not block fresh Chat-agent intake'
   );
   assert(
-    !shouldUseChatAgentForBlankRun({
+    shouldUseChatAgentForBlankRun({
       supervisorEnabled: true,
       supervisorStarted: false,
       state: {
@@ -112,10 +112,10 @@ async function main(): Promise<void> {
         events: [event('SUPERVISOR_START', 'Starting WiCi supervisor')]
       }
     }),
-    'real run events must still block blank-run Chat-agent intake'
+    'chat-only resume without goal must allow blank-run Chat-agent intake even when old events exist'
   );
   assert(
-    !shouldUseChatAgentForBlankRun({
+    shouldUseChatAgentForBlankRun({
       supervisorEnabled: true,
       supervisorStarted: false,
       state: {
@@ -123,7 +123,18 @@ async function main(): Promise<void> {
         outbox: [outbox('question', 'Planner needs clarification before producing PLAN.md. Which host?')]
       }
     }),
-    'real outbox messages must still block blank-run Chat-agent intake'
+    'chat-only resume without goal must allow blank-run Chat-agent intake even when old questions exist'
+  );
+  assert(
+    shouldUseChatAgentForBlankRun({
+      supervisorEnabled: true,
+      supervisorStarted: false,
+      state: {
+        ...blank,
+        checkpoint: checkpoint('EXECUTE')
+      }
+    }),
+    'missing GOAL.md must keep chat-only resume able to restart planning instead of treating stale checkpoint state as an existing run'
   );
   assert(!shouldAutoStartExistingRun({ ...blank, goal: goal() }), 'existing goal must not auto-start from a fresh TUI attach');
   assert(shouldAutoStartExistingRun({ ...blank, goal: goal() }, true), 'explicit resume should continue an existing goal without a checkpoint');

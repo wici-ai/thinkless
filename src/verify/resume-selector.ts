@@ -38,19 +38,40 @@ async function main(): Promise<void> {
   await ensureDir(chatOnly);
   await appendJsonLine(join(chatOnly, 'chat.jsonl'), { ts: ts(), role: 'user', text: 'chat only' });
 
+  const chatOnlyWithRunNoise = join(target, '.thinkless5');
+  const chatOnlyWithRunNoisePaths = runPaths(target, chatOnlyWithRunNoise);
+  await ensureDir(chatOnlyWithRunNoisePaths.stateDir);
+  await appendJsonLine(chatOnlyWithRunNoisePaths.chat, { ts: ts(), role: 'user', text: 'chat only without goal but with prior events' });
+  await appendJsonLine(chatOnlyWithRunNoisePaths.events, { seq: 1, ts: ts(), type: 'CHAT_ONLY', level: 'info', message: 'chat happened before any goal' });
+  await appendJsonLine(chatOnlyWithRunNoisePaths.ledger, { id: 'noise', ts: ts(), status: 'chat-only' });
+  await atomicWriteJson(chatOnlyWithRunNoisePaths.runtimeSelection, { chat: { agent: 'codex', model: 'gpt-5.5' } });
+
   const candidates = await discoverResumeCandidates({ currentTarget: target, limit: 20 });
   const currentCandidate = candidates.find((candidate) => candidate.stateDir === current.stateDir);
   const numberedCandidate = candidates.find((candidate) => candidate.sessionDir === numbered);
   const legacyCandidate = candidates.find((candidate) => candidate.sessionDir === legacy);
   const blockedCandidate = candidates.find((candidate) => candidate.sessionDir === blockedPlanner);
   const chatCandidate = candidates.find((candidate) => candidate.sessionDir === chatOnly);
+  const chatNoiseCandidate = candidates.find((candidate) => candidate.sessionDir === chatOnlyWithRunNoise);
 
   assert(currentCandidate?.runnable, `current run should be runnable: ${JSON.stringify(currentCandidate)}`);
   assert(currentCandidate.hasChat && currentCandidate.hasRuntimeSelection, 'candidate should expose chat/runtime presence');
   assert(numberedCandidate?.runnable && numberedCandidate.plannerSessionId === 'planner-session', `numbered planner run missing: ${JSON.stringify(numberedCandidate)}`);
   assert(legacyCandidate?.runnable && legacyCandidate.fallback === 'executor_rerun', `legacy executor fallback missing: ${JSON.stringify(legacyCandidate)}`);
-  assert(blockedCandidate && !blockedCandidate.runnable && blockedCandidate.reason.includes('planner session'), `blocked planner run should require a planner session: ${JSON.stringify(blockedCandidate)}`);
+  assert(
+    blockedCandidate?.runnable &&
+      blockedCandidate.fallback === 'planner_rerun' &&
+      blockedCandidate.reason.includes('clarification session was not persisted'),
+    `planner run without a persisted clarification session should rerun instead of blocking resume: ${JSON.stringify(blockedCandidate)}`
+  );
   assert(chatCandidate?.runnable && chatCandidate.fallback === 'chat_only', `chat-only run should resume chat context: ${JSON.stringify(chatCandidate)}`);
+  assert(
+    chatNoiseCandidate?.runnable &&
+      chatNoiseCandidate.fallback === 'chat_only' &&
+      chatNoiseCandidate.reason.includes('without GOAL.md') &&
+      chatNoiseCandidate.goalSummary.includes('chat only without goal'),
+    `chat-only run with events/ledger and no goal should still resume Chat: ${JSON.stringify(chatNoiseCandidate)}`
+  );
 
   const context = await loadResumeContext(numberedCandidate);
   assert(context.goal?.run_id === 'resume-selector-run', 'loadResumeContext should preserve selected goal');

@@ -174,7 +174,7 @@ async function verifyChatOnlyCandidateResumesWithoutSupervisor(): Promise<void> 
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `built PTY chat-only resume selector path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('.thinkless3 [runnable]'), `built CLI chat-only candidate was not visible as runnable:\n${output}`);
   assert(output.includes('NO_CHECKPOINT'), `built CLI chat-only candidate should show no checkpoint state:\n${output}`);
-  assert(output.includes('chat session can be') && output.includes('without supervisor'), `built CLI chat-only reason was not visible:\n${output}`);
+  assert(output.includes('session can be resumed as Chat without GOAL.md'), `built CLI chat-only reason was not visible:\n${output}`);
   assert(output.includes('built chat-only candidate'), `built CLI did not restore chat-only transcript:\n${output}`);
 
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);
