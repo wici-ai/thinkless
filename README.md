@@ -34,6 +34,7 @@ npm run verify:direct-no-scripts
 npm run verify:direct-recovery
 npm run verify:direct-preempt
 npm run verify:direct-plan-continuation
+npm run verify:direct-rollback
 npm run verify:self-interrogation
 npm run verify:continuation-verdict
 npm run verify:continuation-escalation
@@ -267,6 +268,8 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 `npm run verify:direct-preempt` covers the legacy fallback path: a fake real-mode `codex exec` run is interrupted after pending Chat input appears, WiCi records `EXECUTE_PREEMPTED`, drains the inbox, applies a planner diff, then resumes Codex.
 
 `npm run verify:direct-plan-continuation` covers exhausted-plan continuation: if `PLAN.md` has no pending steps, Thinkless asks the planner for another in-scope step instead of stopping merely because the markdown checklist is empty.
+
+`npm run verify:direct-rollback` covers measured direct-run regression protection: a later direct step with a worse metric is reverted to the previous best checkpoint and recorded as `revert`.
 
 `npm run verify:self-interrogation` covers AI-led planning assumptions: the planner prompt requires 2-3 approaches, self-grilling, narrow `## QUESTION` use, and materializes `ASSUMPTIONS.md`.
 

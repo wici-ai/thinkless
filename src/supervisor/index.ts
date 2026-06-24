@@ -24,6 +24,7 @@ import {
 import { nextExecutableStep, parsePlanSteps, readPlan, setPlanStepStatus } from './plan.js';
 import { appendLedger, lastAccepted, readLedger } from './ledger.js';
 import {
+  decideImprovement,
   evaluateCandidate,
   initializeBaseline,
   ledgerFromEvaluation,
@@ -979,11 +980,12 @@ async function runDirectPlanExecution(
           mode: 'direct'
         }, 'warn');
       }
-      const directStatus: LedgerEntry['status'] = iterResult.step_done && iterResult.tests_pass ? 'keep' : 'reject';
+      let directStatus: LedgerEntry['status'] = iterResult.step_done && iterResult.tests_pass ? 'keep' : 'reject';
       const measurement = directStatus === 'keep' && (await exists(paths.measure)) ? await runMeasure(paths, config) : null;
       const directMetric = measurement?.metric ?? null;
       const directBaseline = directMetric ? previousKeepMetric(await readLedger(paths)) : null;
       const directDeltaPct = directMetric && directBaseline ? directMetricDeltaPct(directBaseline, directMetric, goal.metric.direction) : null;
+      const directDecision = directMetric && directBaseline ? decideImprovement(directBaseline, directMetric, goal, config) : null;
       if (directMetric) {
         await events.emit('DIRECT_MEASURE', `Measured direct ${step.id}: ${primaryMetricTag(goal, directMetric)}`, {
           iter: nextIter,
@@ -991,14 +993,31 @@ async function runDirectPlanExecution(
           metric: directMetric,
           baseline: directBaseline,
           delta_pct: directDeltaPct,
+          decision: directDecision,
           mode: 'direct'
         });
+      }
+      const regressed = directDecision ? directDecision.deltaPct < -config.evaluation.noise_threshold : false;
+      if (regressed) {
+        await events.emit('DIRECT_METRIC_REGRESSION', `Direct ${step.id} regressed; reverting to best checkpoint: ${directDecision?.reason ?? 'metric regression'}`, {
+          iter: nextIter,
+          step_id: step.id,
+          metric: directMetric,
+          baseline: directBaseline,
+          delta_pct: directDeltaPct,
+          decision: directDecision,
+          best_commit: checkpoint.best_commit ?? null,
+          mode: 'direct'
+        }, 'warn');
+        await revertToBest(paths, checkpoint.best_commit ?? 'NO_HEAD');
+        await setPlanStepStatus(paths, step.id, 'pending', nextIter);
+        directStatus = 'revert';
       }
       const ledgerEntry = directLedgerEntry({
         iter: nextIter,
         stepId: step.id,
         status: directStatus,
-        commit: directBestCommit,
+        commit: regressed ? checkpoint.best_commit ?? null : directBestCommit,
         wallMs: Date.now() - iterationStarted,
         usage: iterResult.invocation.usage,
         notes: iterResult.notes,
@@ -1020,7 +1039,7 @@ async function runDirectPlanExecution(
         ...checkpoint,
         supervisor_state: 'REFLECT',
         next_step: step.id,
-        best_commit: directBestCommit,
+        best_commit: regressed ? checkpoint.best_commit : directBestCommit,
         ledger_seq: await lineCount(paths.ledger),
         events_seq: events.seq,
         plan_hash: await hashFile(paths.plan)
