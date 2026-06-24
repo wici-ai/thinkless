@@ -1,5 +1,5 @@
 ---
-title: Install Thinkless
+title: Thinkless
 ---
 
 <style>
@@ -12,6 +12,7 @@ title: Install Thinkless
   --tl-blue: #1f6feb;
   --tl-teal: #0f8f86;
   --tl-lime: #84cc16;
+  --tl-amber: #c47f00;
   --tl-shadow: 0 24px 70px rgba(17, 24, 39, 0.14);
   --tl-code: #0b1020;
   --tl-command: #f8fafc;
@@ -20,7 +21,9 @@ title: Install Thinkless
 body {
   margin: 0;
   background:
-    linear-gradient(180deg, #f8fafc 0%, #eef4f2 52%, #f7f7fb 100%);
+    radial-gradient(circle at 20% 0%, rgba(132, 204, 22, 0.16), transparent 32%),
+    radial-gradient(circle at 78% 8%, rgba(31, 111, 235, 0.12), transparent 30%),
+    linear-gradient(180deg, #f8fafc 0%, #eef4f2 48%, #f7f7fb 100%);
   color: var(--tl-ink);
 }
 
@@ -37,8 +40,8 @@ body {
 .thinkless-install {
   min-height: 100vh;
   display: grid;
-  place-items: center;
-  padding: 64px 22px;
+  justify-items: center;
+  padding: 64px 22px 86px;
   box-sizing: border-box;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -46,7 +49,7 @@ body {
 .install-shell {
   width: min(1060px, 100%);
   display: grid;
-  gap: 22px;
+  gap: 34px;
 }
 
 .install-hero {
@@ -177,6 +180,163 @@ body {
   padding: 2px 5px;
 }
 
+.flow-strip {
+  width: min(940px, 100%);
+  margin: 10px auto 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.flow-step {
+  min-height: 132px;
+  padding: 16px;
+  border: 1px solid var(--tl-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  text-align: left;
+}
+
+.flow-number {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+  background: var(--tl-code);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+.flow-step strong {
+  display: block;
+  font-size: 0.98rem;
+  margin-bottom: 7px;
+}
+
+.flow-step p {
+  margin: 0;
+  color: var(--tl-muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.content-section {
+  display: grid;
+  gap: 20px;
+}
+
+.section-copy {
+  max-width: 820px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.section-label {
+  margin: 0 0 9px;
+  color: var(--tl-teal);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.section-title {
+  margin: 0;
+  font-size: clamp(1.85rem, 4vw, 3rem);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.section-copy p {
+  margin: 14px auto 0;
+  color: var(--tl-muted);
+  font-size: 1.04rem;
+  line-height: 1.62;
+}
+
+.principle-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.principle-card,
+.example-card {
+  border: 1px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-panel);
+  box-shadow: 0 16px 42px rgba(17, 24, 39, 0.08);
+}
+
+.principle-card {
+  padding: 22px;
+}
+
+.principle-accent {
+  width: 38px;
+  height: 6px;
+  border-radius: 999px;
+  margin-bottom: 18px;
+  background: var(--tl-lime);
+}
+
+.principle-card:nth-child(2) .principle-accent {
+  background: var(--tl-blue);
+}
+
+.principle-card:nth-child(3) .principle-accent {
+  background: var(--tl-amber);
+}
+
+.principle-card h3,
+.example-card h3 {
+  margin: 0;
+  font-size: 1.08rem;
+  line-height: 1.28;
+  letter-spacing: 0;
+}
+
+.principle-card p {
+  margin: 11px 0 0;
+  color: var(--tl-muted);
+  font-size: 0.97rem;
+  line-height: 1.55;
+}
+
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.example-card {
+  overflow: hidden;
+}
+
+.example-card h3 {
+  padding: 18px 18px 0;
+}
+
+.example-card pre {
+  margin: 16px 0 0;
+  padding: 18px;
+  min-height: 260px;
+  background: var(--tl-code);
+  color: #e5eef8;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.example-card code {
+  background: transparent;
+  color: inherit;
+}
+
 @media (max-width: 760px) {
   .thinkless-install {
     padding: 44px 16px;
@@ -207,6 +367,20 @@ body {
     width: 100%;
   }
 
+  .flow-strip,
+  .principle-grid,
+  .example-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-step {
+    min-height: auto;
+  }
+
+  .section-copy {
+    text-align: left;
+  }
+
 }
 </style>
 
@@ -215,7 +389,7 @@ body {
     <div class="install-hero">
       <p class="install-kicker"><span class="install-mark">T</span> Thinkless install</p>
       <h1 id="install-title" class="install-title">Less thinking effort for AI software work.</h1>
-      <p class="install-copy">Thinkless sets up the local tools, connects Codex, Claude Code, and GitHub CLI, then gives you one command to move from idea to working software.</p>
+      <p class="install-copy">Thinkless separates what you mean from how the work gets done. Say the goal in normal language; the system writes the plan, executes it with Codex, and keeps improving the plan as evidence arrives.</p>
       <div class="command-panel" role="group" aria-label="Install command">
         <pre class="command-line"><code id="install-command">curl -fsSL https://wici.ai/thinkless/install.sh | bash</code></pre>
         <button class="copy-command" type="button" onclick="copyInstallCommand(this)" aria-label="Copy install command" title="Copy install command">
@@ -226,9 +400,91 @@ body {
         </button>
       </div>
       <div id="copy-status" class="copy-status" aria-live="polite"></div>
+      <div class="flow-strip" aria-label="Thinkless workflow">
+        <div class="flow-step">
+          <span class="flow-number">1</span>
+          <strong>Speak the intent</strong>
+          <p>Use chat or dictation. The raw requirement stays visible instead of being polished into a fragile mega-prompt.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-number">2</span>
+          <strong>Write the plan</strong>
+          <p>Planner reasoning becomes GOAL.md, ASSUMPTIONS.md, and PLAN.md so the work is explicit and reviewable.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-number">3</span>
+          <strong>Execute the loop</strong>
+          <p>Codex reads the plan, edits the repo, runs checks, inspects failures, and continues without hand-holding.</p>
+        </div>
+        <div class="flow-step">
+          <span class="flow-number">4</span>
+          <strong>Steer forward</strong>
+          <p>Follow-up messages update the live goal and plan. You correct by continuing the conversation.</p>
+        </div>
+      </div>
     </div>
 
     <p class="post-install">After installation, run <code>thinkless</code>, follow the Codex, Claude, and GitHub CLI auth prompts, then verify with <code>thinkless doctor --deep</code>.</p>
+
+    <section class="content-section" aria-labelledby="philosophy-title">
+      <div class="section-copy">
+        <p class="section-label">Philosophy</p>
+        <h2 id="philosophy-title" class="section-title">Think less at the keyboard. Reason better in the system.</h2>
+        <p>Thinkless is not trying to remove judgment from software work. It removes the control labor that makes humans babysit agents: rewriting prompts, restating context, deciding every recovery command, and remembering why a path failed.</p>
+      </div>
+      <div class="principle-grid">
+        <article class="principle-card">
+          <div class="principle-accent"></div>
+          <h3>Separate thinking from doing</h3>
+          <p>Intent capture, planning, and execution are different modes. Thinkless keeps each mode in the right medium: conversation, markdown artifacts, and an agent execution loop.</p>
+        </article>
+        <article class="principle-card">
+          <div class="principle-accent"></div>
+          <h3>Treat submitted chat like speech</h3>
+          <p>Submitted turns are append-only. You do not rewrite what you already said in a meeting; you clarify with the next sentence, preserving the record that lets the plan evolve honestly.</p>
+        </article>
+        <article class="principle-card">
+          <div class="principle-accent"></div>
+          <h3>Let plans improve with evidence</h3>
+          <p>The first plan is a starting point, not a monument. Logs, tests, benchmarks, remote state, and user follow-ups should refine PLAN.md until the goal is genuinely handled.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="content-section" aria-labelledby="examples-title">
+      <div class="section-copy">
+        <p class="section-label">Examples</p>
+        <h2 id="examples-title" class="section-title">Normal requests become durable coding work.</h2>
+      </div>
+      <div class="example-grid">
+        <article class="example-card">
+          <h3>Build an app</h3>
+          <pre><code>You: Build a local dashboard for support triage and make sure it runs.
+
+Thinkless: creates GOAL.md, ASSUMPTIONS.md, and PLAN.md, then Codex implements, validates, and reports evidence.
+
+You: Also make the mobile view dense.
+
+Thinkless: updates the existing plan and steers the active run.</code></pre>
+        </article>
+        <article class="example-card">
+          <h3>Benchmark a remote target</h3>
+          <pre><code>You: Try this model on the SSH host and see if it can reach 700 token/s.
+
+Thinkless: records the performance target, plans discovery and measurement, then lets Codex handle docs, setup, logs, fallback paths, and the final result.</code></pre>
+        </article>
+        <article class="example-card">
+          <h3>Fix a repo issue</h3>
+          <pre><code>You: What is causing this test to fail?
+
+Thinkless: answers directly when the task is bounded.
+
+You: Fix it and harden the regression coverage.
+
+Thinkless: escalates when the work becomes an implementation and validation loop.</code></pre>
+        </article>
+      </div>
+    </section>
   </section>
 </main>
 

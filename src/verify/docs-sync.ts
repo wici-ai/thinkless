@@ -4,6 +4,7 @@ async function main(): Promise<void> {
   const [
     packageRaw,
     readme,
+    referenceDoc,
     configRaw,
     plan,
     simplifiedPlan,
@@ -21,6 +22,7 @@ async function main(): Promise<void> {
   ] = await Promise.all([
     readFile('package.json', 'utf8'),
     readFile('README.md', 'utf8'),
+    readFile('docs/reference.md', 'utf8'),
     readFile('wici.config.json', 'utf8'),
     readFile('PLAN.md', 'utf8'),
     readFile('Simplified_PLAN.md', 'utf8'),
@@ -38,10 +40,11 @@ async function main(): Promise<void> {
   ]);
   const pkg = JSON.parse(packageRaw) as { scripts: Record<string, string> };
   const config = JSON.parse(configRaw) as { budget?: { max_iters?: number; max_cost_usd?: number } };
+  const docsText = `${readme}\n${referenceDoc}`;
   const packageVerifyScripts = Object.keys(pkg.scripts)
     .filter((name) => name.startsWith('verify:'))
     .sort();
-  const readmeVerifyScripts = [...new Set([...readme.matchAll(/npm run (verify:[a-z0-9:-]+)/g)].map((match) => match[1]))].sort();
+  const docsVerifyScripts = [...new Set([...docsText.matchAll(/npm run (verify:[a-z0-9:-]+)/g)].map((match) => match[1]))].sort();
   const releaseResumeVerifiers = [
     'verify:resume-selector',
     'verify:tui-resume-selector-pty',
@@ -61,10 +64,15 @@ async function main(): Promise<void> {
     'verify:resume-rerunnable'
   ];
 
-  const missingFromReadme = packageVerifyScripts.filter((script) => !readmeVerifyScripts.includes(script));
-  const extraInReadme = readmeVerifyScripts.filter((script) => !packageVerifyScripts.includes(script));
-  assert(missingFromReadme.length === 0, `README command list missing package verify scripts: ${missingFromReadme.join(', ')}`);
-  assert(extraInReadme.length === 0, `README command list has unknown verify scripts: ${extraInReadme.join(', ')}`);
+  const missingFromDocs = packageVerifyScripts.filter((script) => !docsVerifyScripts.includes(script));
+  const extraInDocs = docsVerifyScripts.filter((script) => !packageVerifyScripts.includes(script));
+  assert(missingFromDocs.length === 0, `docs command list missing package verify scripts: ${missingFromDocs.join(', ')}`);
+  assert(extraInDocs.length === 0, `docs command list has unknown verify scripts: ${extraInDocs.join(', ')}`);
+  assert(readme.includes('# Thinkless'), 'README should identify the project');
+  assert(readme.includes('## Install') && readme.includes('curl -fsSL https://wici.ai/thinkless/install.sh | bash'), 'README should keep a short install path');
+  assert(readme.includes('## Usage') && readme.includes('thinkless resume'), 'README should keep concise usage examples');
+  assert(readme.includes('[Full reference](docs/reference.md)'), 'README should link the detailed reference docs');
+  assert(readme.length < 7000, 'README should stay concise for an open-source repo landing page');
 
   assert(plan.includes('Autonomous Long-Horizon Coding TUI Orchestrator'), 'PLAN.md should remain the original long-horizon plan');
   assert(
@@ -104,127 +112,127 @@ async function main(): Promise<void> {
   assert(plannerPrompt.includes('unresolvable by repository evidence'), 'planner prompt must narrow QUESTION to essential unresolvable unknowns');
   assert(plannerDiffPrompt.includes('living self-interrogation artifact') && plannerDiffPrompt.includes('override an adopted assumption'), 'planner-diff prompt must maintain assumption overrides');
   assert(plannerDiffPrompt.includes('not blindly append') && plannerDiffPrompt.includes('compact it while applying the new requirement'), 'planner-diff prompt must govern PLAN.md bloat during updates');
-  assert(readme.includes('Legacy optimizer compatibility checks'), 'README should explicitly separate legacy verifiers from core V1 checks');
-  assert(readme.includes('WICI_LEGACY_OPTIMIZER=1'), 'README should document explicit opt-in for legacy optimizer behavior');
-  assert(readme.includes('npm run verify:legacy-optimizer'), 'README should document the legacy optimizer aggregate verifier');
-  assert(readme.includes('npm run verify:direct-no-scripts'), 'README should document the no-script direct PLAN.md verifier');
-  assert(readme.includes('npm run verify:direct-recovery'), 'README should document the direct executor recovery verifier');
-  assert(readme.includes('npm run verify:existing-goal') && readme.includes('without passing a new `--goal`'), 'README should document the existing-goal continuation verifier');
-  assert(readme.includes('npm run verify:tui-chat-pty') && readme.includes('real pseudo-terminal'), 'README should document the real PTY Chat-first verifier');
-  assert(readme.includes('npm run verify:tui-real-fake-chat') && readme.includes('fake Claude/Codex CLIs'), 'README should document the real-mode fake CLI Chat-first verifier');
-  assert(readme.includes('npm run verify:tui-planner-clarification-pty') && readme.includes('resumes the planner session'), 'README should document the real PTY planner clarification verifier');
-  assert(readme.includes('npm run verify:tui-hotreload-pty') && readme.includes('PLAN_DIFF_APPLIED'), 'README should document the real PTY hot reload verifier');
+  assert(docsText.includes('Legacy optimizer compatibility checks'), 'docs should explicitly separate legacy verifiers from core V1 checks');
+  assert(docsText.includes('WICI_LEGACY_OPTIMIZER=1'), 'docs should document explicit opt-in for legacy optimizer behavior');
+  assert(docsText.includes('npm run verify:legacy-optimizer'), 'docs should document the legacy optimizer aggregate verifier');
+  assert(docsText.includes('npm run verify:direct-no-scripts'), 'docs should document the no-script direct PLAN.md verifier');
+  assert(docsText.includes('npm run verify:direct-recovery'), 'docs should document the direct executor recovery verifier');
+  assert(docsText.includes('npm run verify:existing-goal') && docsText.includes('without passing a new `--goal`'), 'docs should document the existing-goal continuation verifier');
+  assert(docsText.includes('npm run verify:tui-chat-pty') && docsText.includes('real pseudo-terminal'), 'docs should document the real PTY Chat-first verifier');
+  assert(docsText.includes('npm run verify:tui-real-fake-chat') && docsText.includes('fake Claude/Codex CLIs'), 'docs should document the real-mode fake CLI Chat-first verifier');
+  assert(docsText.includes('npm run verify:tui-planner-clarification-pty') && docsText.includes('resumes the planner session'), 'docs should document the real PTY planner clarification verifier');
+  assert(docsText.includes('npm run verify:tui-hotreload-pty') && docsText.includes('PLAN_DIFF_APPLIED'), 'docs should document the real PTY hot reload verifier');
   assert(
-    readme.includes('The first natural-language Chat message is ordinary conversation first') &&
-      readme.includes('the Chat agent decides the work is large'),
-    'README should document Chat-agent-gated blank-run planning'
+    docsText.includes('The first natural-language Chat message is ordinary conversation first') &&
+      docsText.includes('the Chat agent decides the work is large'),
+    'docs should document Chat-agent-gated blank-run planning'
   );
   assert(
-    readme.includes('Typing a direct stop request') && readme.includes('aborts an active planner subprocess'),
-    'README should document Chat stop control for planner/executor'
+    docsText.includes('Typing a direct stop request') && docsText.includes('aborts an active planner subprocess'),
+    'docs should document Chat stop control for planner/executor'
   );
   assert(
-    readme.includes('ordinary code changes, validation, commits, pushes, and guarded release commands can stay in Chat') &&
-      readme.includes('make ordinary code changes, validate, commit, push, or run guarded release commands without starting a run'),
-    'README should document lightweight Chat work before planner/executor escalation'
+    docsText.includes('ordinary code changes, validation, commits, pushes, and guarded release commands can stay in Chat') &&
+      docsText.includes('make ordinary code changes, validate, commit, push, or run guarded release commands without starting a run'),
+    'docs should document lightweight Chat work before planner/executor escalation'
   );
   assert(
-    readme.includes('Chat agents run with normal native CLI permission') &&
-      readme.includes('Claude Chat is not forced into plan-only mode') &&
-      readme.includes('Codex Chat bypasses approvals and sandboxing'),
-    'README should document Chat direct-work permissions'
+    docsText.includes('Chat agents run with normal native CLI permission') &&
+      docsText.includes('Claude Chat is not forced into plan-only mode') &&
+      docsText.includes('Codex Chat bypasses approvals and sandboxing'),
+    'docs should document Chat direct-work permissions'
   );
   assert(
-    readme.includes('Press `Ctrl+R` to open the selector') &&
-      readme.includes('bottom Chat input is paused while the selector is open') &&
-      readme.includes('model is fixed by that agent') &&
-      readme.includes('/agent chat claude') &&
-      readme.includes('/effort execution high') &&
-      readme.includes('Claude effort options are `high`, `xhigh`, `max`, and `ultracode`') &&
-      readme.includes('Codex effort options are `fast`, `medium`, `high`, and `xhigh`') &&
-      readme.includes('model_reasoning_effort'),
-    'README should document per-workspace runtime selection commands'
+    docsText.includes('Press `Ctrl+R` to open the selector') &&
+      docsText.includes('bottom Chat input is paused while the selector is open') &&
+      docsText.includes('model is fixed by that agent') &&
+      docsText.includes('/agent chat claude') &&
+      docsText.includes('/effort execution high') &&
+      docsText.includes('Claude effort options are `high`, `xhigh`, `max`, and `ultracode`') &&
+      docsText.includes('Codex effort options are `fast`, `medium`, `high`, and `xhigh`') &&
+      docsText.includes('model_reasoning_effort'),
+    'docs should document per-workspace runtime selection commands'
   );
   assert(
-    readme.includes('Terminal text selection/copy is the default pointer mode') &&
-      readme.includes('cannot reliably provide native drag selection and app-level touchpad scrolling at the same time') &&
-      readme.includes('Press `Ctrl+O`') &&
-      readme.includes('`--mouse-reporting`'),
-    'README should document explicit select/scroll pointer modes'
+    docsText.includes('Terminal text selection/copy is the default pointer mode') &&
+      docsText.includes('cannot reliably provide native drag selection and app-level touchpad scrolling at the same time') &&
+      docsText.includes('Press `Ctrl+O`') &&
+      docsText.includes('`--mouse-reporting`'),
+    'docs should document explicit select/scroll pointer modes'
   );
-  assert(readme.includes('WICI_PLANNER_EFFORT') && readme.includes('WICI_EXECUTOR_AGENT') && readme.includes('WICI_EXECUTOR_EFFORT'), 'README should document runtime environment overrides');
-  assert(readme.includes('npm run verify:release-tag'), 'README should document the guarded release tag verifier');
-  assert(readme.includes('planner-*.stdout.jsonl') && readme.includes('.wici/codex-run.jsonl'), 'README should document planner and Codex transcript paths');
-  assert(readme.includes('git clone git@github.com:wici-ai/thinkless.git'), 'README should document a source checkout deployment path');
-  assert(readme.includes('git checkout <verified-release-tag-or-commit>'), 'README should document pinning a verified WiCi version');
-  assert(readme.includes('npm run build') && readme.includes('npm run verify:v1-core'), 'README deployment should include build and core verification');
+  assert(docsText.includes('WICI_PLANNER_EFFORT') && docsText.includes('WICI_EXECUTOR_AGENT') && docsText.includes('WICI_EXECUTOR_EFFORT'), 'docs should document runtime environment overrides');
+  assert(docsText.includes('npm run verify:release-tag'), 'docs should document the guarded release tag verifier');
+  assert(docsText.includes('planner-*.stdout.jsonl') && docsText.includes('.wici/codex-run.jsonl'), 'docs should document planner and Codex transcript paths');
+  assert(docsText.includes('git clone git@github.com:wici-ai/thinkless.git'), 'docs should document a source checkout deployment path');
+  assert(docsText.includes('git checkout <verified-release-tag-or-commit>'), 'docs should document pinning a verified WiCi version');
+  assert(docsText.includes('npm run build') && docsText.includes('npm run verify:v1-core'), 'docs deployment should include build and core verification');
   assert(
-    readme.includes('## Resume Or Re-Run') &&
-      readme.includes('without a new `--goal`') &&
-      readme.includes('--resume-iteration 1') &&
-      readme.includes('drained_inbox[]') &&
-      readme.includes('open an in-TUI selector') &&
-      readme.includes('runnable or blocked') &&
-      readme.includes('RESUME_CONTEXT_VALIDATED'),
-    'README should document continuing, rewinding, selectable resume, and idempotent hot-reload resume'
+    docsText.includes('## Resume Or Re-Run') &&
+      docsText.includes('without a new `--goal`') &&
+      docsText.includes('--resume-iteration 1') &&
+      docsText.includes('drained_inbox[]') &&
+      docsText.includes('open an in-TUI selector') &&
+      docsText.includes('runnable or blocked') &&
+      docsText.includes('RESUME_CONTEXT_VALIDATED'),
+    'docs should document continuing, rewinding, selectable resume, and idempotent hot-reload resume'
   );
   assert(config.budget?.max_iters === 0 && config.budget?.max_cost_usd === 0, 'default config should not impose cost or iteration hard caps');
-  assert(readme.includes('default `max_iters` is `0`') && readme.includes('disable WiCi\'s own cost and iteration hard stops'), 'README should document unbounded default real-run budgets');
+  assert(docsText.includes('default `max_iters` is `0`') && docsText.includes('disable WiCi\'s own cost and iteration hard stops'), 'docs should document unbounded default real-run budgets');
   assert(
-    readme.includes('automatically checks for Codex/Claude updates at run boundaries') &&
-      readme.includes('pending updates are not a WiCi supervisor start gate'),
-    'README should document automatic Codex/Claude update checks without a pending-update start gate'
+    docsText.includes('automatically checks for Codex/Claude updates at run boundaries') &&
+      docsText.includes('pending updates are not a WiCi supervisor start gate'),
+    'docs should document automatic Codex/Claude update checks without a pending-update start gate'
   );
   assert(
-      readme.includes('## macOS Bootstrap') &&
-      readme.includes('curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash') &&
-      readme.includes('THINKLESS_TARBALL_URL') &&
-      readme.includes('workflow is manually triggered') &&
-      readme.includes('Publish public install release') &&
-      readme.includes('From a clean machine') &&
-      readme.includes('scripts/postinstall.mjs') &&
-      readme.includes('THINKLESS_BOOTSTRAP=0') &&
-      readme.includes('scripts/bootstrap-macos.sh') &&
-      readme.includes('no `npm` yet') &&
-      readme.includes('usable `sudo` access') &&
-      readme.includes('verifies `sudo` access') &&
-      readme.includes('does not run npm install scripts with `sudo`') &&
-      readme.includes('Apple Command Line Tools') &&
-      readme.includes('~/.zprofile') &&
-      readme.includes('~/.zshrc') &&
-      readme.includes('`node`, `npm`, `thinkless`, `codex`, `claude`, and `gh`') &&
-      readme.includes('clean zsh login and interactive shells') &&
-      readme.includes('export PATH=... && thinkless') &&
-      readme.includes('auth onboarding status') &&
-      readme.includes('codex login') &&
-      readme.includes('/dev/tty') &&
-      readme.includes('THINKLESS_AUTH_ONBOARDING=0') &&
-      readme.includes('auth is pending'),
-    'README should document public one-line install, automatic macOS install-time bootstrap, and the no-npm bootstrap path'
+      docsText.includes('## macOS Bootstrap') &&
+      docsText.includes('curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash') &&
+      docsText.includes('THINKLESS_TARBALL_URL') &&
+      docsText.includes('workflow is manually triggered') &&
+      docsText.includes('Publish public install release') &&
+      docsText.includes('From a clean machine') &&
+      docsText.includes('scripts/postinstall.mjs') &&
+      docsText.includes('THINKLESS_BOOTSTRAP=0') &&
+      docsText.includes('scripts/bootstrap-macos.sh') &&
+      docsText.includes('no `npm` yet') &&
+      docsText.includes('usable `sudo` access') &&
+      docsText.includes('verifies `sudo` access') &&
+      docsText.includes('does not run npm install scripts with `sudo`') &&
+      docsText.includes('Apple Command Line Tools') &&
+      docsText.includes('~/.zprofile') &&
+      docsText.includes('~/.zshrc') &&
+      docsText.includes('`node`, `npm`, `thinkless`, `codex`, `claude`, and `gh`') &&
+      docsText.includes('clean zsh login and interactive shells') &&
+      docsText.includes('export PATH=... && thinkless') &&
+      docsText.includes('auth onboarding status') &&
+      docsText.includes('codex login') &&
+      docsText.includes('/dev/tty') &&
+      docsText.includes('THINKLESS_AUTH_ONBOARDING=0') &&
+      docsText.includes('auth is pending'),
+    'docs should document public one-line install, automatic macOS install-time bootstrap, and the no-npm bootstrap path'
   );
   assert(
-    readme.includes('`brew`, `git`, `node`, `npm`, `gh`, `codex`, and `claude`') &&
-      readme.includes('GitHub CLI') &&
-      readme.includes('gh auth login') &&
-      readme.includes('gh auth status') &&
-      readme.includes('Codex CLI') &&
-      readme.includes('Claude Code CLI') &&
-      readme.includes('Codex, Claude, and GitHub CLI commands'),
-    'README should document GitHub CLI as a required installed and authenticated host dependency'
+    docsText.includes('`brew`, `git`, `node`, `npm`, `gh`, `codex`, and `claude`') &&
+      docsText.includes('GitHub CLI') &&
+      docsText.includes('gh auth login') &&
+      docsText.includes('gh auth status') &&
+      docsText.includes('Codex CLI') &&
+      docsText.includes('Claude Code CLI') &&
+      docsText.includes('Codex, Claude, and GitHub CLI commands'),
+    'docs should document GitHub CLI as a required installed and authenticated host dependency'
   );
   assert(
-    readme.includes('THINKLESS_CONFIG_BUNDLE') &&
-      readme.includes('~/.codex/config.toml') &&
-      readme.includes('~/.codex/auth.json') &&
-      readme.includes('~/.claude/settings.json') &&
-      readme.includes('~/.claude/.credentials.json') &&
-      readme.includes('keep them out of the repository'),
-    'README should document user-scoped Codex/Claude config copying without committing secrets'
+    docsText.includes('THINKLESS_CONFIG_BUNDLE') &&
+      docsText.includes('~/.codex/config.toml') &&
+      docsText.includes('~/.codex/auth.json') &&
+      docsText.includes('~/.claude/settings.json') &&
+      docsText.includes('~/.claude/.credentials.json') &&
+      docsText.includes('keep them out of the repository'),
+    'docs should document user-scoped Codex/Claude config copying without committing secrets'
   );
   assert(
-    readme.includes('Codex `doctor` reachability failures are recorded as diagnostics') &&
-      readme.includes('not a hard real-mode start gate'),
-    'README should document advisory Codex doctor diagnostics'
+    docsText.includes('Codex `doctor` reachability failures are recorded as diagnostics') &&
+      docsText.includes('not a hard real-mode start gate'),
+    'docs should document advisory Codex doctor diagnostics'
   );
   assert(
     installPage.includes('curl -fsSL https://wici.ai/thinkless/install.sh | bash') &&
@@ -234,99 +242,99 @@ async function main(): Promise<void> {
     'docs install page should expose the public one-line installer, copy button, purpose, and verification command'
   );
   assert(
-    readme.includes('Do not pass the canary as `--goal`; the release proof is the Chat-first path.'),
-    'README should document Chat-first canary execution'
+    docsText.includes('Do not pass the canary as `--goal`; the release proof is the Chat-first path.'),
+    'docs should document Chat-first canary execution'
   );
   assert(
-    readme.includes('Keep that first Chat as the real user request only') &&
-      readme.includes('those requirements belong in the planner and executor prompts'),
-    'README should keep canary Chat free of research/debug meta instructions'
+    docsText.includes('Keep that first Chat as the real user request only') &&
+      docsText.includes('those requirements belong in the planner and executor prompts'),
+    'docs should keep canary Chat free of research/debug meta instructions'
   );
   assert(
-    readme.includes('`GOAL.md + PLAN.md` as one goal') && !readme.includes('execute a `PLAN.md` step'),
-    'README should document whole-goal Codex execution instead of the old step-only contract'
+    docsText.includes('`GOAL.md + PLAN.md` as one goal') && !docsText.includes('execute a `PLAN.md` step'),
+    'docs should document whole-goal Codex execution instead of the old step-only contract'
   );
   assert(
-    readme.includes('optional planner scripts are persisted executable and runnable when present'),
-    'README should document executable runnable planner scripts when they are present'
+    docsText.includes('optional planner scripts are persisted executable and runnable when present'),
+    'docs should document executable runnable planner scripts when they are present'
   );
   assert(
-    readme.includes('ASSUMPTIONS.md') &&
-      readme.includes('self-grill its assumptions') &&
-      readme.includes('essential and unresolvable by evidence or discovery'),
-    'README should document planner self-interrogation and the assumptions artifact'
+    docsText.includes('ASSUMPTIONS.md') &&
+      docsText.includes('self-grill its assumptions') &&
+      docsText.includes('essential and unresolvable by evidence or discovery'),
+    'docs should document planner self-interrogation and the assumptions artifact'
   );
   assert(
-    readme.includes('recoverable crash ledger rows') &&
-      readme.includes('Codex is allowed to inspect logs and remote state') &&
-      readme.includes('update `PLAN.md`') &&
-      readme.includes('continue the same `GOAL.md`'),
-    'README should document long-goal executor recovery instead of one-shot blocking'
+    docsText.includes('recoverable crash ledger rows') &&
+      docsText.includes('Codex is allowed to inspect logs and remote state') &&
+      docsText.includes('update `PLAN.md`') &&
+      docsText.includes('continue the same `GOAL.md`'),
+    'docs should document long-goal executor recovery instead of one-shot blocking'
   );
   assert(
-    readme.includes('continue-biased completion gate') &&
-      readme.includes('only an explicit `complete` verdict stops cleanly') &&
-      readme.includes('without inventing new scope'),
-    'README should document direct exhausted-plan completion gate behavior'
+    docsText.includes('continue-biased completion gate') &&
+      docsText.includes('only an explicit `complete` verdict stops cleanly') &&
+      docsText.includes('without inventing new scope'),
+    'docs should document direct exhausted-plan completion gate behavior'
   );
   assert(
-    readme.includes('TUI header displays the current rollback checkpoint') &&
-      readme.includes('rollback pending'),
-    'README should document visible rollback checkpoint status in the TUI'
+    docsText.includes('TUI header displays the current rollback checkpoint') &&
+      docsText.includes('rollback pending'),
+    'docs should document visible rollback checkpoint status in the TUI'
   );
   assert(
-    readme.includes('The absence of `.opt` scripts is a valid fresh V1 path') &&
-      readme.includes('no-script plans still execute directly'),
-    'README should document no-script PLAN.md execution as a valid fresh V1 path'
+    docsText.includes('The absence of `.opt` scripts is a valid fresh V1 path') &&
+      docsText.includes('no-script plans still execute directly'),
+    'docs should document no-script PLAN.md execution as a valid fresh V1 path'
   );
   assert(
-    readme.includes('planning-time web research or remote discovery') && readme.includes('does not pass a custom tool allowlist or denylist'),
-    'README should document native Claude plan-mode tool availability'
+    docsText.includes('planning-time web research or remote discovery') && docsText.includes('does not pass a custom tool allowlist or denylist'),
+    'docs should document native Claude plan-mode tool availability'
   );
   assert(
-    readme.includes('release_action: blocked_do_not_tag_or_push') && readme.includes('local release tags are not proof'),
-    'README should document explicit blocked tag-gate action'
+    docsText.includes('release_action: blocked_do_not_tag_or_push') && docsText.includes('local release tags are not proof'),
+    'docs should document explicit blocked tag-gate action'
   );
   assert(
-    readme.includes('npm run release:preflight') && readme.includes('automated V1 core gate') && readme.includes('real canary tag gate'),
-    'README should document the release preflight command'
+    docsText.includes('npm run release:preflight') && docsText.includes('automated V1 core gate') && docsText.includes('real canary tag gate'),
+    'docs should document the release preflight command'
   );
   assert(
-    readme.includes('npm run release:tag -- 0.1.0') && readme.includes('It never pushes') && readme.includes('exits before `git tag`'),
-    'README should document the guarded release tag command'
+    docsText.includes('npm run release:tag -- 0.1.0') && docsText.includes('It never pushes') && docsText.includes('exits before `git tag`'),
+    'docs should document the guarded release tag command'
   );
   assert(
-    readme.includes('evidence commit must equal current `HEAD`') && readme.includes('current checkout must be clean'),
-    'README should document current checkout matching for release tags'
+    docsText.includes('evidence commit must equal current `HEAD`') && docsText.includes('current checkout must be clean'),
+    'docs should document current checkout matching for release tags'
   );
   assert(
-    readme.includes('clean target git checkout') && readme.includes('uncommitted target changes'),
-    'README should document target checkout cleanliness for passed release tags'
+    docsText.includes('clean target git checkout') && docsText.includes('uncommitted target changes'),
+    'docs should document target checkout cleanliness for passed release tags'
   );
-  assert(readme.includes('mode: real') && readme.includes('stub canaries'), 'README should document real tool-mode requirement for passed release tags');
+  assert(docsText.includes('mode: real') && docsText.includes('stub canaries'), 'docs should document real tool-mode requirement for passed release tags');
   assert(
-    readme.includes('run_checkpoint.goal_source: "tui_chat"') &&
-      readme.includes('goal_source: "tui_chat"'),
-    'README should document TUI Chat checkpoint source evidence for passed canaries'
-  );
-  assert(
-    readme.includes('the recorder requires `--started-from-empty-tui true`') &&
-      readme.includes('`--operator-manual-execution false`'),
-    'README should document passed-canary attestation requirements'
+    docsText.includes('run_checkpoint.goal_source: "tui_chat"') &&
+      docsText.includes('goal_source: "tui_chat"'),
+    'docs should document TUI Chat checkpoint source evidence for passed canaries'
   );
   assert(
-    readme.includes('artifacts/.wici/codex-run.jsonl') && readme.includes('checks the recorded sha256 and byte length') && readme.includes('remain executable'),
-    'README should document committed release canary artifact files'
+    docsText.includes('the recorder requires `--started-from-empty-tui true`') &&
+      docsText.includes('`--operator-manual-execution false`'),
+    'docs should document passed-canary attestation requirements'
   );
-  assert(readme.includes('npm run release:record-canary'), 'README should document the release canary recorder');
   assert(
-    readme.includes('--started-from-empty-tui true') &&
-      readme.includes('--operator-manual-execution false') &&
-      readme.includes('--codex-attempted-ssh true'),
-    'README should document explicit release canary attestation flags'
+    docsText.includes('artifacts/.wici/codex-run.jsonl') && docsText.includes('checks the recorded sha256 and byte length') && docsText.includes('remain executable'),
+    'docs should document committed release canary artifact files'
   );
-  assert(readme.includes('--observed-value <number>') && readme.includes('observed value to reach the recorded target'), 'README should document passed canary observed value evidence');
-  assert(readme.includes('docs/v1-completion-audit.md'), 'README should link the V1 completion audit');
+  assert(docsText.includes('npm run release:record-canary'), 'docs should document the release canary recorder');
+  assert(
+    docsText.includes('--started-from-empty-tui true') &&
+      docsText.includes('--operator-manual-execution false') &&
+      docsText.includes('--codex-attempted-ssh true'),
+    'docs should document explicit release canary attestation flags'
+  );
+  assert(docsText.includes('--observed-value <number>') && docsText.includes('observed value to reach the recorded target'), 'docs should document passed canary observed value evidence');
+  assert(docsText.includes('docs/v1-completion-audit.md'), 'docs should link the V1 completion audit');
   assert(completionAudit.includes('Current blocker') && completionAudit.includes('tag_allowed: false'), 'completion audit should record the current release blocker');
   assert(
     completionAudit.includes('Next required action') && completionAudit.includes('root@116.127.115.18:23276'),
@@ -339,8 +347,8 @@ async function main(): Promise<void> {
     'completion audit should distinguish historical failed canary evidence from passed-canary Chat checkpoint provenance'
   );
   assert(
-    readme.includes('Failed canaries record `failure_reason` and `next_required_action`'),
-    'README should document explicit failed-canary blocker fields'
+    docsText.includes('Failed canaries record `failure_reason` and `next_required_action`'),
+    'docs should document explicit failed-canary blocker fields'
   );
   assert(completionAudit.includes('npm run verify:v1-core') && completionAudit.includes('npm run verify:tag-gate'), 'completion audit should list core and tag-gate verification commands');
   assert(completionAudit.includes('npm run verify:tui-chat-intake'), 'completion audit should list the Chat-first intake verification command');
@@ -400,8 +408,8 @@ async function main(): Promise<void> {
   );
   assert(completionAudit.includes('Chat pane restores current goal, user steering, and planner answers'), 'completion audit should include durable Chat history evidence');
   assert(completionAudit.includes('goal_doc_contains_steering'), 'completion audit should include GOAL.md steering persistence evidence');
-  assert(completionAudit.includes('EXECUTE_STEERED') && readme.includes('npm run verify:app-server-hotreload'), 'docs should cover Codex app-server steering after hot reload');
-  assert(completionAudit.includes('legacy resume fallback') && readme.includes('npm run verify:hotreload-resume'), 'docs should cover Codex exec resume fallback after hot reload');
+  assert(completionAudit.includes('EXECUTE_STEERED') && docsText.includes('npm run verify:app-server-hotreload'), 'docs should cover Codex app-server steering after hot reload');
+  assert(completionAudit.includes('legacy resume fallback') && docsText.includes('npm run verify:hotreload-resume'), 'docs should cover Codex exec resume fallback after hot reload');
   assert(completionAudit.includes('goal_source_not_retroactive'), 'completion audit should include non-retroactive initial goal provenance evidence');
   assert(completionAudit.includes('only ChatPane writes inbox injections') && completionAudit.includes('chat_writes_only_inbox'), 'completion audit should include single-writer TUI boundary evidence');
   assert(completionAudit.includes('historical_baseline_does_not_block_chat'), 'completion audit should include historical baseline isolation for Chat-first intake');
@@ -419,7 +427,7 @@ async function main(): Promise<void> {
       completionAudit.includes('EXECUTOR_RESUME_FALLBACK'),
     'completion audit should include selectable resume catalog and runnable preflight evidence'
   );
-  assert(completionAudit.includes('clean checkout, build, core verification'), 'completion audit should include README deployment evidence');
+  assert(completionAudit.includes('clean checkout, build, core verification'), 'completion audit should include docs deployment evidence');
   assert(completionAudit.includes('blocked_do_not_tag_or_push'), 'completion audit should include explicit tag/push blocker evidence');
   assert(completionAudit.includes('Release tags are created only through a guarded command') && completionAudit.includes('npm run verify:release-tag'), 'completion audit should include guarded release tag evidence');
   assert(
@@ -480,7 +488,7 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:v1-core']?.includes('verify:resume-rerunnable'), 'fresh V1 core gate must include runnable resume preflight coverage');
   for (const verifier of releaseResumeVerifiers) {
     assert(pkg.scripts['verify:v1-core']?.includes(verifier), `fresh V1 core gate must include release resume verifier ${verifier}`);
-    assert(readme.includes(`npm run ${verifier}`), `README must document release resume verifier ${verifier}`);
+    assert(docsText.includes(`npm run ${verifier}`), `docs must document release resume verifier ${verifier}`);
     assert(completionAudit.includes(verifier), `completion audit must document release resume verifier ${verifier}`);
   }
   assert(pkg.scripts['verify:v1-core']?.includes('verify:app-server-hotreload'), 'fresh V1 core gate must include Codex app-server steering after hot reload');
@@ -495,7 +503,7 @@ async function main(): Promise<void> {
     JSON.stringify(
       {
         ok: true,
-        readme_verify_scripts: readmeVerifyScripts.length,
+        docs_verify_scripts: docsVerifyScripts.length,
         package_verify_scripts: packageVerifyScripts.length,
         no_planner_schema: true,
         no_prebaseline_path: true,
