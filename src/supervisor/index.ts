@@ -1,6 +1,6 @@
 import { chmod, readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
-import { atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
+import { atomicWriteFile, atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { ensureRunDirs, ensureTargetGitignore, runPaths } from '../shared/paths.js';
@@ -62,6 +62,7 @@ import { formatSkillsForPrompt, recordSkillFromKeep, retrieveSkills } from './sk
 import { codexUsageFromError } from './codexRun.js';
 import { PLANNER_SELECTED_METRIC, formatPrimaryMetricTransition, primaryMetricTag, primaryMetricValue } from './metricFormat.js';
 import { isTransientNetworkFailure, transientFailureReason, transientRetryDelayMs, transientRetryMessage } from './transientRetry.js';
+import { findNearDuplicateContinuationStep } from './stepSimilarity.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
@@ -1240,6 +1241,7 @@ async function continueDirectExhaustedPlan(
       supervisor_state: 'STOP',
       next_step: null,
       consecutive_continuation_fallbacks: 0,
+      consecutive_duplicate_continuation_steps: 0,
       ledger_seq: await lineCount(paths.ledger),
       events_seq: events.seq,
       plan_hash: await hashFile(paths.plan)
@@ -1284,6 +1286,54 @@ async function continueDirectExhaustedPlan(
   }
 
   const updatedPlan = await readPlan(paths);
+  const duplicateMatch = findNearDuplicateContinuationStep(parsePlanSteps(plan), parsePlanSteps(updatedPlan), {
+    recentWindow: stepDedupRecentWindow(),
+    threshold: stepDedupSimilarityThreshold()
+  });
+  const duplicateCount = duplicateMatch ? (checkpoint.consecutive_duplicate_continuation_steps ?? 0) + 1 : 0;
+  if (duplicateMatch) {
+    checkpoint = {
+      ...checkpoint,
+      consecutive_duplicate_continuation_steps: duplicateCount,
+      events_seq: events.seq
+    };
+    await saveCheckpoint(paths, checkpoint);
+    if (duplicateCount >= stepDedupConsecutiveThreshold()) {
+      await atomicWriteFile(paths.plan, ensureTrailingNewline(plan));
+      const replyKey = `${CONTINUATION_STALL_REPLY_PREFIX}${checkpoint.iter}-dedup`;
+      const reason = `Planner continuation proposed near-duplicate step ${duplicateMatch.added.id} (${duplicateMatch.added.text}) similar to ${duplicateMatch.existing.id} (${duplicateMatch.existing.text}); pausing instead of appending busywork.`;
+      const question = await writeOutbox(paths, {
+        kind: 'question',
+        text: `${reason} Reply with a steer or new requirement to resume, or answer stop to leave the run stopped.`,
+        replyKey,
+        data: {
+          mode: 'direct',
+          duplicate_step: duplicateMatch,
+          consecutive_duplicate_continuation_steps: duplicateCount,
+          threshold: stepDedupConsecutiveThreshold()
+        }
+      });
+      checkpoint = {
+        ...checkpoint,
+        supervisor_state: 'STOP',
+        next_step: null,
+        ledger_seq: await lineCount(paths.ledger),
+        events_seq: events.seq,
+        plan_hash: await hashFile(paths.plan)
+      };
+      await saveCheckpoint(paths, checkpoint);
+      await events.emit('CONTINUATION_DEDUP_ESCALATED', reason, {
+        mode: 'direct',
+        reply_key: replyKey,
+        outbox_id: question.id,
+        duplicate_step: duplicateMatch,
+        consecutive_duplicate_continuation_steps: duplicateCount,
+        threshold: stepDedupConsecutiveThreshold()
+      }, 'warn');
+      await events.emit('STOP', reason, { mode: 'direct', reply_key: replyKey, outbox_id: question.id }, 'warn');
+      return { goal, checkpoint, continued: false, stop: { state: 'STOP', reason, iter: checkpoint.iter } };
+    }
+  }
   const nextStep = nextExecutableStep(updatedPlan);
   checkpoint = {
     ...checkpoint,
@@ -1293,6 +1343,7 @@ async function continueDirectExhaustedPlan(
     },
     supervisor_state: nextStep ? 'EXECUTE' : 'FAILED',
     next_step: nextStep?.id ?? null,
+    consecutive_duplicate_continuation_steps: duplicateCount,
     plan_hash: await hashFile(paths.plan),
     ledger_seq: await lineCount(paths.ledger),
     events_seq: events.seq
@@ -2143,6 +2194,7 @@ async function handlePendingStopQuestion(
       ...checkpoint,
       drained_inbox: [...checkpoint.drained_inbox, ...injectionIds(drained)],
       consecutive_continuation_fallbacks: continuationStall ? 0 : checkpoint.consecutive_continuation_fallbacks,
+      consecutive_duplicate_continuation_steps: continuationStall ? 0 : checkpoint.consecutive_duplicate_continuation_steps,
       events_seq: events.seq
     };
     await saveCheckpoint(paths, next);
@@ -2161,6 +2213,7 @@ async function handlePendingStopQuestion(
   const next = {
     ...checkpoint,
     consecutive_continuation_fallbacks: continuationStall ? 0 : checkpoint.consecutive_continuation_fallbacks,
+    consecutive_duplicate_continuation_steps: continuationStall ? 0 : checkpoint.consecutive_duplicate_continuation_steps,
     events_seq: events.seq
   };
   await saveCheckpoint(paths, next);
@@ -2312,6 +2365,25 @@ function isStopQuestionReplyKey(replyKey: string | undefined): boolean {
 function continuationFallbackThreshold(): number {
   const parsed = Number(process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD?.trim() ?? '');
   return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 3;
+}
+
+function stepDedupRecentWindow(): number {
+  const parsed = Number(process.env.WICI_STEP_DEDUP_RECENT_WINDOW?.trim() ?? '');
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 8;
+}
+
+function stepDedupSimilarityThreshold(): number {
+  const parsed = Number(process.env.WICI_STEP_DEDUP_SIMILARITY?.trim() ?? '');
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= 1 ? parsed : 0.78;
+}
+
+function stepDedupConsecutiveThreshold(): number {
+  const parsed = Number(process.env.WICI_STEP_DEDUP_CONSECUTIVE?.trim() ?? '');
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 1;
+}
+
+function ensureTrailingNewline(text: string): string {
+  return text.endsWith('\n') ? text : `${text}\n`;
 }
 
 function plannerQuestionData(data: unknown): { sessionId?: string; question?: string } {

@@ -38,6 +38,7 @@ npm run verify:direct-rollback
 npm run verify:self-interrogation
 npm run verify:continuation-verdict
 npm run verify:continuation-escalation
+npm run verify:step-dedup
 npm run verify:existing-goal
 npm run verify:v1-requirements
 npm run verify:tui-structure
@@ -276,6 +277,8 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 `npm run verify:continuation-verdict` covers the direct completion gate: explicit `complete` stops, explicit `continue` continues, and ambiguous or stub verdicts fall back to continue.
 
 `npm run verify:continuation-escalation` covers the direct completion gate stall path: repeated fallback verdicts pause with a `continuation-stall-*` outbox question, wait without advancing, and resume through the existing steer path.
+
+`npm run verify:step-dedup` covers continuation-step duplicate detection: near-identical planner-diff steps are rejected, PLAN.md is restored, and the run escalates through the continuation outbox channel while distinct steps pass the similarity gate.
 
 `npm run verify:existing-goal` covers continuing a target that already has `GOAL.md` and `PLAN.md` without passing a new `--goal`.
 
