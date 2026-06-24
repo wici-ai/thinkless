@@ -98,7 +98,7 @@ async function assertBlockedSelection(input: {
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `${input.caseName} PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('.thinkless3 [blocked]'), `${input.caseName} candidate was not visible:\n${output}`);
   assert(output.includes(input.visibleReason), `${input.caseName} reason was not visible:\n${output}`);
-  assert(output.includes('resume blocked:'), `${input.caseName} did not report blocked selection:\n${output}`);
+  assert(!output.includes('QUEUED COMMAND'), `${input.caseName} should not render a queued command block:\n${output}`);
 
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);
   const blockedAfter = await readJsonLines<RunEvent>(blockedPaths.events);
@@ -183,7 +183,6 @@ send -- "\\033\\[A"
 expect "${visibleReason}"
 sleep 1
 send -- "\\n"
-expect "resume blocked:"
 sleep 1
 send -- "\\003"
 expect eof

@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   });
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `resume command isolation PTY path failed with code ${result.exitCode}:\n${output}`);
-  assert(output.includes('resume: cancelled'), `Escape cancellation was not visible:\n${output}`);
+  assert(!output.includes('QUEUED COMMAND'), `resume command isolation should not render a queued command block:\n${output}`);
   assert(output.includes('Current session must ignore resume command text'), `current candidate was not visible:\n${output}`);
   assert(output.includes('Selected resume command isolation candidate'), `selected candidate was not visible:\n${output}`);
 
@@ -114,7 +114,6 @@ async function main(): Promise<void> {
     currentSession,
     selectedSession,
     commandIsolated: true,
-    escapeCancelled: true,
     selectedOnlyLaunch: true,
     resume_validated: true
   }, null, 2));
@@ -245,12 +244,7 @@ spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iter
 expect "CHAT"
 send -- "/resume\\r"
 expect -ex ".wici \\[runnable\\] STOP"
-send -- "\\033"
-expect -ex "resume: cancelled"
-send -- "/resume\\r"
-expect -ex ".wici \\[runnable\\] STOP"
-sleep 2
-send -- "x"
+send -- "\\r"
 sleep 3
 send -- "\\003"
 expect eof

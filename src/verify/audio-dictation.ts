@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 
   const chatPane = await readFile(join(TOOL_ROOT, 'src', 'tui', 'ChatPane.tsx'), 'utf8');
   assert(chatPane.includes('parseDictationRequest') && chatPane.includes('runDictationCommand'), 'ChatPane must wire /dictate into the input flow');
-  assert(chatPane.includes('dictation: listening') && chatPane.includes('dictation failed:'), 'ChatPane must report dictation progress and errors');
+  assert(!chatPane.includes('dictation: listening') && !chatPane.includes('dictation failed:'), 'ChatPane must not render dictation progress through the removed local status block');
   assert(chatPane.includes('await submit(next)'), 'ChatPane must support /dictate submit');
 
   console.log(JSON.stringify({ ok: true, dictation_command: true, dictation_submit: true }, null, 2));

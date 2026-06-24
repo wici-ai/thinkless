@@ -70,7 +70,6 @@ export function App({
   const [startError, setStartError] = useState<string | null>(null);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(supervisor.initialGoal ? 'execution' : 'chat');
   const [chatBusy, setChatBusy] = useState(false);
-  const [chatLocalStatus, setChatLocalStatus] = useState<string | null>(null);
   const [runtimeSelection, setRuntimeSelection] = useState(defaultRuntimeSelection);
   const [runtimeHydrated, setRuntimeHydrated] = useState(false);
   const [runtimeSelectorOpen, setRuntimeSelectorOpen] = useState(false);
@@ -102,7 +101,7 @@ export function App({
       if (!alive) return;
       runtimeSignatureRef.current = JSON.stringify(defaultRuntimeSelection());
       setRuntimeHydrated(true);
-      setChatLocalStatus(`runtime restore failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStartError(`Runtime restore failed: ${error instanceof Error ? error.message : String(error)}`);
     });
     return () => {
       alive = false;
@@ -115,7 +114,7 @@ export function App({
     if (signature === runtimeSignatureRef.current) return;
     runtimeSignatureRef.current = signature;
     void writePersistedRuntimeSelection(runPaths(activeTarget, activeSessionDir), runtimeSelection).catch((error: unknown) => {
-      setChatLocalStatus(`runtime save failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStartError(`Runtime save failed: ${error instanceof Error ? error.message : String(error)}`);
     });
   }, [activeSessionDir, activeTarget, runtimeHydrated, runtimeSelection]);
 
@@ -172,22 +171,19 @@ export function App({
     setResumeCandidatesLoaded(false);
     setResumeCandidates([]);
     setResumeIndex(0);
-    setChatLocalStatus('resume: loading candidates');
     void discoverResumeCandidates({ currentTarget: activeTarget }).then((candidates) => {
       setResumeCandidates(candidates);
       setResumeCandidatesLoaded(true);
       setResumeIndex(Math.max(0, candidates.findIndex((candidate) => candidate.runnable)));
-      setChatLocalStatus(candidates.length > 0 ? 'resume: select a run' : 'resume: no candidates found');
     }).catch((error: unknown) => {
       setResumeCandidates([]);
       setResumeCandidatesLoaded(true);
-      setChatLocalStatus(`resume scan failed: ${error instanceof Error ? error.message : String(error)}`);
+      setStartError(`Resume scan failed: ${error instanceof Error ? error.message : String(error)}`);
     });
   }, [activeTarget]);
 
   const selectResumeCandidate = useCallback(async (candidate: ResumeCandidate) => {
     if (!candidate.runnable) {
-      setChatLocalStatus(`resume blocked: ${candidate.reason}`);
       return;
     }
     const freshCandidate = await preflightResumeCandidate(candidate.target, candidate.sessionDir);
@@ -203,7 +199,6 @@ export function App({
         reason: freshCandidate.reason
       }, 'warn');
       setResumeCandidates((current) => current.map((item) => item.id === freshCandidate.id ? freshCandidate : item));
-      setChatLocalStatus(`resume blocked: ${freshCandidate.reason}`);
       return;
     }
     setResumeSelectorOpen(false);
@@ -211,11 +206,9 @@ export function App({
     setActiveSessionDir(freshCandidate.sessionDir);
     if (freshCandidate.fallback === 'chat_only') {
       setWorkspaceTab('chat');
-      setChatLocalStatus(`resume chat: ${freshCandidate.label}`);
       return;
     }
     setWorkspaceTab('execution');
-    setChatLocalStatus(`resume: ${freshCandidate.label}`);
     launchSupervisor(undefined, undefined, undefined, freshCandidate.target, freshCandidate.sessionDir, true);
   }, [launchSupervisor]);
 
@@ -266,7 +259,6 @@ export function App({
         if (candidate) void selectResumeCandidate(candidate);
       } else if (key.escape || input === '\x1b') {
         setResumeSelectorOpen(false);
-        setChatLocalStatus('resume: cancelled');
       } else if (input && !key.leftArrow && !key.rightArrow && !key.tab && !key.ctrl && !key.meta) {
         const candidate = resumeCandidatesRef.current[resumeIndexRef.current];
         if (candidate) void selectResumeCandidate(candidate);
@@ -334,7 +326,6 @@ export function App({
               active={workspaceTab === 'chat' && !runtimeSelectorOpen && !resumeSelectorOpen}
               showTitle={false}
               systemLine={startError}
-              localStatus={chatLocalStatus}
               activityStatus={buildActivityStatus(state)}
               busy={chatBusy}
             />
@@ -353,7 +344,6 @@ export function App({
               onSelect={selectResumeCandidate}
               onCancel={() => {
                 setResumeSelectorOpen(false);
-                setChatLocalStatus('resume: cancelled');
               }}
             />
           ) : null}
@@ -373,13 +363,11 @@ export function App({
         contentWidth={inputContentWidth}
         inputPaused={runtimeSelectorOpen || resumeSelectorOpen}
         blankRun={blankRunChat}
-        hasExistingRun={Boolean(state.goal)}
         onPlanningRequested={(goal, planningContext) => launchSupervisor(goal, 'tui_chat', planningContext)}
         onInjection={() => launchSupervisor(undefined)}
         onResumeRequested={openResumeSelector}
         onRuntimeChange={setRuntimeSelection}
         onBusyChange={setChatBusy}
-        onLocalStatus={setChatLocalStatus}
       />
     </Box>
   );

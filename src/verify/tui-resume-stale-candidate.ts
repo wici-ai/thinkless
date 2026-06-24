@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `stale resume candidate PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('.thinkless2 [runnable] STOP'), `stale candidate was not initially visible as runnable:\n${output}`);
-  assert(output.includes('resume blocked: missing checkpoint context'), `stale candidate block reason was not visible:\n${output}`);
+  assert(output.includes('missing checkpoint context'), `stale candidate block reason was not visible:\n${output}`);
 
   const staleAfter = await readJsonLines<RunEvent>(stalePaths.events);
   const decoyAfter = await readJsonLines<RunEvent>(decoyPaths.events);
@@ -98,7 +98,7 @@ send -- "/resume\\r"
 expect ".thinkless2 \\[runnable\\] STOP"
 file delete -force "$env(STALE_CHECKPOINT)"
 send -- "\\n"
-expect "resume blocked: missing checkpoint context"
+expect "missing checkpoint context"
 sleep 1
 send -- "\\003"
 expect eof

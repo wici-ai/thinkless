@@ -8,7 +8,7 @@ import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { isMouseInput, mouseScrollDelta } from './input.js';
 import { scrollBy, scrollDeltaForInput, wrapLines, wrappedViewport } from './viewport.js';
 import { defaultRuntimeSelection, parseRuntimeCommand } from './runtimeSettings.js';
-import { appendDictationText, dictationUnavailableMessage, parseDictationRequest, runDictationCommand } from './dictation.js';
+import { appendDictationText, parseDictationRequest, runDictationCommand } from './dictation.js';
 
 type ChatColor = 'white' | 'gray' | 'cyan' | 'cyanBright' | 'green' | 'yellow' | 'red' | 'magenta';
 const PLANNING_CONTEXT_MAX_ENTRIES = 14;
@@ -39,7 +39,6 @@ export function ChatHistoryPane({
   viewportHeight = 12,
   active = true,
   systemLine,
-  localStatus,
   activityStatus,
   busy = false,
   showTitle = true
@@ -53,7 +52,6 @@ export function ChatHistoryPane({
   contentWidth?: number;
   viewportHeight?: number;
   systemLine?: string | null;
-  localStatus?: string | null;
   activityStatus?: string | null;
   busy?: boolean;
   active?: boolean;
@@ -68,7 +66,6 @@ export function ChatHistoryPane({
     ...history,
     ...buildActiveOutboxLines(activeOutbox),
     ...(systemLine ? blockLines('system', systemLine, 'red', `system-${systemLine}`) : []),
-    ...(localStatus ? blockLines('queued command', localStatus, 'yellow', `local-${localStatus}`) : []),
     ...(activityStatus ? blockLines('activity', activityStatus, 'cyan', `activity-${activityStatus}`) : []),
     ...(busy ? [{ id: 'busy', ts: timestampSortKey(), text: 'Assistant is thinking...', color: 'yellow' as ChatColor, bold: true }] : [])
   ];
@@ -136,13 +133,11 @@ export function ChatInputBox({
   contentWidth = 80,
   inputPaused = false,
   blankRun = false,
-  hasExistingRun = false,
   onPlanningRequested,
   onInjection,
   onResumeRequested,
   onRuntimeChange,
-  onBusyChange,
-  onLocalStatus
+  onBusyChange
 }: {
   target: string;
   sessionDir?: string;
@@ -157,13 +152,11 @@ export function ChatInputBox({
   contentWidth?: number;
   inputPaused?: boolean;
   blankRun?: boolean;
-  hasExistingRun?: boolean;
   onPlanningRequested?: (text: string, planningContext?: string) => void;
   onInjection?: () => void;
   onResumeRequested?: () => void;
   onRuntimeChange?: (runtime: RuntimeSelection) => void;
   onBusyChange?: (busy: boolean) => void;
-  onLocalStatus?: (text: string | null) => void;
 }) {
   const { isFocused } = useFocus({ id: 'chat-input', autoFocus: true, isActive: interactive });
   const [value, setValue] = useState('');
@@ -189,23 +182,22 @@ export function ChatInputBox({
     const dictationRequest = parseDictationRequest(text);
     if (dictationRequest) {
       if (!dictationRequest.command) {
-        onLocalStatus?.(dictationUnavailableMessage());
+        setInputValue(text);
         return;
       }
       setBusy(true);
-      onLocalStatus?.('dictation: listening');
       try {
         const result = await runDictationCommand(dictationRequest.command);
         const next = appendDictationText(valueRef.current, result.text);
         setInputValue(next);
-        onLocalStatus?.(result.text ? `dictation: inserted ${result.wordCount} words` : 'dictation: no transcript');
         if (dictationRequest.submit && next.trim()) {
           setBusy(false);
           await submit(next);
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        onLocalStatus?.(`dictation failed: ${truncate(message, 120)}`);
+      } catch {
+        // Keep failed dictation attempts local to the input flow; the chat pane no
+        // longer has a transient status area for command progress.
+        setInputValue(text);
       } finally {
         setBusy(false);
       }
@@ -215,7 +207,6 @@ export function ChatInputBox({
     const runtimeCommand = parseRuntimeCommand(text, runtime);
     if (runtimeCommand) {
       onRuntimeChange?.(runtimeCommand.next);
-      onLocalStatus?.(runtimeCommand.status);
       return;
     }
 
@@ -223,7 +214,6 @@ export function ChatInputBox({
     const latestQuestion = [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered);
 
     if (text === '/resume' || text.startsWith('/resume ')) {
-      onLocalStatus?.(hasExistingRun ? 'resume: opening selector' : 'resume: scanning for runs');
       onResumeRequested?.();
       return;
     }
@@ -242,7 +232,6 @@ export function ChatInputBox({
             : text.startsWith('/steer ')
               ? await writeInjection(paths, { kind: 'steer', text: text.slice('/steer '.length), priority: 'normal' })
             : await writeAnswer(paths, text, latestQuestion!.reply_key);
-      onLocalStatus?.(`${injection.kind}: ${text}`);
       onInjection?.();
       return;
     }
@@ -256,11 +245,9 @@ export function ChatInputBox({
         if (blankRun && onPlanningRequested) {
           // Trust real Chat-agent UPDATE decisions; only guard local degraded fallback.
           if (result.degraded && !shouldStartPlannerFromBlankChat(text, result.update)) {
-            onLocalStatus?.('conversation only: planner not started');
             return;
           }
           const planningContext = buildBlankRunPlanningContext(chat, text, result);
-          onLocalStatus?.(`planning: ${result.update.text}`);
           onPlanningRequested(result.update.text, planningContext);
         } else {
           onInjection?.();
@@ -271,13 +258,11 @@ export function ChatInputBox({
       const fallbackUpdate = { kind: 'add_requirement' as const, text };
       if (blankRun && onPlanningRequested && shouldStartPlannerFromBlankChat(text, fallbackUpdate)) {
         const planningContext = buildBlankRunPlanningContext(chat, text, { reply: '', update: fallbackUpdate, degraded: true });
-        onLocalStatus?.(`planning: ${text}`);
         onPlanningRequested(text, planningContext);
       } else if (blankRun) {
-        onLocalStatus?.('conversation only: planner not started');
+        return;
       } else {
         await writeInjection(paths, { kind: 'add_requirement', text, priority: 'normal' });
-        onLocalStatus?.(`add_requirement: ${text}`);
         onInjection?.();
       }
     } finally {
@@ -362,7 +347,6 @@ export function ChatPane({
   systemLine?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
-  const [localStatus, setLocalStatus] = useState<string | null>(null);
   return (
     <Box flexDirection="column" height="100%" paddingX={1}>
       <ChatHistoryPane
@@ -376,7 +360,6 @@ export function ChatPane({
         viewportHeight={viewportHeight}
         active
         systemLine={systemLine}
-        localStatus={localStatus}
         activityStatus={activityStatus}
         busy={busy}
       />
@@ -394,12 +377,10 @@ export function ChatPane({
         contentWidth={contentWidth}
         inputPaused={inputPaused}
         blankRun={blankRun}
-        hasExistingRun={Boolean(goal)}
         onPlanningRequested={onPlanningRequested}
         onInjection={onInjection}
         onResumeRequested={onResumeRequested}
         onBusyChange={setBusy}
-        onLocalStatus={setLocalStatus}
       />
     </Box>
   );

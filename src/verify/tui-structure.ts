@@ -88,6 +88,7 @@ async function main(): Promise<void> {
   assert(files.chat.includes('isActiveOutboxMessage') && files.chat.includes("supervisorState !== 'STOP'") && files.chat.includes("supervisorState !== 'FAILED'"), 'ChatPane must hide stale error outbox messages after terminal run states');
   assert(files.chat.includes('wrappedViewport') && files.chat.includes('line.color') && files.chat.includes('line.bold'), 'ChatPane must preserve per-line role styling instead of guessing colors from text prefixes');
   assert(files.chat.includes('activityStatus') && files.chat.includes("blockLines('activity'"), 'ChatPane must render compact live activity without writing it into chat history');
+  assert(!files.chat.includes('localStatus') && !files.chat.includes("blockLines('queued command'"), 'ChatPane must not render the removed local status / queued command block');
   assert(!files.chat.includes('chatLineColor'), 'ChatPane must not color chat by fragile string-prefix guessing');
   assert(files.chat.includes('Number.POSITIVE_INFINITY'), 'ChatPane must not truncate long chat turns before the scroll viewport');
   assert(files.chat.includes('wrappedViewport') && files.chat.includes('wrapLines'), 'ChatPane must render full wrapped content through a scroll viewport');

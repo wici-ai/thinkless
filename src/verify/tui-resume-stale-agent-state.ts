@@ -101,7 +101,7 @@ async function assertStaleSelection(input: {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `${input.caseName} PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes(`.thinkless2 [runnable] ${input.visibleState}`), `${input.caseName} candidate was not initially visible as runnable:\n${output}`);
-  assert(output.includes(`resume blocked: ${input.visibleReason}`), `${input.caseName} block reason was not visible:\n${output}`);
+  assert(output.includes(input.visibleReason), `${input.caseName} block reason was not visible:\n${output}`);
 
   const staleAfter = await readJsonLines<RunEvent>(stalePaths.events);
   const decoyAfter = await readJsonLines<RunEvent>(decoyPaths.events);
@@ -182,7 +182,7 @@ send -- "/resume\\r"
 expect ".thinkless2 \\[runnable\\] ${visibleState}"
 file delete -force "$env(STALE_AGENT_FILE)"
 send -- "\\n"
-expect "resume blocked: ${visibleReason}"
+expect "${visibleReason}"
 sleep 1
 send -- "\\003"
 expect eof

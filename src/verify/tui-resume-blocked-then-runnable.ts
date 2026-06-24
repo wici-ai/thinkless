@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `blocked-then-runnable PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('.thinkless2 [runnable] PLAN'), `stale candidate was not initially visible as runnable:\n${output}`);
-  assert(output.includes(`resume blocked: ${staleReason}`), `blocked reason was not visible:\n${output}`);
+  assert(output.includes(staleReason), `blocked reason was not visible:\n${output}`);
   assert(output.includes('Runnable decoy after blocked selection'), `runnable decoy was not visible after blocked selection:\n${output}`);
 
   const staleAfter = await readJsonLines<RunEvent>(stalePaths.events);
@@ -166,7 +166,7 @@ send -- "/resume\\r"
 expect -ex ".thinkless2 \\[runnable\\] PLAN"
 file delete -force "$env(STALE_PLANNER_TRANSCRIPT)"
 send -- "\\n"
-expect -ex "resume blocked: ${staleReason}"
+expect -ex "${staleReason}"
 expect -ex ".thinkless3 \\[runnable\\] STOP"
 send -- "\\033\\[B"
 expect -ex "Selected runnable: stopped run can be explicitly resumed"

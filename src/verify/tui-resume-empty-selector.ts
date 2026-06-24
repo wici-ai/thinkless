@@ -32,8 +32,7 @@ async function main(): Promise<void> {
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `empty resume selector PTY failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('No resumable Thinkless runs found.'), `empty resume selector did not show explicit empty state:\n${output}`);
   assert(!output.includes('Scanning for resumable Thinkless runs...'), `empty resume selector stayed on loading text after scan:\n${output}`);
-  assert(output.includes('resume: no candidates found'), `empty resume selector did not report no candidates status:\n${output}`);
-  assert(output.includes('resume: cancelled'), `empty resume selector did not cancel cleanly:\n${output}`);
+  assert(!output.includes('QUEUED COMMAND'), `empty resume selector should not render a queued command block:\n${output}`);
   assert(!output.includes('SUPERVISOR_START'), `empty selector should not print supervisor launch evidence:\n${output}`);
   assert(!(await exists(join(target, '.thinkless', 'events.jsonl'))), 'empty selector should not create current-session events');
   assert(!(await exists(join(target, '.thinkless2', 'events.jsonl'))), 'empty selector should not create numbered-session events');
@@ -57,7 +56,6 @@ sleep 1
 send -- "\\n"
 sleep 1
 send -- "\\033"
-expect "resume: cancelled"
 sleep 1
 send -- "\\003"
 expect eof

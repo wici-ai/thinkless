@@ -102,7 +102,7 @@ set timeout 30
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect "resume: select a run"
+expect "many-candidates-target .thinkless2"
 send -- "\\033\\[B"
 expect "*> many-candidates-target .thinkless3*"
 send -- "\\033\\[B"

@@ -130,7 +130,7 @@ async function verifyEscapeCancelsWithoutLaunch(): Promise<void> {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `built PTY resume selector Escape path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('[runnable] STOP'), `built CLI Escape path did not open selector:\n${output}`);
-  assert(output.includes('resume: cancelled'), `built CLI Escape path did not report cancellation:\n${output}`);
+  assert(!output.includes('QUEUED COMMAND'), `built CLI Escape path should not render a queued command block:\n${output}`);
   const after = await readJsonLines<RunEvent>(escapePaths.events);
   assert(after.length === before.length, 'Escape cancellation should not launch or preflight any candidate session');
   console.log(JSON.stringify({ ok: true, case: 'escape-cancel', target: escapeTarget, selectedSession: escapeSession, noLaunch: true }, null, 2));
@@ -175,7 +175,7 @@ async function verifyChatOnlyCandidateResumesWithoutSupervisor(): Promise<void> 
   assert(output.includes('.thinkless3 [runnable]'), `built CLI chat-only candidate was not visible as runnable:\n${output}`);
   assert(output.includes('NO_CHECKPOINT'), `built CLI chat-only candidate should show no checkpoint state:\n${output}`);
   assert(output.includes('chat session can be') && output.includes('without supervisor'), `built CLI chat-only reason was not visible:\n${output}`);
-  assert(output.includes('resume chat:'), `built CLI did not report chat resume selection:\n${output}`);
+  assert(output.includes('built chat-only candidate'), `built CLI did not restore chat-only transcript:\n${output}`);
 
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);
   const chatOnlyAfter = await readJsonLines<RunEvent>(chatOnlyPaths.events);
@@ -282,7 +282,6 @@ expect "CHAT"
 send -- "/resume\\r"
 expect "\\[runnable\\] STOP"
 send -- "\\033"
-expect "resume: cancelled"
 sleep 1
 send -- "\\003"
 expect eof
@@ -299,7 +298,7 @@ expect "CHAT"
 send -- "/resume\\r"
 expect ".thinkless3 \\[runnable\\] NO_CHECKPOINT"
 send -- "\\n"
-expect "resume chat:"
+expect "built chat-only candidate"
 sleep 1
 send -- "\\003"
 expect eof

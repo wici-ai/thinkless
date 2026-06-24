@@ -134,7 +134,7 @@ async function verifyChatOnlyLegacyCandidate(): Promise<void> {
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `legacy chat-only PTY path failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes(`${basename(blockedTarget)} .wici [runnable]`), `legacy chat-only candidate was not visible as runnable:\n${output}`);
   assert(output.includes('chat session can be') && output.includes('without supervisor'), `legacy chat-only reason was not visible:\n${output}`);
-  assert(output.includes('resume chat:'), `legacy chat-only candidate did not report chat resume selection:\n${output}`);
+  assert(output.includes('legacy chat-only candidate can resume chat'), `legacy chat-only candidate did not restore chat transcript:\n${output}`);
 
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);
   const legacyAfter = await readJsonLines<RunEvent>(legacyPaths.events);
@@ -241,7 +241,7 @@ expect "CHAT"
 send -- "/resume\\r"
 expect ".wici \\[runnable\\]"
 send -- "\\n"
-expect "resume chat:"
+expect "legacy chat-only candidate can resume chat"
 sleep 1
 send -- "\\003"
 expect eof
