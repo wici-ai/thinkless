@@ -13,7 +13,7 @@ const builtCli = resolve('dist/src/cli.js');
 async function main(): Promise<void> {
   await requireExpect();
   await verifyRunnableLegacyCandidate();
-  await verifyBlockedLegacyCandidate();
+  await verifyChatOnlyLegacyCandidate();
 }
 
 async function verifyRunnableLegacyCandidate(): Promise<void> {
@@ -24,7 +24,6 @@ async function verifyRunnableLegacyCandidate(): Promise<void> {
   const legacySession = join(runnableTarget, '.wici');
   const currentPaths = runPaths(runnableTarget, currentSession);
   const legacyPaths = runPaths(runnableTarget, legacySession);
-  await writeChatOnly(currentPaths, 'current decoy must not launch for legacy runnable selection');
   await writeRunnableRun(legacyPaths, {
     runId: 'tui-resume-legacy-runnable',
     requirement: 'Selected legacy resume goal',
@@ -95,7 +94,7 @@ async function verifyRunnableLegacyCandidate(): Promise<void> {
   console.log(JSON.stringify({ ok: true, case: 'legacy-runnable', target: runnableTarget, legacySession, currentSession, legacyNewEvents: legacyNewEvents.length, currentNewEvents: currentNewEvents.length, resume_validated: true }, null, 2));
 }
 
-async function verifyBlockedLegacyCandidate(): Promise<void> {
+async function verifyChatOnlyLegacyCandidate(): Promise<void> {
   await rm(blockedTarget, { recursive: true, force: true });
   await createSampleTarget(blockedTarget, true);
 
@@ -105,13 +104,13 @@ async function verifyBlockedLegacyCandidate(): Promise<void> {
   const legacyPaths = runPaths(blockedTarget, legacySession);
   await writeRunnableRun(runnablePaths, {
     runId: 'tui-resume-legacy-blocked-decoy',
-    requirement: 'Runnable decoy for blocked legacy selection',
+    requirement: 'Runnable decoy for chat-only legacy selection',
     chat: 'blocked legacy runnable decoy chat',
     planner: 'legacy-blocked-decoy-planner',
     executor: 'legacy-blocked-decoy-executor',
     appThread: 'legacy-blocked-decoy-app-thread'
   });
-  await writeChatOnly(legacyPaths, 'legacy chat-only candidate must stay blocked');
+  await writeChatOnly(legacyPaths, 'legacy chat-only candidate can resume chat');
 
   const runnableBefore = await readJsonLines<RunEvent>(runnablePaths.events);
   const legacyBefore = await readJsonLines<RunEvent>(legacyPaths.events);
@@ -130,20 +129,20 @@ async function verifyBlockedLegacyCandidate(): Promise<void> {
     maxBuffer: 1024 * 1024 * 5
   });
   const output = stripAnsi(result.all ?? '');
-  assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `legacy blocked PTY path failed with code ${result.exitCode}:\n${output}`);
-  assert(output.includes(`${basename(blockedTarget)} .wici [blocked]`), `legacy blocked candidate was not visible:\n${output}`);
-  assert(output.includes('chat/runtime only; no supervisor run context'), `legacy blocked reason was not visible:\n${output}`);
-  assert(output.includes('resume blocked:'), `legacy blocked candidate did not report blocked selection:\n${output}`);
+  assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `legacy chat-only PTY path failed with code ${result.exitCode}:\n${output}`);
+  assert(output.includes(`${basename(blockedTarget)} .wici [runnable]`), `legacy chat-only candidate was not visible as runnable:\n${output}`);
+  assert(output.includes('chat session can be') && output.includes('without supervisor'), `legacy chat-only reason was not visible:\n${output}`);
+  assert(output.includes('resume chat:'), `legacy chat-only candidate did not report chat resume selection:\n${output}`);
 
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);
   const legacyAfter = await readJsonLines<RunEvent>(legacyPaths.events);
   const runnableNewEvents = runnableAfter.slice(runnableBefore.length);
   const legacyNewEvents = legacyAfter.slice(legacyBefore.length);
   const forbiddenTypes = new Set(['RESUME_CONTEXT_VALIDATED', 'SUPERVISOR_START', 'EXECUTOR_RESUME_FALLBACK']);
-  assert(runnableNewEvents.length === 0, `blocked legacy selection should not mutate runnable decoy events: ${JSON.stringify(runnableNewEvents)}`);
-  assert(!legacyNewEvents.some((event) => forbiddenTypes.has(event.type)), `blocked legacy selection emitted launch/preflight events: ${JSON.stringify(legacyNewEvents)}`);
+  assert(runnableNewEvents.length === 0, `chat-only legacy selection should not mutate runnable decoy events: ${JSON.stringify(runnableNewEvents)}`);
+  assert(!legacyNewEvents.some((event) => forbiddenTypes.has(event.type)), `chat-only legacy selection emitted supervisor events: ${JSON.stringify(legacyNewEvents)}`);
 
-  console.log(JSON.stringify({ ok: true, case: 'legacy-blocked', target: blockedTarget, legacySession, runnableSession, noLaunch: true, blockedReasonVisible: true }, null, 2));
+  console.log(JSON.stringify({ ok: true, case: 'legacy-chat-only', target: blockedTarget, legacySession, runnableSession, noLaunch: true, chatResumeVisible: true }, null, 2));
 }
 
 async function writeChatOnly(paths: ReturnType<typeof runPaths>, text: string): Promise<void> {
@@ -238,11 +237,9 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".wici \\[blocked\\]"
-send -- "\\033\\[A"
-sleep 1
+expect ".wici \\[runnable\\]"
 send -- "\\n"
-expect "resume blocked:"
+expect "resume chat:"
 sleep 1
 send -- "\\003"
 expect eof

@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `PTY resume selector failed with code ${result.exitCode}:\n${output}`);
   assert(output.includes('[runnable] STOP'), `runnable candidate was not visible:\n${output}`);
-  assert(output.includes('[blocked]'), `blocked candidate status was not visible:\n${output}`);
+  assert(output.includes('[runnable] NO_CHECKPOINT'), `chat-only candidate should be visible as runnable:\n${output}`);
 
   const events = await readJsonLines<RunEvent>(runPaths(target, selectedSession).events);
   assert(events.length > before.length, `selected session should receive new resume supervisor events:\n${output}`);

@@ -113,12 +113,14 @@ export function runPaths(target: string, sessionDir?: string): RunPaths {
 function resolveStateDir(root: string, explicitSessionDir?: string): string {
   const sessionOverride = explicitSessionDir ? resolve(root, explicitSessionDir) : sessionDirOverride(root);
   if (sessionOverride) return sessionOverride;
-  const numbered = latestNumberedSessionDir(root);
-  if (numbered) return numbered;
+  const numberedRun = latestNumberedRunSessionDir(root);
+  if (numberedRun) return numberedRun;
   const thinkless = join(root, THINKLESS_STATE_DIR);
   if (existsSync(thinkless)) return thinkless;
   const legacy = join(root, LEGACY_STATE_DIR);
   if (hasRunState(legacy)) return legacy;
+  const numbered = latestNumberedSessionDir(root);
+  if (numbered) return numbered;
   return thinkless;
 }
 
@@ -139,6 +141,14 @@ export function allocateNumberedSessionDir(target: string): string {
 }
 
 export function latestNumberedSessionDir(target: string): string | null {
+  return latestNumberedSessionDirMatching(target, hasSessionState);
+}
+
+export function latestNumberedRunSessionDir(target: string): string | null {
+  return latestNumberedSessionDirMatching(target, hasRunState);
+}
+
+function latestNumberedSessionDirMatching(target: string, predicate: (stateDir: string) => boolean): string | null {
   const root = resolve(target);
   let entries;
   try {
@@ -153,7 +163,7 @@ export function latestNumberedSessionDir(target: string): string | null {
       return match ? { dir: join(root, entry.name), index: Number(match[1]) } : null;
     })
     .filter((entry): entry is { dir: string; index: number } => Boolean(entry))
-    .filter((entry) => hasSessionState(entry.dir))
+    .filter((entry) => predicate(entry.dir))
     .sort((a, b) => b.index - a.index);
   return candidates[0]?.dir ?? null;
 }

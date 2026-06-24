@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   assert(numberedCandidate?.runnable && numberedCandidate.plannerSessionId === 'planner-session', `numbered planner run missing: ${JSON.stringify(numberedCandidate)}`);
   assert(legacyCandidate?.runnable && legacyCandidate.fallback === 'executor_rerun', `legacy executor fallback missing: ${JSON.stringify(legacyCandidate)}`);
   assert(blockedCandidate && !blockedCandidate.runnable && blockedCandidate.reason.includes('planner session'), `blocked planner run should require a planner session: ${JSON.stringify(blockedCandidate)}`);
-  assert(chatCandidate && !chatCandidate.runnable && chatCandidate.reason.includes('chat/runtime only'), `chat-only run should be blocked: ${JSON.stringify(chatCandidate)}`);
+  assert(chatCandidate?.runnable && chatCandidate.fallback === 'chat_only', `chat-only run should resume chat context: ${JSON.stringify(chatCandidate)}`);
 
   const context = await loadResumeContext(numberedCandidate);
   assert(context.goal?.run_id === 'resume-selector-run', 'loadResumeContext should preserve selected goal');

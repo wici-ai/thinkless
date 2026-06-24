@@ -209,6 +209,11 @@ export function App({
     setResumeSelectorOpen(false);
     setActiveTarget(freshCandidate.target);
     setActiveSessionDir(freshCandidate.sessionDir);
+    if (freshCandidate.fallback === 'chat_only') {
+      setWorkspaceTab('chat');
+      setChatLocalStatus(`resume chat: ${freshCandidate.label}`);
+      return;
+    }
     setWorkspaceTab('execution');
     setChatLocalStatus(`resume: ${freshCandidate.label}`);
     launchSupervisor(undefined, undefined, undefined, freshCandidate.target, freshCandidate.sessionDir, true);

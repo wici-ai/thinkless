@@ -34,7 +34,7 @@ export interface ResumeCandidate {
   runnable: boolean;
   status: ResumeCandidateStatus;
   reason: string;
-  fallback?: 'planner_rerun' | 'executor_rerun';
+  fallback?: 'planner_rerun' | 'executor_rerun' | 'chat_only';
 }
 
 export interface ResumeContext {
@@ -130,7 +130,7 @@ async function candidateFromPaths(paths: RunPaths, sessionDir?: string): Promise
     hasNonEmptyFile(paths.codexRun)
   ]);
   const updatedAt = await latestUpdatedAt([paths.checkpoint, paths.events, paths.chat, paths.goal, paths.plan, paths.goalDoc]);
-  const preflight = buildPreflight({ paths, goal, checkpoint, goalDoc, plan, ledger, events, outbox, plannerTranscript, executorTranscript });
+  const preflight = buildPreflight({ paths, goal, checkpoint, goalDoc, plan, ledger, chat, runtimeSelection, events, outbox, plannerTranscript, executorTranscript });
   const label = sessionDir ? `${basename(paths.target)} ${basename(sessionDir)}` : basename(paths.target);
   return {
     id: `${paths.target}::${sessionDir ?? paths.stateDir}`,
@@ -164,6 +164,8 @@ function buildPreflight(input: {
   goalDoc: boolean;
   plan: boolean;
   ledger: boolean;
+  chat: boolean;
+  runtimeSelection: boolean;
   events: boolean;
   outbox: OutboxMessage[];
   plannerTranscript: boolean;
@@ -171,7 +173,8 @@ function buildPreflight(input: {
 }): Pick<ResumeCandidate, 'runnable' | 'status' | 'reason' | 'fallback'> {
   const { goal, checkpoint } = input;
   if (!goal && (input.events || input.outbox.length > 0 || input.ledger)) return blocked('missing durable GOAL context');
-  if (!goal && !checkpoint) return blocked('chat/runtime only; no supervisor run context');
+  if (!goal && !checkpoint && (input.chat || input.runtimeSelection)) return runnable('chat session can be resumed without supervisor context', 'chat_only');
+  if (!goal && !checkpoint) return blocked('no resumable Thinkless context');
   if (!checkpoint) return blocked('missing checkpoint context');
   if (!input.goalDoc) return blocked('missing GOAL.md context');
   if (checkpoint.supervisor_state === 'FAILED') return blocked('failed run requires manual inspection');

@@ -8,7 +8,7 @@ import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
 
 const target = resolve('fixture/tui-resume-selector-built-target');
 const escapeTarget = resolve('fixture/tui-resume-selector-built-escape-target');
-const blockedTarget = resolve('fixture/tui-resume-selector-built-blocked-target');
+const chatOnlyTarget = resolve('fixture/tui-resume-selector-built-chat-only-target');
 const selectedSession = join(target, '.thinkless2');
 const decoySession = join(target, '.thinkless3');
 const builtCli = resolve('dist/src/cli.js');
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   await requireExpect();
   await verifyArrowEnterLaunchesSelectedSession();
   await verifyEscapeCancelsWithoutLaunch();
-  await verifyBlockedCandidateRefusesLaunch();
+  await verifyChatOnlyCandidateResumesWithoutSupervisor();
 }
 
 async function verifyArrowEnterLaunchesSelectedSession(): Promise<void> {
@@ -134,32 +134,32 @@ async function verifyEscapeCancelsWithoutLaunch(): Promise<void> {
   console.log(JSON.stringify({ ok: true, case: 'escape-cancel', target: escapeTarget, selectedSession: escapeSession, noLaunch: true }, null, 2));
 }
 
-async function verifyBlockedCandidateRefusesLaunch(): Promise<void> {
-  await rm(blockedTarget, { recursive: true, force: true });
-  await createSampleTarget(blockedTarget, true);
-  const runnableSession = join(blockedTarget, '.thinkless2');
-  const blockedSession = join(blockedTarget, '.thinkless3');
-  await writeRunnableRun(runPaths(blockedTarget, runnableSession), {
+async function verifyChatOnlyCandidateResumesWithoutSupervisor(): Promise<void> {
+  await rm(chatOnlyTarget, { recursive: true, force: true });
+  await createSampleTarget(chatOnlyTarget, true);
+  const runnableSession = join(chatOnlyTarget, '.thinkless2');
+  const chatOnlySession = join(chatOnlyTarget, '.thinkless3');
+  await writeRunnableRun(runPaths(chatOnlyTarget, runnableSession), {
     runId: 'tui-resume-selector-built-blocked-runnable',
-    requirement: 'Runnable decoy for blocked selection',
+    requirement: 'Runnable decoy for chat-only selection',
     chat: 'runnable decoy chat must not launch',
     planner: 'resume-selector-built-blocked-runnable-planner',
     executor: 'resume-selector-built-blocked-runnable-executor',
     appThread: 'resume-selector-built-blocked-runnable-app-thread'
   });
-  await writeChatOnly(runPaths(blockedTarget, blockedSession));
+  await writeChatOnly(runPaths(chatOnlyTarget, chatOnlySession));
 
-  const runnablePaths = runPaths(blockedTarget, runnableSession);
-  const blockedPaths = runPaths(blockedTarget, blockedSession);
+  const runnablePaths = runPaths(chatOnlyTarget, runnableSession);
+  const chatOnlyPaths = runPaths(chatOnlyTarget, chatOnlySession);
   const runnableBefore = await readJsonLines<RunEvent>(runnablePaths.events);
-  const blockedBefore = await readJsonLines<RunEvent>(blockedPaths.events);
-  const result = await execa('expect', ['-c', blockedCandidateExpectScript()], {
+  const chatOnlyBefore = await readJsonLines<RunEvent>(chatOnlyPaths.events);
+  const result = await execa('expect', ['-c', chatOnlyCandidateExpectScript()], {
     cwd: resolve('.'),
     env: {
       ...process.env,
       FORCE_COLOR: '0',
       TERM: 'xterm-256color',
-      WICI_PTY_TARGET: blockedTarget,
+      WICI_PTY_TARGET: chatOnlyTarget,
       WICI_THINKLESS_BIN: builtCli
     },
     reject: false,
@@ -168,19 +168,20 @@ async function verifyBlockedCandidateRefusesLaunch(): Promise<void> {
     maxBuffer: 1024 * 1024 * 5
   });
   const output = stripAnsi(result.all ?? '');
-  assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `built PTY blocked resume selector path failed with code ${result.exitCode}:\n${output}`);
-  assert(output.includes('.thinkless3 [blocked]'), `built CLI blocked candidate was not visible:\n${output}`);
-  assert(output.includes('chat/runtime only; no supervisor run context'), `built CLI blocked reason was not visible:\n${output}`);
-  assert(output.includes('resume blocked:'), `built CLI did not report blocked resume selection:\n${output}`);
+  assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `built PTY chat-only resume selector path failed with code ${result.exitCode}:\n${output}`);
+  assert(output.includes('.thinkless3 [runnable]'), `built CLI chat-only candidate was not visible as runnable:\n${output}`);
+  assert(output.includes('NO_CHECKPOINT'), `built CLI chat-only candidate should show no checkpoint state:\n${output}`);
+  assert(output.includes('chat session can be') && output.includes('without supervisor'), `built CLI chat-only reason was not visible:\n${output}`);
+  assert(output.includes('resume chat:'), `built CLI did not report chat resume selection:\n${output}`);
 
   const runnableAfter = await readJsonLines<RunEvent>(runnablePaths.events);
-  const blockedAfter = await readJsonLines<RunEvent>(blockedPaths.events);
+  const chatOnlyAfter = await readJsonLines<RunEvent>(chatOnlyPaths.events);
   const runnableNewEvents = runnableAfter.slice(runnableBefore.length);
-  const blockedNewEvents = blockedAfter.slice(blockedBefore.length);
+  const chatOnlyNewEvents = chatOnlyAfter.slice(chatOnlyBefore.length);
   const forbiddenTypes = new Set(['RESUME_CONTEXT_VALIDATED', 'SUPERVISOR_START', 'EXECUTOR_RESUME_FALLBACK']);
-  assert(runnableNewEvents.length === 0, `blocked selection should not mutate runnable decoy events: ${JSON.stringify(runnableNewEvents)}`);
-  assert(!blockedNewEvents.some((event) => forbiddenTypes.has(event.type)), `blocked selection emitted launch/preflight events: ${JSON.stringify(blockedNewEvents)}`);
-  console.log(JSON.stringify({ ok: true, case: 'blocked-candidate', target: blockedTarget, blockedSession, runnableSession, noLaunch: true, blockedReasonVisible: true }, null, 2));
+  assert(runnableNewEvents.length === 0, `chat-only selection should not mutate runnable decoy events: ${JSON.stringify(runnableNewEvents)}`);
+  assert(!chatOnlyNewEvents.some((event) => forbiddenTypes.has(event.type)), `chat-only selection emitted supervisor events: ${JSON.stringify(chatOnlyNewEvents)}`);
+  console.log(JSON.stringify({ ok: true, case: 'chat-only-candidate', target: chatOnlyTarget, chatOnlySession, runnableSession, noLaunch: true, chatResumeVisible: true }, null, 2));
 }
 
 async function writeChatOnly(paths: ReturnType<typeof runPaths>): Promise<void> {
@@ -286,18 +287,16 @@ exit 0
 `;
 }
 
-function blockedCandidateExpectScript(): string {
+function chatOnlyCandidateExpectScript(): string {
   return `
 log_user 1
 set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".thinkless3 \\[blocked\\] NO_CHECKPOINT"
-send -- "\\033\\[A"
-sleep 1
+expect ".thinkless3 \\[runnable\\] NO_CHECKPOINT"
 send -- "\\n"
-expect "resume blocked:"
+expect "resume chat:"
 sleep 1
 send -- "\\003"
 expect eof

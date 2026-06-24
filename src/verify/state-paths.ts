@@ -2,7 +2,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execa } from 'execa';
-import { ensureRunDirs, ensureTargetGitignore, runPaths, THINKLESS_SESSION_DIR_ENV } from '../shared/paths.js';
+import { ensureRunDirs, ensureTargetGitignore, latestNumberedRunSessionDir, runPaths, THINKLESS_SESSION_DIR_ENV } from '../shared/paths.js';
 
 const root = resolve('fixture/state-paths-target');
 
@@ -41,6 +41,23 @@ async function main(): Promise<void> {
     await writeFile(join(numbered, '.thinkless3', 'goal.json'), '{}\n');
     numberedPaths = runPaths(numbered);
     assert(numberedPaths.wici.endsWith('/.thinkless3'), `latest non-empty numbered session should win, got ${numberedPaths.wici}`);
+    assert(latestNumberedRunSessionDir(numbered)?.endsWith('/.thinkless3'), 'latest numbered run session should ignore chat-only numbered sessions');
+
+    const preferCurrent = join(root, 'prefer-current-over-chat-numbered');
+    await mkdir(join(preferCurrent, '.thinkless1'), { recursive: true });
+    await mkdir(join(preferCurrent, '.thinkless'), { recursive: true });
+    await writeFile(join(preferCurrent, '.thinkless1', 'runtime-selection.json'), '{}\n');
+    await writeFile(join(preferCurrent, '.thinkless', 'checkpoint.json'), '{}\n');
+    const preferCurrentPaths = runPaths(preferCurrent);
+    assert(preferCurrentPaths.wici.endsWith('/.thinkless'), `durable current run should beat chat-only numbered session, got ${preferCurrentPaths.wici}`);
+
+    const preferLegacy = join(root, 'prefer-legacy-over-chat-numbered');
+    await mkdir(join(preferLegacy, '.thinkless1'), { recursive: true });
+    await mkdir(join(preferLegacy, '.wici'), { recursive: true });
+    await writeFile(join(preferLegacy, '.thinkless1', 'chat.jsonl'), '{}\n');
+    await writeFile(join(preferLegacy, '.wici', 'checkpoint.json'), '{}\n');
+    const preferLegacyPaths = runPaths(preferLegacy);
+    assert(preferLegacyPaths.wici.endsWith('/.wici'), `durable legacy run should beat chat-only numbered session, got ${preferLegacyPaths.wici}`);
 
     process.env[THINKLESS_SESSION_DIR_ENV] = join(numbered, '.thinkless4');
     const overridePaths = runPaths(numbered);

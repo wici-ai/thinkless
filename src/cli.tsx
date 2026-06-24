@@ -14,7 +14,7 @@ import { runSupervisor } from './supervisor/index.js';
 import { createSampleTarget } from './sample.js';
 import type { ToolMode } from './shared/types.js';
 import { loadConfig } from './shared/config.js';
-import { allocateNumberedSessionDir, isNumberedSessionDirName, latestNumberedSessionDir, runPaths, THINKLESS_SESSION_DIR_ENV, TOOL_ROOT } from './shared/paths.js';
+import { allocateNumberedSessionDir, isNumberedSessionDirName, latestNumberedRunSessionDir, latestNumberedSessionDir, runPaths, THINKLESS_SESSION_DIR_ENV, TOOL_ROOT } from './shared/paths.js';
 import { installCrashHandlers } from './shared/crashHandlers.js';
 import { previewRollback, rollbackTarget } from './supervisor/rollback.js';
 import { checkToolHealth, runThinklessStartupSelfUpdate, updateToolsBetweenRuns, type ThinklessSelfUpdateResult } from './supervisor/selfupdate.js';
@@ -242,8 +242,15 @@ function resolveResumeLaunchOption(target?: string): { target: string; sessionDi
   const normalized = normalizeTargetAndSession(resolvedTarget);
   return {
     target: normalized.target,
-    sessionDir: normalized.sessionDir ?? latestNumberedSessionDir(normalized.target) ?? undefined
+    sessionDir: normalized.sessionDir ?? resumeSessionDirForTarget(normalized.target)
   };
+}
+
+function resumeSessionDirForTarget(target: string): string | undefined {
+  const durableNumbered = latestNumberedRunSessionDir(target);
+  if (durableNumbered) return durableNumbered;
+  if (hasDurableSupervisorState(join(resolve(target), '.thinkless')) || hasDurableSupervisorState(join(resolve(target), '.wici'))) return undefined;
+  return latestNumberedSessionDir(target) ?? undefined;
 }
 
 function resolveResumeTargetOption(target?: string): string {
@@ -285,8 +292,41 @@ function latestThinklessWorkspace(): string | null {
 }
 
 function hasThinklessRun(target: string): boolean {
-  const paths = runPaths(resolve(target));
-  return existsSync(paths.goal) || existsSync(paths.checkpoint) || existsSync(paths.chat);
+  return Boolean(findThinklessStateDir(resolve(target)));
+}
+
+function findThinklessStateDir(target: string): string | null {
+  const root = resolve(target);
+  const stateDirs = [
+    join(root, '.thinkless'),
+    ...numberedStateDirs(root),
+    join(root, '.wici')
+  ];
+  return stateDirs.find(hasAnyThinklessState) ?? null;
+}
+
+function numberedStateDirs(target: string): string[] {
+  try {
+    return readdirSync(target, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && isNumberedSessionDirName(entry.name))
+      .map((entry) => join(target, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+function hasAnyThinklessState(stateDir: string): boolean {
+  return (
+    existsSync(join(stateDir, 'goal.json')) ||
+    existsSync(join(stateDir, 'checkpoint.json')) ||
+    existsSync(join(stateDir, 'chat.jsonl')) ||
+    existsSync(join(stateDir, 'runtime-selection.json')) ||
+    existsSync(join(stateDir, 'events.jsonl'))
+  );
+}
+
+function hasDurableSupervisorState(stateDir: string): boolean {
+  return existsSync(join(stateDir, 'goal.json')) || existsSync(join(stateDir, 'checkpoint.json'));
 }
 
 function normalizeTargetAndSession(target: string): { target: string; sessionDir?: string } {
