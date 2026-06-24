@@ -5,6 +5,8 @@ import {
   type ThinklessReleaseInfo
 } from '../supervisor/selfupdate.js';
 
+const futureVersion = '9.9.9';
+
 async function main(): Promise<void> {
   assert(compareReleaseVersions('0.1.4', 'v0.1.5') < 0, 'release comparison should normalize v-prefixed tags');
   assert(compareReleaseVersions('v0.1.5', '0.1.5') === 0, 'same release versions should compare equal');
@@ -28,7 +30,7 @@ async function main(): Promise<void> {
 
   const dirtyCommands: Array<{ command: string; args: string[] }> = [];
   const dirty = await runThinklessStartupSelfUpdate({}, {
-    latestRelease: latest('0.1.5'),
+    latestRelease: latest(futureVersion),
     runCommand: commandRecorder(dirtyCommands, { git: true, dirty: true }).run
   });
   assert(dirty.action === 'skipped-dirty-checkout', `dirty checkouts must not update: ${JSON.stringify(dirty)}`);
@@ -36,7 +38,7 @@ async function main(): Promise<void> {
 
   const globalCommands: Array<{ command: string; args: string[] }> = [];
   const globalInstall = await runThinklessStartupSelfUpdate({}, {
-    latestRelease: latest('0.1.5'),
+    latestRelease: latest(futureVersion),
     runCommand: commandRecorder(globalCommands, { git: false }).run
   });
   assert(globalInstall.action === 'updated-global-install', `non-git installs should update globally: ${JSON.stringify(globalInstall)}`);
@@ -47,19 +49,26 @@ async function main(): Promise<void> {
 
   const gitCommands: Array<{ command: string; args: string[] }> = [];
   const gitInstall = await runThinklessStartupSelfUpdate({}, {
-    latestRelease: latest('0.1.5'),
+    latestRelease: latest(futureVersion),
     runCommand: commandRecorder(gitCommands, { git: true, dirty: false }).run
   });
   assert(gitInstall.action === 'updated-git-checkout', `clean git checkout should update from release tag: ${JSON.stringify(gitInstall)}`);
-  assert(gitCommands.some((call) => call.command === 'git' && call.args.includes('fetch') && call.args.includes('v0.1.5')), `git update should fetch latest tag: ${JSON.stringify(gitCommands)}`);
-  assert(gitCommands.some((call) => call.command === 'git' && call.args.includes('checkout') && call.args.includes('v0.1.5')), `git update should checkout latest tag: ${JSON.stringify(gitCommands)}`);
+  assert(gitCommands.some((call) => call.command === 'git' && call.args.includes('fetch') && call.args.includes(`v${futureVersion}`)), `git update should fetch latest tag: ${JSON.stringify(gitCommands)}`);
+  assert(gitCommands.some((call) => call.command === 'git' && call.args.includes('checkout') && call.args.includes(`v${futureVersion}`)), `git update should checkout latest tag: ${JSON.stringify(gitCommands)}`);
   assert(gitCommands.some((call) => call.command === 'npm' && call.args.join(' ') === 'install'), `git update should install dependencies: ${JSON.stringify(gitCommands)}`);
   assert(gitCommands.some((call) => call.command === 'npm' && call.args.join(' ') === 'run build'), `git update should rebuild: ${JSON.stringify(gitCommands)}`);
 
   const cli = await readFile('src/cli.tsx', 'utf8');
   assert(cli.includes('runThinklessStartupSelfUpdate') && cli.includes('maybeRunThinklessStartupSelfUpdate'), 'CLI must run startup self-update before command handling');
+  assert(
+    cli.includes('spawnSync(process.execPath, process.argv.slice(1)') &&
+      cli.includes('THINKLESS_SELF_UPDATE_REEXECED') &&
+      cli.includes("updated-global-install") &&
+      cli.includes("updated-git-checkout"),
+    'CLI must restart the current command after a successful Thinkless self-update'
+  );
 
-  console.log(JSON.stringify({ ok: true, fail_open: true, dirty_skip: true, global_install: true, git_update: true }, null, 2));
+  console.log(JSON.stringify({ ok: true, fail_open: true, dirty_skip: true, global_install: true, git_update: true, reexec_after_update: true }, null, 2));
 }
 
 function latest(version: string): () => Promise<ThinklessReleaseInfo> {

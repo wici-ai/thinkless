@@ -2,7 +2,7 @@
 import React from 'react';
 import { render } from 'ink';
 import { Command } from 'commander';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -196,6 +196,16 @@ async function maybeRunThinklessStartupSelfUpdate(): Promise<void> {
     action: 'failed-open',
     error: error instanceof Error ? error.message : String(error)
   }));
+  if ((result.action === 'updated-global-install' || result.action === 'updated-git-checkout') && process.env.THINKLESS_SELF_UPDATE_REEXECED !== '1') {
+    if (process.env.THINKLESS_SELF_UPDATE_VERBOSE === '1') {
+      console.error(`thinkless self-update: ${result.action}; restarting with ${result.latestVersion ?? 'latest release'}`);
+    }
+    const child = spawnSync(process.execPath, process.argv.slice(1), {
+      stdio: 'inherit',
+      env: { ...process.env, THINKLESS_SELF_UPDATE_REEXECED: '1' }
+    });
+    process.exit(child.status ?? (child.signal ? 1 : 0));
+  }
   if (process.env.THINKLESS_SELF_UPDATE_VERBOSE !== '1') return;
   const detail = result.error ? `: ${result.error}` : result.message ? `: ${result.message}` : '';
   console.error(`thinkless self-update: ${result.action}${detail}`);
