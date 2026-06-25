@@ -77,6 +77,7 @@ async function main(): Promise<void> {
   assert(transcript.includes('"item.completed"'), 'codex transcript missing item.completed event');
 
   await verifyLastMessageJsonReceiptFallback(paths);
+  await verifyReceiptCompletionStopsStuckProcess(paths);
   await verifyIdleWatchdog(paths);
   await verifyFirstMeaningfulEventWatchdog(paths);
 
@@ -89,6 +90,7 @@ async function main(): Promise<void> {
         resume_used: true,
         artifact_contract: true,
         last_message_receipt_fallback: true,
+        receipt_completion_stops_stuck_process: true,
         usage_parsed: true,
         streaming_progress: true,
         idle_watchdog: true
@@ -97,6 +99,22 @@ async function main(): Promise<void> {
       2
     )
   );
+}
+
+async function verifyReceiptCompletionStopsStuckProcess(paths: ReturnType<typeof runPaths>): Promise<void> {
+  const stuckAfterCompletionCodex = await writeFakeCodex(paths, 'fake-stuck-after-completion-codex', stuckAfterCompletionCodexScript());
+  const started = Date.now();
+  const result = await runExecutorStep(paths, goal(), 'S4', 4, testConfig(stuckAfterCompletionCodex), undefined, undefined, {
+    artifactId: 'stuck-after-completion-4',
+    idleTimeoutMs: 10_000,
+    hardTimeoutMs: 10_000,
+    heartbeatMs: 25
+  });
+
+  const wallMs = Date.now() - started;
+  assert(result.step_done && result.tests_pass, `stuck-after-completion receipt did not complete: ${JSON.stringify(result)}`);
+  assert(result.notes === 'fake codex completed but did not exit', `unexpected stuck-after-completion notes: ${result.notes}`);
+  assert(wallMs < 5_000, `executor waited for timeout instead of receipt completion, wallMs=${wallMs}`);
 }
 
 async function verifyLastMessageJsonReceiptFallback(paths: ReturnType<typeof runPaths>): Promise<void> {
@@ -293,6 +311,33 @@ const result = {
 writeFileSync(resolve(process.cwd(), args[outputIndex + 1]), JSON.stringify(result, null, 2) + '\\n');
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 130, output_tokens: 13, cost_usd: 0.003 } }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'message', iter: 3 } }));
+`;
+}
+
+function stuckAfterCompletionCodexScript(): string {
+  return `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf('--output-last-message');
+if (outputIndex < 0 || !args[outputIndex + 1]) {
+  console.error('fake codex missing --output-last-message');
+  process.exit(2);
+}
+
+const out = resolve(process.cwd(), args[outputIndex + 1]);
+const result = {
+  step_done: true,
+  tests_pass: true,
+  notes: 'fake codex completed but did not exit',
+  changed_files: [],
+  next: null
+};
+writeFileSync(out.replace(/\\.txt$/, '.json'), JSON.stringify(result, null, 2) + '\\n');
+writeFileSync(out, result.notes + '\\n');
+console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 140, output_tokens: 14, cost_usd: 0.004 } }));
+setInterval(() => {}, 1000);
 `;
 }
 

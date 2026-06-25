@@ -37,6 +37,7 @@ export interface ExecutorRunOptions {
   onProgress?: (progress: ExecutorProgress) => Promise<void>;
   onBackendFallback?: (fallback: ExecutorBackendFallback) => Promise<void>;
   shouldPreempt?: () => Promise<boolean>;
+  completionArtifactId?: string;
   idleTimeoutMs?: number;
   hardTimeoutMs?: number;
   heartbeatMs?: number;
@@ -113,6 +114,7 @@ export async function runExecutorStep(
         cwd: paths.target,
         onProgress: options.onProgress,
         shouldPreempt: options.shouldPreempt,
+        completionArtifactId: artifactId,
         idleTimeoutMs: options.idleTimeoutMs,
         hardTimeoutMs: options.hardTimeoutMs,
         heartbeatMs: options.heartbeatMs,
@@ -333,6 +335,7 @@ async function runCodexProcess(
     cwd: string;
     onProgress?: (progress: ExecutorProgress) => Promise<void>;
     shouldPreempt?: () => Promise<boolean>;
+    completionArtifactId?: string;
     idleTimeoutMs?: number;
     hardTimeoutMs?: number;
     heartbeatMs?: number;
@@ -361,7 +364,11 @@ async function runCodexProcess(
   let progressError: unknown;
   let preemptChain = Promise.resolve();
   let preemptError: unknown;
+  let completionChain = Promise.resolve();
+  let completionError: unknown;
   let preempted = false;
+  let turnCompleted = false;
+  let completedFromReceipt = false;
   const usage = emptyUsageSummary();
   const startedAt = Date.now();
   let lastActivityAt = startedAt;
@@ -409,6 +416,7 @@ async function runCodexProcess(
     for (const line of lines) {
       const eventType = consumeCodexLine(line, usage, scheduleProgress);
       if (isMeaningfulCodexEvent(eventType)) firstMeaningfulEventAt ??= Date.now();
+      if (eventType === 'turn.completed') turnCompleted = true;
     }
     return nextBuffer;
   };
@@ -438,6 +446,25 @@ async function runCodexProcess(
     });
   };
 
+  const requestCompletionCheck = () => {
+    if (!options.completionArtifactId || !turnCompleted || completedFromReceipt || timeoutReason) return;
+    completionChain = completionChain.then(async () => {
+      if (!options.completionArtifactId || !turnCompleted || completedFromReceipt || timeoutReason || completionError) return;
+      try {
+        await readIterResult(paths, options.completionArtifactId);
+        completedFromReceipt = true;
+        child.kill('SIGTERM');
+        setTimeout(() => {
+          if (completedFromReceipt) child.kill('SIGKILL');
+        }, 2_000).unref();
+      } catch {
+        // Codex can emit turn.completed just before --output-last-message is flushed.
+      }
+    }).catch((error: unknown) => {
+      completionError = error;
+    });
+  };
+
   const watchdog = setInterval(() => {
     const now = Date.now();
     if (now - startedAt >= hardTimeoutMs) {
@@ -452,6 +479,7 @@ async function runCodexProcess(
 
   const heartbeat = setInterval(() => {
     scheduleProgress({ kind: 'heartbeat' });
+    requestCompletionCheck();
     requestPreemptCheck();
   }, heartbeatMs);
   heartbeat.unref();
@@ -462,6 +490,7 @@ async function runCodexProcess(
     stdout = tailChars(stdout + chunk, OUTPUT_TAIL_CHARS);
     appendTranscript(chunk);
     stdoutLineBuffer = consumeLines(stdoutLineBuffer, chunk);
+    requestCompletionCheck();
     requestPreemptCheck();
   });
   child.stderr?.setEncoding('utf8');
@@ -470,6 +499,7 @@ async function runCodexProcess(
     stderr = tailChars(stderr + chunk, OUTPUT_TAIL_CHARS);
     appendTranscript(chunk);
     stderrLineBuffer = consumeLines(stderrLineBuffer, chunk);
+    requestCompletionCheck();
     requestPreemptCheck();
   });
 
@@ -485,6 +515,7 @@ async function runCodexProcess(
     await transcriptChain;
     await progressChain;
     await preemptChain;
+    await completionChain;
     throw new CodexRunError(`codex exec failed to start: ${error instanceof Error ? error.message : String(error)}`, cloneUsageSummary(usage));
   }
 
@@ -493,14 +524,18 @@ async function runCodexProcess(
   if (stdoutLineBuffer) {
     const eventType = consumeCodexLine(stdoutLineBuffer, usage, scheduleProgress);
     if (isMeaningfulCodexEvent(eventType)) firstMeaningfulEventAt ??= Date.now();
+    if (eventType === 'turn.completed') turnCompleted = true;
   }
   if (stderrLineBuffer) {
     const eventType = consumeCodexLine(stderrLineBuffer, usage, scheduleProgress);
     if (isMeaningfulCodexEvent(eventType)) firstMeaningfulEventAt ??= Date.now();
+    if (eventType === 'turn.completed') turnCompleted = true;
   }
+  requestCompletionCheck();
   await transcriptChain;
   await progressChain;
   await preemptChain;
+  await completionChain;
 
   if (transcriptError) {
     throw transcriptError;
@@ -510,6 +545,9 @@ async function runCodexProcess(
   }
   if (preemptError) {
     throw preemptError;
+  }
+  if (completionError) {
+    throw completionError;
   }
   if (preempted) {
     throw new ExecutorPreemptedError('Codex executor preempted to apply pending Chat input', cloneUsageSummary(usage));
@@ -534,7 +572,7 @@ async function runCodexProcess(
     stderr,
     all,
     usage: cloneUsageSummary(usage),
-    exitCode: exit.code,
+    exitCode: completedFromReceipt ? 0 : exit.code,
     signal: exit.signal
   };
 }
