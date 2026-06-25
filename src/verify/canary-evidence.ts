@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promis
 import { resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
+import { exists } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import { runSupervisor } from '../supervisor/index.js';
 import { recordCanaryEvidence } from '../release/record-canary.js';
@@ -1041,6 +1042,10 @@ async function mutateEvidence(path: string, update: (evidence: Record<string, un
 }
 
 async function assertExecutable(path: string): Promise<void> {
+  if (process.platform === 'win32') {
+    assert(await exists(path), `${path} should remain present in copied canary artifacts`);
+    return;
+  }
   const mode = (await stat(path)).mode;
   assert((mode & 0o111) !== 0, `${path} should remain executable in copied canary artifacts`);
 }

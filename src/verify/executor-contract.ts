@@ -1,7 +1,7 @@
 import { chmod, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createSampleTarget } from '../sample.js';
-import { atomicWriteFile } from '../shared/atomic.js';
+import { atomicWriteFile, atomicWriteJson } from '../shared/atomic.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
 import type { GoalFile, WiCiConfig } from '../shared/types.js';
 import { runExecutorStep, type ExecutorProgress } from '../supervisor/executor.js';
@@ -21,9 +21,7 @@ async function main(): Promise<void> {
 `
   );
 
-  const fakeCodex = join(paths.wici, 'fake-codex.mjs');
-  await atomicWriteFile(fakeCodex, fakeCodexScript(), 0o755);
-  await chmod(fakeCodex, 0o755);
+  const fakeCodex = await writeFakeCodex(paths, 'fake-codex', fakeCodexScript());
 
   const config = testConfig(fakeCodex);
   const progress: ExecutorProgress[] = [];
@@ -78,6 +76,7 @@ async function main(): Promise<void> {
   assert(transcript.includes('"turn.completed"'), 'codex transcript missing turn.completed event');
   assert(transcript.includes('"item.completed"'), 'codex transcript missing item.completed event');
 
+  await verifyLastMessageJsonReceiptFallback(paths);
   await verifyIdleWatchdog(paths);
   await verifyFirstMeaningfulEventWatchdog(paths);
 
@@ -89,6 +88,7 @@ async function main(): Promise<void> {
         fake_codex_invocations: argsLog.length,
         resume_used: true,
         artifact_contract: true,
+        last_message_receipt_fallback: true,
         usage_parsed: true,
         streaming_progress: true,
         idle_watchdog: true
@@ -99,10 +99,30 @@ async function main(): Promise<void> {
   );
 }
 
+async function verifyLastMessageJsonReceiptFallback(paths: ReturnType<typeof runPaths>): Promise<void> {
+  const lastMessageOnlyCodex = await writeFakeCodex(paths, 'fake-last-message-only-codex', lastMessageOnlyCodexScript());
+  await atomicWriteJson(join(paths.artifacts, 'last-message-only-3.json'), {
+    step_done: false,
+    tests_pass: false,
+    notes: 'Stub executor found no fixture hotpath.js; wrote a no-op result.',
+    changed_files: [],
+    next: null
+  });
+
+  const result = await runExecutorStep(paths, goal(), 'S3', 3, testConfig(lastMessageOnlyCodex), undefined, undefined, {
+    artifactId: 'last-message-only-3'
+  });
+
+  assert(result.step_done && result.tests_pass, `last-message receipt fallback did not complete: ${JSON.stringify(result)}`);
+  assert(result.notes === 'fake codex txt receipt iter 3', `last-message receipt fallback used the wrong result: ${result.notes}`);
+
+  const recovered = await readFile(join(paths.artifacts, 'last-message-only-3.json'), 'utf8');
+  assert(recovered.includes('fake codex txt receipt iter 3'), 'last-message receipt fallback did not persist recovered json receipt');
+  assert(!recovered.includes('Stub executor'), 'last-message receipt fallback must not write a stub receipt');
+}
+
 async function verifyFirstMeaningfulEventWatchdog(paths: ReturnType<typeof runPaths>): Promise<void> {
-  const threadOnlyCodex = join(paths.wici, 'fake-thread-only-codex.mjs');
-  await atomicWriteFile(threadOnlyCodex, threadOnlyCodexScript(), 0o755);
-  await chmod(threadOnlyCodex, 0o755);
+  const threadOnlyCodex = await writeFakeCodex(paths, 'fake-thread-only-codex', threadOnlyCodexScript());
 
   let error: unknown;
   try {
@@ -137,9 +157,7 @@ async function verifyFirstMeaningfulEventWatchdog(paths: ReturnType<typeof runPa
 }
 
 async function verifyIdleWatchdog(paths: ReturnType<typeof runPaths>): Promise<void> {
-  const hangingCodex = join(paths.wici, 'fake-hanging-codex.mjs');
-  await atomicWriteFile(hangingCodex, hangingCodexScript(), 0o755);
-  await chmod(hangingCodex, 0o755);
+  const hangingCodex = await writeFakeCodex(paths, 'fake-hanging-codex', hangingCodexScript());
 
   const heartbeatProgress: ExecutorProgress[] = [];
   let error: unknown;
@@ -175,6 +193,17 @@ async function verifyIdleWatchdog(paths: ReturnType<typeof runPaths>): Promise<v
   assert(error instanceof Error, 'hanging fake codex should fail by idle timeout');
   assert(error.message.includes('Codex executor timed out'), `unexpected hanging fake codex error: ${error.message}`);
   assert(heartbeatProgress.some((item) => item.kind === 'heartbeat'), 'executor idle watchdog did not emit heartbeat progress');
+}
+
+async function writeFakeCodex(paths: ReturnType<typeof runPaths>, name: string, script: string): Promise<string> {
+  const js = join(paths.wici, `${name}.js`);
+  await atomicWriteFile(js, script, 0o755);
+  await chmod(js, 0o755);
+  if (process.platform !== 'win32') return js;
+
+  const cmd = join(paths.wici, `${name}.cmd`);
+  await atomicWriteFile(cmd, `@echo off\r\nnode "%~dp0\\${name}.js" %*\r\n`);
+  return cmd;
 }
 
 function goal(): GoalFile {
@@ -239,6 +268,31 @@ if (outputIndex >= 0 && args[outputIndex + 1]) {
 appendFileSync(join(cwd, '.thinkless', 'fake-codex-args.jsonl'), JSON.stringify({ args, prompt, iter, cwd }) + '\\n');
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100 + iter, output_tokens: 10 + iter, cost_usd: Number((0.001 * iter).toFixed(3)) } }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'message', iter } }));
+`;
+}
+
+function lastMessageOnlyCodexScript(): string {
+  return `#!/usr/bin/env node
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf('--output-last-message');
+if (outputIndex < 0 || !args[outputIndex + 1]) {
+  console.error('fake codex missing --output-last-message');
+  process.exit(2);
+}
+
+const result = {
+  step_done: true,
+  tests_pass: true,
+  notes: 'fake codex txt receipt iter 3',
+  changed_files: [],
+  next: null
+};
+writeFileSync(resolve(process.cwd(), args[outputIndex + 1]), JSON.stringify(result, null, 2) + '\\n');
+console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 130, output_tokens: 13, cost_usd: 0.003 } }));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'message', iter: 3 } }));
 `;
 }
 

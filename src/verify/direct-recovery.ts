@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { readJsonFile, readJsonLines } from '../shared/atomic.js';
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
 
   const oldPath = process.env.PATH;
   const oldStateDir = process.env.WICI_FAKE_STATE_DIR;
-  process.env.PATH = `${fakeBin}:${oldPath ?? ''}`;
+  process.env.PATH = `${fakeBin}${delimiter}${oldPath ?? ''}`;
   process.env.WICI_FAKE_TARGET = target;
   process.env.WICI_FAKE_STATE_DIR = paths.wici;
   try {
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
 }
 
 async function writeFakeClaude(): Promise<void> {
-  const path = join(fakeBin, 'claude');
+  const path = await fakeCommandPath('claude');
   await writeFile(
     path,
     `#!/usr/bin/env node
@@ -119,7 +119,7 @@ console.log(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'un
 }
 
 async function writeFakeCodex(): Promise<void> {
-  const path = join(fakeBin, 'codex');
+  const path = await fakeCommandPath('codex');
   await writeFile(
     path,
     `#!/usr/bin/env node
@@ -180,6 +180,13 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'message' } }
 `
   );
   await chmod(path, 0o755);
+}
+
+async function fakeCommandPath(name: string): Promise<string> {
+  if (process.platform !== 'win32') return join(fakeBin, name);
+  const cmd = join(fakeBin, `${name}.cmd`);
+  await writeFile(cmd, `@echo off\r\nnode "%~dp0\\${name}.js" %*\r\n`);
+  return join(fakeBin, `${name}.js`);
 }
 
 async function git(args: string[]): Promise<string> {

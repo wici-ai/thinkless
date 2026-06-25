@@ -592,6 +592,7 @@ async function verifyExecutablePaths(paths: string[]): Promise<{ executable: boo
   const notExecutable: string[] = [];
   for (const path of paths) {
     if (!(await exists(path))) continue;
+    if (process.platform === 'win32') continue;
     const mode = (await stat(path)).mode;
     if ((mode & 0o111) === 0) notExecutable.push(path);
   }

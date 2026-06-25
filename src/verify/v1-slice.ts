@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
+import { resolveShellScriptForSpawn } from '../shared/commands.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
 import { runSupervisor } from '../supervisor/index.js';
@@ -87,9 +88,9 @@ async function main(): Promise<void> {
   assert(prompt.includes('S1'), 'executor prompt missing PLAN.md step content');
   assert(prompt.includes('Thinkless will not run git add or git commit for direct V1 execution'), 'executor prompt must make commits executor-owned');
 
-  const checks = await execa(paths.checks, [], { cwd: target, all: true, reject: false });
+  const checks = await runShellScript(paths.checks, target);
   assert(checks.exitCode === 0, `locked checks failed after v1 run:\n${checks.all}`);
-  const measure = await execa(paths.measure, [], { cwd: target, all: true, reject: false });
+  const measure = await runShellScript(paths.measure, target);
   assert(measure.exitCode === 0 && (measure.all ?? '').includes('METRIC '), `locked measure failed after v1 run:\n${measure.all}`);
 
   const log = await git(['log', '--oneline', '--decorate', '-8']);
@@ -140,7 +141,7 @@ async function verifyTuiRender(): Promise<{ rendered: true }> {
     ['--import', 'tsx', 'src/cli.tsx', 'tui', '--target', target, '--mode', 'stub', '--no-supervisor', '--no-fullscreen'],
     {
       cwd: resolve('.'),
-      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color' },
+      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1' },
       stdio: ['ignore', 'pipe', 'pipe']
     }
   );
@@ -199,8 +200,17 @@ async function assertExists(path: string, label: string): Promise<void> {
 }
 
 async function assertExecutable(path: string, label: string): Promise<void> {
+  if (process.platform === 'win32') {
+    assert(await exists(path), `${label} should exist: ${path}`);
+    return;
+  }
   const mode = (await stat(path)).mode;
   assert((mode & 0o111) !== 0, `${label} should be executable: ${path}`);
+}
+
+async function runShellScript(path: string, cwd: string): Promise<{ exitCode?: number; all?: string }> {
+  const command = await resolveShellScriptForSpawn(path);
+  return execa(command.command, command.args, { cwd, shell: command.shell ?? false, all: true, reject: false });
 }
 
 async function git(args: string[]): Promise<string> {

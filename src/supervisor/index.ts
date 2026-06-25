@@ -1172,6 +1172,29 @@ async function runDirectPlanExecution(
         changedFiles: []
       });
       await appendLedger(paths, ledgerEntry);
+      const crashLoopCount = consecutiveCrashCount(await readLedger(paths), step.id, String(ledgerEntry.guards.reason));
+      if (crashLoopCount >= 3) {
+        await events.emit('EXECUTE_CRASH_LOOP_BLOCKED', `Blocked ${step.id} after ${crashLoopCount} consecutive executor crashes: ${reason}`, {
+          iter: nextIter,
+          step_id: step.id,
+          mode: 'direct',
+          crash_loop_count: crashLoopCount
+        }, 'error');
+        await setPlanStepStatus(paths, step.id, 'blocked', nextIter);
+        await refreshContextSummary(paths, goal, events);
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'STOP',
+          next_step: step.id,
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq,
+          plan_hash: await hashFile(paths.plan)
+        };
+        await saveCheckpoint(paths, checkpoint);
+        const blockedReason = `Executor crash loop blocked for ${step.id}: ${reason}`;
+        await writeOutbox(paths, { kind: 'error', text: blockedReason });
+        return { state: 'STOP', reason: blockedReason, iter: checkpoint.iter };
+      }
       await setPlanStepStatus(paths, step.id, 'pending', nextIter);
       await refreshContextSummary(paths, goal, events);
       checkpoint = {
@@ -1767,6 +1790,16 @@ function directLedgerEntry(args: {
 
 function previousKeepMetric(ledger: LedgerEntry[]): MetricStats | null {
   return [...ledger].reverse().find((entry) => entry.status === 'keep' && entry.metric)?.metric ?? null;
+}
+
+function consecutiveCrashCount(ledger: LedgerEntry[], stepId: string, reason: string): number {
+  let count = 0;
+  for (let index = ledger.length - 1; index >= 0; index -= 1) {
+    const entry = ledger[index];
+    if (entry.step_id !== stepId || entry.status !== 'crash' || entry.guards.reason !== reason) break;
+    count += 1;
+  }
+  return count;
 }
 
 function directMetricDeltaPct(base: MetricStats, next: MetricStats, direction: GoalFile['metric']['direction']): number {

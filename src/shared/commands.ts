@@ -34,6 +34,13 @@ export async function resolveCommandForSpawn(command: string, args: string[]): P
   return { command: resolved, args };
 }
 
+export async function resolveShellScriptForSpawn(script: string, args: string[] = []): Promise<ResolvedCommand> {
+  if (process.platform !== 'win32') return { command: script, args };
+  const shell = await resolveWindowsShell();
+  if (!shell) return { command: script, args };
+  return { command: shell, args: [script, ...args] };
+}
+
 function looksLikePath(command: string): boolean {
   return command.includes('/') || command.includes('\\') || /^[A-Za-z]:/.test(command);
 }
@@ -53,6 +60,19 @@ async function resolveWindowsPath(command: string): Promise<string | null> {
   if (result.exitCode !== 0) return null;
   const candidates = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   return candidates.find((candidate) => windowsExecutableExtensions().includes(extname(candidate).toLowerCase())) ?? candidates[0] ?? null;
+}
+
+async function resolveWindowsShell(): Promise<string | null> {
+  const fromPath = (await resolveWindowsPath('bash')) ?? (await resolveWindowsPath('sh'));
+  if (fromPath) return fromPath;
+  for (const candidate of [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+    'C:\\Program Files\\Git\\usr\\bin\\sh.exe'
+  ]) {
+    if (await fileExists(candidate)) return candidate;
+  }
+  return null;
 }
 
 function windowsExecutableExtensions(): string[] {

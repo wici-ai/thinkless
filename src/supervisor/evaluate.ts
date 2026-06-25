@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import { atomicWriteJson, exists, readJsonFileMaybe } from '../shared/atomic.js';
+import { resolveShellScriptForSpawn } from '../shared/commands.js';
 import type { BaselineFile, GoalFile, LedgerEntry, MetricStats, ToolUsageSummary, WiCiConfig } from '../shared/types.js';
 import type { RunPaths } from '../shared/paths.js';
 import { currentCommit } from './gitgate.js';
@@ -520,9 +521,10 @@ function mulberry32(seed: number): () => number {
 
 async function runScript(script: string, cwd: string, timeout: number): Promise<CommandOutcome> {
   const started = Date.now();
-  const result = await execa(script, [], {
+  const command = await resolveShellScriptForSpawn(script);
+  const result = await execa(command.command, command.args, {
     cwd,
-    shell: false,
+    shell: command.shell ?? false,
     reject: false,
     all: true,
     timeout,

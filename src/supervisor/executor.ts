@@ -126,6 +126,7 @@ export async function runExecutorStep(
       return { ...iterResult, invocation: { ok: true, stdout: result.all, usage: result.usage } };
     } catch (error) {
       if (config.tools.mode === 'real') throw error;
+      throw new Error(`Executor command failed after starting real executor; refusing to fall back to stub: ${errorMessage(error)}`);
     }
   }
 
@@ -613,10 +614,70 @@ function durationLabel(ms: number): string {
 
 async function readIterResult(paths: RunPaths, artifactId: string): Promise<IterResult> {
   const path = join(paths.artifacts, `${artifactId}.json`);
-  if (!(await exists(path))) {
-    throw new Error(`Executor did not write expected result file: ${path}`);
+  const lastMessagePath = join(paths.artifacts, `${artifactId}.txt`);
+  if (await exists(path)) {
+    const parsed = normalizeIterResult(JSON.parse(await readFile(path, 'utf8')) as IterResult);
+    if (isStubNoopResult(parsed)) {
+      const recovered = await readIterResultFromLastMessage(lastMessagePath);
+      if (recovered && !isStubNoopResult(recovered)) {
+        await atomicWriteJson(path, recovered);
+        return recovered;
+      }
+    }
+    return parsed;
   }
-  const parsed = JSON.parse(await readFile(path, 'utf8')) as IterResult;
+
+  const parsed = await readIterResultFromLastMessage(lastMessagePath);
+  if (parsed) {
+    await atomicWriteJson(path, parsed);
+    return parsed;
+  }
+
+  throw new Error(`Executor did not write expected result file: ${path}`);
+}
+
+async function readIterResultFromLastMessage(path: string): Promise<IterResult | null> {
+  if (!(await exists(path))) return null;
+  const raw = (await readFile(path, 'utf8')).trim();
+  if (!raw) return null;
+
+  for (const candidate of iterResultJsonCandidates(raw)) {
+    try {
+      return normalizeIterResult(JSON.parse(candidate) as IterResult);
+    } catch {
+      // Try the next candidate; the last message may contain prose around JSON.
+    }
+  }
+
+  return null;
+}
+
+function iterResultJsonCandidates(raw: string): string[] {
+  const candidates = [raw];
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) candidates.push(fenced[1].trim());
+  const firstBrace = raw.indexOf('{');
+  const lastBrace = raw.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(raw.slice(firstBrace, lastBrace + 1));
+  return candidates;
+}
+
+function isStubNoopResult(result: IterResult): boolean {
+  return (
+    result.step_done === false &&
+    result.tests_pass === false &&
+    result.changed_files.length === 0 &&
+    result.notes === 'Stub executor found no fixture hotpath.js; wrote a no-op result.'
+  );
+}
+
+function normalizeIterResult(parsed: IterResult): IterResult {
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Executor result was not a JSON object');
+  }
+  if (typeof parsed.step_done !== 'boolean' || typeof parsed.tests_pass !== 'boolean' || typeof parsed.notes !== 'string') {
+    throw new Error('Executor result JSON missing required step_done/tests_pass/notes fields');
+  }
   return {
     ...parsed,
     changed_files: Array.isArray(parsed.changed_files) ? parsed.changed_files : [],
