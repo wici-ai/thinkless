@@ -184,7 +184,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
           : await checkToolHealth(config, { probeClaude: false });
     if (toolHealth) assertRealToolsReady(config, toolHealth);
     const currentToolVersions = await toolVersionsFromHealth(config, toolHealth);
-    const toolDrift = reconcileToolVersionDrift(checkpoint, currentToolVersions);
+    const toolDrift = reconcileToolVersionDrift(checkpoint, currentToolVersions, { allowWiCiBoundary: Boolean(resumePreflight) });
     checkpoint.tool_versions = currentToolVersions;
     await saveCheckpoint(paths, checkpoint);
     if (didAutoUpdateTools) {

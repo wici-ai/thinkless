@@ -30,6 +30,10 @@ export interface ToolVersionDriftReport {
   accepted: string[];
 }
 
+export interface ToolVersionDriftOptions {
+  allowWiCiBoundary?: boolean;
+}
+
 export interface ThinklessReleaseInfo {
   version: string;
   tagName: string;
@@ -100,7 +104,11 @@ export function shouldAutoUpdateToolsAtBoundary(config: WiCiConfig, checkpoint: 
   return !checkpoint.tool_versions || checkpoint.supervisor_state === 'STOP' || checkpoint.supervisor_state === 'FAILED';
 }
 
-export function reconcileToolVersionDrift(checkpoint: Checkpoint, current: NonNullable<Checkpoint['tool_versions']>): ToolVersionDriftReport {
+export function reconcileToolVersionDrift(
+  checkpoint: Checkpoint,
+  current: NonNullable<Checkpoint['tool_versions']>,
+  options: ToolVersionDriftOptions = {}
+): ToolVersionDriftReport {
   if (!checkpoint.tool_versions) return { accepted: [] };
   if (checkpoint.supervisor_state === 'STOP' || checkpoint.supervisor_state === 'FAILED') return { accepted: [] };
 
@@ -113,13 +121,19 @@ export function reconcileToolVersionDrift(checkpoint: Checkpoint, current: NonNu
   if (pinned.github !== current.github) accepted.push(`github ${pinned.github ?? 'unknown'} -> ${current.github ?? 'unknown'}`);
   if (pinned.wici) {
     if (pinned.wici.package_version !== current.wici?.package_version) {
-      rejected.push(`wici package ${pinned.wici.package_version ?? 'unknown'} -> ${current.wici?.package_version ?? 'unknown'}`);
+      const item = `wici package ${pinned.wici.package_version ?? 'unknown'} -> ${current.wici?.package_version ?? 'unknown'}`;
+      if (options.allowWiCiBoundary) accepted.push(item);
+      else rejected.push(item);
     }
     if (pinned.wici.git_commit !== current.wici?.git_commit) {
-      rejected.push(`wici git ${pinned.wici.git_commit ?? 'unknown'} -> ${current.wici?.git_commit ?? 'unknown'}`);
+      const item = `wici git ${pinned.wici.git_commit ?? 'unknown'} -> ${current.wici?.git_commit ?? 'unknown'}`;
+      if (options.allowWiCiBoundary) accepted.push(item);
+      else rejected.push(item);
     }
     if (pinned.wici.git_dirty !== current.wici?.git_dirty) {
-      rejected.push(`wici dirty ${String(pinned.wici.git_dirty)} -> ${String(current.wici?.git_dirty)}`);
+      const item = `wici dirty ${String(pinned.wici.git_dirty)} -> ${String(current.wici?.git_dirty)}`;
+      if (options.allowWiCiBoundary) accepted.push(item);
+      else rejected.push(item);
     }
   }
 
