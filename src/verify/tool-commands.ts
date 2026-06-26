@@ -330,6 +330,9 @@ async function main(): Promise<void> {
   assert(resumeCodex.includes('--output-schema'), 'codex resume missing --output-schema');
   assert(resumeCodex.includes('--output-last-message'), 'codex resume missing --output-last-message');
   assert(resumeCodex.includes('--skip-git-repo-check'), 'codex resume missing --skip-git-repo-check');
+  assert(firstCodex.at(-1) === '-' && firstCodex.stdin === 'execute', `first codex exec must pass prompt over stdin, got ${JSON.stringify(firstCodex)}`);
+  assert(resumeCodex.at(-1) === '-' && resumeCodex.stdin === 'resume', `codex resume must pass prompt over stdin, got ${JSON.stringify(resumeCodex)}`);
+  assert(!firstCodex.slice(1).includes('execute'), 'fresh executor prompt text must not be carried in argv on Windows');
   assert(!resumeCodex.includes('-C'), `codex resume must rely on process cwd instead of unsupported -C: ${resumeCodex.join(' ')}`);
   assert(!firstCodex.includes('gpt-5.3-codex-spark'), 'spark model must not be hardcoded into default executor args');
   assert(sparkCodex[sparkCodex.indexOf('--model') + 1] === 'gpt-5.3-codex-spark', 'executor must support explicit model override for real canaries');

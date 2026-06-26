@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { appendJsonLine, atomicWriteFile, ensureDir } from '../shared/atomic.js';
 import { commandExists } from '../shared/commands.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
-import { readChatSession, writeChatSession } from '../shared/chatSession.js';
+import { clearChatSession, readChatSession, writeChatSession } from '../shared/chatSession.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
 import { runtimeAgentFromCommand } from '../shared/runtime.js';
@@ -153,7 +153,11 @@ async function runCodexChatTurn(
 ): Promise<ChatTurnResult> {
   await ensureDir(ctx.paths.artifacts);
   const outputLastMessage = join(ctx.paths.artifacts, `chat-codex-${Date.now()}.txt`);
-  const result = await runCodexChatProcess(ctx, command, input, outputLastMessage, input.sessionId);
+  let result = await runCodexChatProcess(ctx, command, input, outputLastMessage, input.sessionId);
+  if (input.sessionId && result.exitCode !== 0 && isContextWindowFailure(result.all)) {
+    await clearChatSession(ctx.paths, 'codex');
+    result = await runCodexChatProcess(ctx, command, input, outputLastMessage, undefined);
+  }
   if (result.timeoutReason || result.exitCode !== 0) {
     const action = input.sessionId ? 'resume failed' : 'exited';
     const detail = codexFailureDetail(result.all);
@@ -171,6 +175,10 @@ async function runCodexChatTurn(
   const sessionId = parsed.sessionId ?? extractCodexSessionId(result.stdout) ?? input.sessionId;
   if (sessionId) await writeChatSession(ctx.paths, 'codex', sessionId, { agent: 'codex', model: input.model, effort: input.effort });
   return { reply: parsed.reply, update: parsed.update, degraded: false };
+}
+
+function isContextWindowFailure(output: string): boolean {
+  return /ran out of room|context window|model'?s context|context length|maximum context/i.test(output);
 }
 
 function codexFailureDetail(output: string): string {

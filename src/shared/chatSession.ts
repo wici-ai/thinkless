@@ -49,6 +49,18 @@ export async function writeChatSession(paths: RunPaths, agent: ChatSessionAgent,
   });
 }
 
+export async function clearChatSession(paths: RunPaths, agent: ChatSessionAgent): Promise<void> {
+  const current = (await readChatSessionFile(paths)) ?? {};
+  const sessions = { ...(current.sessions ?? {}) };
+  delete sessions[agent];
+  await atomicWriteJson(paths.chatSession, {
+    ...(agent === 'claude' ? {} : { session_id: current.session_id }),
+    updated_at: timestamp(),
+    ...(current.runtime_selection ? { runtime_selection: current.runtime_selection } : {}),
+    sessions
+  });
+}
+
 export async function readPersistedRuntimeSelection(paths: RunPaths): Promise<RuntimeSelection | undefined> {
   const runtime = await readJsonFileMaybe<RuntimeSelection>(paths.runtimeSelection);
   if (runtime) return normalizeRuntimeSelection(runtime);

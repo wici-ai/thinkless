@@ -147,7 +147,8 @@ if (!target) {
 }
 const wici = process.env.WICI_FAKE_STATE_DIR || join(target, '.thinkless');
 mkdirSync(wici, { recursive: true });
-const prompt = args.at(-1) ?? '';
+const promptArg = args.at(-1) ?? '';
+const prompt = promptArg === '-' ? readFileSync(0, 'utf8') : promptArg;
 appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args, prompt }) + '\\n');
 const countPath = join(wici, 'fake-codex-count.txt');
 let count = 0;

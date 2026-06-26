@@ -52,6 +52,8 @@ async function main(): Promise<void> {
   assert(argsLog[1].args[0] === 'exec' && argsLog[1].args[1] === 'resume', `second invocation was not codex exec resume: ${JSON.stringify(argsLog[1].args)}`);
   assert(argsLog[0].args.includes('-C'), `first codex exec should set target cwd with -C: ${JSON.stringify(argsLog[0].args)}`);
   assert(!argsLog[1].args.includes('-C'), `codex exec resume does not support -C and must rely on spawn cwd: ${JSON.stringify(argsLog[1].args)}`);
+  assert(argsLog[0].args.at(-1) === '-' && argsLog[1].args.at(-1) === '-', `executor prompts must be passed over stdin to avoid Windows ENAMETOOLONG: ${JSON.stringify(argsLog)}`);
+  assert(argsLog[0].prompt.includes('Current GOAL.md:') && argsLog[1].prompt.includes('Continue the existing Codex session'), 'fake Codex did not receive executor prompts over stdin');
   for (const item of argsLog) {
     assert(item.args.includes('--dangerously-bypass-approvals-and-sandbox'), `executor missing autonomy flag: ${JSON.stringify(item.args)}`);
     assert(item.args.includes('--json'), `executor missing json flag: ${JSON.stringify(item.args)}`);
@@ -255,11 +257,12 @@ function testConfig(fakeCodex: string): WiCiConfig {
 
 function fakeCodexScript(): string {
   return `#!/usr/bin/env node
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const args = process.argv.slice(2);
-const prompt = args.at(-1) ?? '';
+const promptArg = args.at(-1) ?? '';
+const prompt = promptArg === '-' ? readFileSync(0, 'utf8') : promptArg;
 const match = prompt.match(/iter-(\\d+)\\.json/);
 const iter = Number(match?.[1] ?? 0);
 if (!iter) {

@@ -112,6 +112,7 @@ export async function runExecutorStep(
 
       const result = await runCodexProcess(config.tools.executor.command, args, paths, {
         cwd: paths.target,
+        stdin: args.stdin,
         onProgress: options.onProgress,
         shouldPreempt: options.shouldPreempt,
         completionArtifactId: artifactId,
@@ -333,6 +334,7 @@ async function runCodexProcess(
   paths: RunPaths,
   options: {
     cwd: string;
+    stdin?: string;
     onProgress?: (progress: ExecutorProgress) => Promise<void>;
     shouldPreempt?: () => Promise<boolean>;
     completionArtifactId?: string;
@@ -349,9 +351,12 @@ async function runCodexProcess(
   const resolved = await resolveCommandForSpawn(command, args);
   const child = spawn(resolved.command, resolved.args, {
     cwd: options.cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [options.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     shell: resolved.shell
   });
+  if (options.stdin !== undefined) {
+    child.stdin?.end(options.stdin);
+  }
 
   let stdout = '';
   let stderr = '';
@@ -785,9 +790,9 @@ export function buildExecutorArgs(input: {
   resume?: boolean;
   model?: string;
   effort?: string;
-}): string[] {
+}): string[] & { stdin?: string } {
   if (!(input.resume ?? input.iter > 1)) {
-    return [
+    return withStdinPrompt([
       'exec',
       ...modelArgs(input.model),
       ...codexEffortArgs(input.effort),
@@ -800,11 +805,11 @@ export function buildExecutorArgs(input: {
       '-C',
       input.target,
       '--skip-git-repo-check',
-      input.prompt
-    ];
+      '-'
+    ], input.prompt);
   }
 
-  return [
+  return withStdinPrompt([
     'exec',
     'resume',
     '--last',
@@ -817,8 +822,12 @@ export function buildExecutorArgs(input: {
     '--output-schema',
     input.schemaPath,
     '--skip-git-repo-check',
-    input.prompt
-  ];
+    '-'
+  ], input.prompt);
+}
+
+function withStdinPrompt(args: string[], prompt: string): string[] & { stdin?: string } {
+  return Object.assign(args, { stdin: prompt });
 }
 
 function modelArgs(model: string | undefined): string[] {
