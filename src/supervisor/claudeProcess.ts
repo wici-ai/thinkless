@@ -11,6 +11,8 @@ export interface ClaudeStreamOptions {
   shouldAbort?: () => boolean | Promise<boolean>;
 }
 
+export type CommandArgs = string[] & { stdin?: string };
+
 export interface ClaudeStreamResult {
   stdout: string;
   stderr: string;
@@ -29,15 +31,19 @@ export interface ClaudeStreamResult {
  */
 export async function runClaudeStreamProcess(
   command: string,
-  args: string[],
+  args: CommandArgs,
   options: ClaudeStreamOptions
 ): Promise<ClaudeStreamResult> {
   const resolved = await resolveCommandForSpawn(command, args);
   const child = spawn(resolved.command, resolved.args, {
     cwd: options.cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: [args.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     shell: resolved.shell
   });
+  if (args.stdin !== undefined) {
+    child.stdin?.on('error', () => undefined);
+    child.stdin?.end(args.stdin);
+  }
 
   let stdout = '';
   let stderr = '';
@@ -83,8 +89,12 @@ export async function runClaudeStreamProcess(
     : null;
   abortWatchdog?.unref();
 
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (chunk: string) => {
+  const stdoutStream = child.stdout;
+  const stderrStream = child.stderr;
+  if (!stdoutStream || !stderrStream) throw new Error('failed to open child stdout/stderr pipes');
+
+  stdoutStream.setEncoding('utf8');
+  stdoutStream.on('data', (chunk: string) => {
     markActivity();
     stdout += chunk;
     lineBuffer += chunk;
@@ -92,8 +102,8 @@ export async function runClaudeStreamProcess(
     lineBuffer = lines.pop() ?? '';
     for (const line of lines) handleLine(line);
   });
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk: string) => {
+  stderrStream.setEncoding('utf8');
+  stderrStream.on('data', (chunk: string) => {
     markActivity();
     stderr += chunk;
   });

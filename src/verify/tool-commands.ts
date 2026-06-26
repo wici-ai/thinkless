@@ -121,6 +121,8 @@ async function main(): Promise<void> {
   assert(chatArgs[chatArgs.indexOf('--model') + 1] === 'claude-chat-test', 'Chat agent must support explicit model selection');
   assert(chatArgs[chatArgs.indexOf('--effort') + 1] === 'low', 'Chat agent must support explicit effort selection');
   assert(codexChatArgs[0] === 'exec' && codexChatArgs.includes('--json') && codexChatArgs.includes('--output-last-message'), 'Codex Chat must use codex exec JSON output, not Claude print args');
+  assert(codexChatArgs.at(-1) === '-' && codexChatArgs.stdin === 'chat with read-only context', `Codex Chat prompt must be passed over stdin to avoid Windows ENAMETOOLONG: ${JSON.stringify(codexChatArgs)}`);
+  assert(!codexChatArgs.includes('chat with read-only context'), 'fresh Codex Chat prompt text must not be carried in argv on Windows');
   assert(codexChatArgs[codexChatArgs.indexOf('--model') + 1] === 'gpt-5.5', 'Codex Chat must receive the fixed Codex model');
   assert(codexChatArgs.includes('-c') && codexChatArgs.includes('model_reasoning_effort="medium"'), 'Codex Chat must map effort to Codex config override');
   assert(!chatArgs.includes('--permission-mode') || chatArgs[chatArgs.indexOf('--permission-mode') + 1] !== 'plan', 'Chat agent must not be forced into Claude plan mode');
@@ -129,6 +131,8 @@ async function main(): Promise<void> {
   assert(!codexChatArgs.includes('-p') && !codexChatArgs.includes('--permission-mode'), 'Codex Chat must not receive Claude-only arguments');
   assert(!codexChatArgs.includes('--ephemeral'), 'Codex Chat must persist its own session instead of running ephemerally');
   assert(resumeCodexChatArgs[0] === 'exec' && resumeCodexChatArgs[1] === 'resume', `Codex Chat follow-up must resume its session: ${resumeCodexChatArgs.join(' ')}`);
+  assert(resumeCodexChatArgs.at(-1) === '-' && resumeCodexChatArgs.stdin === 'chat follow-up', `Codex Chat resume prompt must be passed over stdin: ${JSON.stringify(resumeCodexChatArgs)}`);
+  assert(!resumeCodexChatArgs.includes('chat follow-up'), 'resume Codex Chat prompt text must not be carried in argv on Windows');
   assert(resumeCodexChatArgs.includes('chat-session-123') && !resumeCodexChatArgs.includes('-C'), `Codex Chat resume must use the session id and spawn cwd, not -C: ${resumeCodexChatArgs.join(' ')}`);
   assert(resumeCodexChatArgs.includes('--dangerously-bypass-approvals-and-sandbox') && !resumeCodexChatArgs.includes('--sandbox'), `Codex Chat resume must use flags supported by codex exec resume: ${resumeCodexChatArgs.join(' ')}`);
   assert(resumeCodexChatArgs.includes('model_reasoning_effort="xhigh"'), 'Codex Chat resume must apply changed effort without changing session');
@@ -499,10 +503,16 @@ async function verifyCodexPlannerDoesNotReceiveClaudeArgs(): Promise<void> {
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 const args = process.argv.slice(2);
+const prompt = await new Promise((resolve) => {
+  let data = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => { data += chunk; });
+  process.stdin.on('end', () => resolve(data));
+});
 const target = ${JSON.stringify(target)};
 const stateDir = join(target, '.thinkless');
 mkdirSync(stateDir, { recursive: true });
-appendFileSync(join(stateDir, 'fake-codex-planner-args.jsonl'), JSON.stringify({ args }) + '\\n');
+appendFileSync(join(stateDir, 'fake-codex-planner-args.jsonl'), JSON.stringify({ args, prompt }) + '\\n');
 console.error('simulated codex planner failure');
 process.exit(2);
 `
@@ -540,10 +550,12 @@ process.exit(2);
   const argsLog = (await readFile(join(paths.wici, 'fake-codex-planner-args.jsonl'), 'utf8'))
     .trim()
     .split('\n')
-    .map((line) => JSON.parse(line) as { args: string[] });
+    .map((line) => JSON.parse(line) as { args: string[]; prompt: string });
   assert(argsLog.length === 2, `expected initial and diff Codex planner invocations: ${JSON.stringify(argsLog)}`);
   for (const entry of argsLog) {
     assert(entry.args[0] === 'exec', `Codex planner should use codex exec args: ${JSON.stringify(entry.args)}`);
+    assert(entry.args.at(-1) === '-' && entry.prompt.length > 0, `Codex planner prompt must be passed over stdin: ${JSON.stringify(entry)}`);
+    assert(!entry.args.some((arg) => arg.includes('Run as the Thinkless planner')), `Codex planner prompt leaked into argv: ${JSON.stringify(entry.args)}`);
     assert(!entry.args.includes('--output-format'), `Codex planner received Claude-only --output-format: ${JSON.stringify(entry.args)}`);
     assert(!entry.args.includes('--permission-mode'), `Codex planner received Claude-only --permission-mode: ${JSON.stringify(entry.args)}`);
   }
@@ -574,6 +586,12 @@ async function verifyCodexChatAgent(): Promise<void> {
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 const args = process.argv.slice(2);
+const prompt = await new Promise((resolve) => {
+  let data = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => { data += chunk; });
+  process.stdin.on('end', () => resolve(data));
+});
 if (args.includes('--version')) {
   console.log('codex-cli 0.999.0');
   process.exit(0);
@@ -585,7 +603,7 @@ const resumeIndex = args.indexOf('resume');
 const resumed = resumeIndex >= 0;
 mkdirSync(dirname(out), { recursive: true });
 mkdirSync(stateDir, { recursive: true });
-appendFileSync(join(stateDir, 'fake-codex-chat-args.jsonl'), JSON.stringify({ args }) + '\\n');
+appendFileSync(join(stateDir, 'fake-codex-chat-args.jsonl'), JSON.stringify({ args, prompt }) + '\\n');
 writeFileSync(out, [
   '## REPLY',
   '',
@@ -638,9 +656,12 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     const argsLog = (await readFile(join(paths.wici, 'fake-codex-chat-args.jsonl'), 'utf8'))
       .trim()
       .split('\n')
-      .map((line) => JSON.parse(line) as { args: string[] });
+      .map((line) => JSON.parse(line) as { args: string[]; prompt: string });
     assert(argsLog.length === 2, `Codex Chat should have two invocations: ${JSON.stringify(argsLog)}`);
     assert(argsLog[0].args.includes('--dangerously-bypass-approvals-and-sandbox'), `Codex Chat did not allow normal direct work: ${JSON.stringify(argsLog)}`);
+    assert(argsLog[0].args.at(-1) === '-' && argsLog[0].prompt.includes('Start planning after this.'), `Codex Chat first prompt must be passed over stdin: ${JSON.stringify(argsLog[0])}`);
+    assert(argsLog[1].args.at(-1) === '-' && argsLog[1].prompt.includes('Use higher effort'), `Codex Chat resume prompt must be passed over stdin: ${JSON.stringify(argsLog[1])}`);
+    assert(!argsLog[0].args.some((arg) => arg.includes('Start planning after this.')) && !argsLog[1].args.some((arg) => arg.includes('Use higher effort')), `Codex Chat prompt leaked into argv: ${JSON.stringify(argsLog)}`);
     assert(!argsLog[0].args.includes('--sandbox'), `Codex Chat first call used a weaker Chat-only sandbox: ${JSON.stringify(argsLog[0].args)}`);
     assert(!argsLog[0].args.includes('--permission-mode') && !argsLog[1].args.includes('--permission-mode'), `Codex Chat received Claude-only args: ${JSON.stringify(argsLog)}`);
     assert(argsLog[0].args[0] === 'exec' && argsLog[0].args[1] !== 'resume', `first Codex Chat call should start a persistent session: ${JSON.stringify(argsLog[0].args)}`);

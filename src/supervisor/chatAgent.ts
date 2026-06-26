@@ -10,7 +10,7 @@ import { runtimeAgentFromCommand } from '../shared/runtime.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { appendSafety, formatChatSafetyForPrompt } from './safety.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput } from './claudeOutput.js';
-import { runClaudeStreamProcess, type ClaudeStreamResult } from './claudeProcess.js';
+import { runClaudeStreamProcess, type ClaudeStreamResult, type CommandArgs } from './claudeProcess.js';
 import { writeInjection } from './inbox.js';
 
 const CHAT_IDLE_TIMEOUT_MS = 2 * 60_000;
@@ -462,9 +462,9 @@ export function buildCodexChatArgs(input: {
   model?: string;
   effort?: string;
   resumeSessionId?: string;
-}): string[] {
+}): CommandArgs {
   if (input.resumeSessionId) {
-    return [
+    return withStdinPrompt([
       'exec',
       'resume',
       ...codexModelArgs(input.model),
@@ -475,10 +475,10 @@ export function buildCodexChatArgs(input: {
       input.outputLastMessage,
       '--skip-git-repo-check',
       input.resumeSessionId,
-      input.prompt
-    ];
+      '-'
+    ], input.prompt);
   }
-  return [
+  return withStdinPrompt([
     'exec',
     ...codexModelArgs(input.model),
     ...codexEffortArgs(input.effort),
@@ -489,8 +489,12 @@ export function buildCodexChatArgs(input: {
     '-C',
     input.target,
     '--skip-git-repo-check',
-    input.prompt
-  ];
+    '-'
+  ], input.prompt);
+}
+
+function withStdinPrompt(args: string[], prompt: string): CommandArgs {
+  return Object.assign(args, { stdin: prompt });
 }
 
 function buildCodexChatPrompt(input: { systemPrompt: string; safetyText?: string; userPrompt: string }): string {

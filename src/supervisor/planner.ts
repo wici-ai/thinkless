@@ -12,7 +12,7 @@ import { type PlannerBenchmark, writeBenchmarkManifest } from './benchmark.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
 import { isPlannerSelectedMetricName, primaryMetricName } from './metricFormat.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput, type ClaudeUsage } from './claudeOutput.js';
-import { runClaudeStreamProcess } from './claudeProcess.js';
+import { runClaudeStreamProcess, type CommandArgs } from './claudeProcess.js';
 import { saveGoalFiles } from './goalDoc.js';
 import { isTransientNetworkFailure, transientFailureReason, transientRetryDelayMs, type TransientRetryInfo } from './transientRetry.js';
 
@@ -329,9 +329,9 @@ export function buildCodexPlannerArgs(input: {
   model?: string;
   effort?: string;
   resumeSessionId?: string;
-}): string[] {
+}): CommandArgs {
   if (input.resumeSessionId) {
-    return [
+    return withStdinPrompt([
       'exec',
       'resume',
       ...codexModelArgs(input.model),
@@ -342,10 +342,10 @@ export function buildCodexPlannerArgs(input: {
       input.outputLastMessage,
       '--skip-git-repo-check',
       input.resumeSessionId,
-      input.prompt
-    ];
+      '-'
+    ], input.prompt);
   }
-  return [
+  return withStdinPrompt([
     'exec',
     ...codexModelArgs(input.model),
     ...codexEffortArgs(input.effort),
@@ -357,8 +357,12 @@ export function buildCodexPlannerArgs(input: {
     '-C',
     input.target,
     '--skip-git-repo-check',
-    input.prompt
-  ];
+    '-'
+  ], input.prompt);
+}
+
+function withStdinPrompt(args: string[], prompt: string): CommandArgs {
+  return Object.assign(args, { stdin: prompt });
 }
 
 function codexModelArgs(model: string | undefined): string[] {
