@@ -1122,6 +1122,35 @@ async function runDirectPlanExecution(
       }
       const usage = codexUsageFromError(error);
       const reason = errorMessage(error);
+      if (isExecutorContextWindowExhausted(reason)) {
+        await events.emit('EXECUTOR_CONTEXT_WINDOW_RESET', 'Codex executor context window was exhausted; starting a fresh executor thread from durable PLAN/ledger state', {
+          iter: nextIter,
+          step_id: step.id,
+          mode: 'direct',
+          usage
+        }, 'warn');
+        await revertToBest(paths, checkpoint.best_commit ?? 'NO_HEAD');
+        await setPlanStepStatus(paths, step.id, 'pending', nextIter);
+        await refreshContextSummary(paths, goal, events);
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'REFLECT',
+          iter: nextIter - 1,
+          next_step: step.id,
+          sessions: withExecutorContextReset(checkpoint.sessions, step.id),
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq,
+          plan_hash: await hashFile(paths.plan)
+        };
+        await saveCheckpoint(paths, checkpoint);
+        steerText = contextWindowResetSteerText(step.id);
+        await writeOutbox(paths, {
+          kind: 'info',
+          text: `Codex executor context window filled while running ${step.id}; WiCi will start a fresh executor thread from durable GOAL.md/PLAN.md/ledger state instead of resuming the full old thread.`
+        });
+        if (options.once) break;
+        continue;
+      }
       if (isTransientNetworkFailure(reason)) {
         const retryKey = `${step.id}:${nextIter}`;
         const attempt = (transientExecutorRetries.get(retryKey) ?? 0) + 1;
@@ -1588,7 +1617,10 @@ async function runDirectExecutorWithHotReload(input: {
   let checkpoint = input.checkpoint;
   let steerText = input.steerText;
   let lastExecutorSessionWriteAt = 0;
+  const executorReset = checkpoint.sessions.executorReset;
+  const forceFreshExecutor = Boolean(executorReset && (!executorReset.stepId || executorReset.stepId === input.stepId));
   const controller = await startExecutorStep(input.paths, goal, input.stepId, input.iter, input.config, checkpoint, steerText, input.contextText, {
+    resume: forceFreshExecutor ? false : undefined,
     onProgress: async (progress) => {
       const now = Date.now();
       await input.events.emit('EXECUTE_PROGRESS', formatExecutorProgress(progress), {
@@ -1659,7 +1691,7 @@ async function runDirectExecutorWithHotReload(input: {
 
   if (controller.backend !== 'app-server') {
     const result = await controller.done;
-    return { goal, checkpoint, steerText, result };
+    return { goal, checkpoint: clearExecutorReset(checkpoint, input.stepId), steerText, result };
   }
 
   while (true) {
@@ -1668,6 +1700,7 @@ async function runDirectExecutorWithHotReload(input: {
       delay(1_000).then(() => ({ kind: 'tick' as const }))
     ]);
     if (outcome.kind === 'done') {
+      checkpoint = clearExecutorReset(checkpoint, input.stepId);
       const executorApp = controller.threadId
         ? {
             threadId: controller.threadId,
@@ -1862,6 +1895,42 @@ function recoverySteerText(stepId: string, iter: number, reason: string): string
     'If a long command is needed, run it with visible progress or log tailing so the TUI receives output.',
     'Do not repeat the exact same silent failing command unless you can justify why conditions changed.'
   ].join('\n');
+}
+
+function isExecutorContextWindowExhausted(reason: string): boolean {
+  return /ran out of room|context window|model'?s context|context length|maximum context/i.test(reason);
+}
+
+function contextWindowResetSteerText(stepId: string): string {
+  return [
+    `The previous Codex executor thread for ${stepId} exhausted its model context window.`,
+    'Start from the durable workspace state instead of relying on prior chat context.',
+    'Re-read GOAL.md, PLAN.md, .thinkless/context.md, and recent ledger artifacts before acting.',
+    'Summarize only the facts needed for this step, then continue with the smallest concrete validation or implementation move.',
+    'Write the normal executor result JSON when done.'
+  ].join('\n');
+}
+
+function withExecutorContextReset(sessions: Checkpoint['sessions'], stepId: string): Checkpoint['sessions'] {
+  const { executor: _executor, executorApp: _executorApp, executorReset: _executorReset, ...rest } = sessions;
+  return {
+    ...rest,
+    executorReset: {
+      reason: 'context_window_exhausted',
+      stepId,
+      at: new Date().toISOString()
+    }
+  };
+}
+
+function clearExecutorReset(checkpoint: Checkpoint, stepId: string): Checkpoint {
+  const reset = checkpoint.sessions.executorReset;
+  if (!reset || (reset.stepId && reset.stepId !== stepId)) return checkpoint;
+  const { executorReset: _executorReset, ...sessions } = checkpoint.sessions;
+  return {
+    ...checkpoint,
+    sessions
+  };
 }
 
 async function ensurePlanAndLegacyBaselineState(

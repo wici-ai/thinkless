@@ -319,6 +319,11 @@ export interface Checkpoint {
       phase?: 'starting' | 'running' | 'idle' | 'stalled' | 'completed';
       lastEventType?: string;
     };
+    executorReset?: {
+      reason: string;
+      stepId?: string;
+      at: string;
+    };
   };
   tool_versions?: {
     mode: ToolMode;
