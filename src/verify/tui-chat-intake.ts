@@ -158,6 +158,9 @@ async function main(): Promise<void> {
         degraded_inspection_does_not_start_planner: true,
         degraded_plan_request_starts_planner: true,
         introduction_does_not_start_planner: true,
+        status_question_reply_only: true,
+        architecture_question_emits_steer: true,
+        fallback_policy_emits_steer: true,
         planner_receives_chat_context: true,
         historical_baseline_does_not_block_chat: true,
         goal_source_not_retroactive: true
@@ -211,6 +214,45 @@ function verifyDegradedBlankRunChatDecision(): void {
   assert(
     shouldStartPlannerFromBlankChat('可以，开始修复这个问题', { kind: 'add_requirement', text: 'Fix the discussed issue.' }),
     'blank-run planner guard must allow explicit start/fix requests'
+  );
+  const statusQuestion = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: 'What is the current status?',
+      goalDoc: '# Goal\n\nFix the architecture bug.',
+      plan: '# Plan\n\n- [>] S2 Debug current failure',
+      recentEvents: [event('EXECUTE_PROGRESS', 'Codex is running S2')]
+    },
+    'stub'
+  );
+  assert(!statusQuestion.update, `degraded status question should stay reply-only: ${JSON.stringify(statusQuestion)}`);
+
+  const architectureQuestion = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: 'Can we fail close instead of falling back when the resource mapping is missing?',
+      goalDoc: '# Goal\n\nFix the architecture bug.',
+      plan: '# Plan\n\n- [>] S2 Debug current failure',
+      recentEvents: [event('EXECUTE_PROGRESS', 'Codex is running S2')]
+    },
+    'stub'
+  );
+  assert(architectureQuestion.update?.kind === 'steer', `degraded architecture proposal question should become steer: ${JSON.stringify(architectureQuestion)}`);
+
+  const fallbackPolicy = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: 'Do not fallback; preserve the mapping and fail closed if ownership is missing.',
+      goalDoc: '# Goal\n\nFix the architecture bug.',
+      plan: '# Plan\n\n- [>] S2 Debug current failure',
+      recentEvents: [event('EXECUTE_PROGRESS', 'Codex is running S2')]
+    },
+    'stub'
+  );
+  assert(fallbackPolicy.update?.kind === 'steer', `degraded fallback-policy steering should not be generic requirement noise: ${JSON.stringify(fallbackPolicy)}`);
+  assert(
+    shouldStartPlannerFromBlankChat('Can we preserve mapping at the translation boundary?', { kind: 'add_requirement', text: 'Preserve mapping at the translation boundary.' }),
+    'blank-run planner guard must allow actionable architecture proposal questions'
   );
 }
 

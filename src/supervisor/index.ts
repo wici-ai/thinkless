@@ -2537,7 +2537,7 @@ function stepDedupSimilarityThreshold(): number {
 
 function stepDedupConsecutiveThreshold(): number {
   const parsed = Number(process.env.WICI_STEP_DEDUP_CONSECUTIVE?.trim() ?? '');
-  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 1;
+  return Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : 2;
 }
 
 function ensureTrailingNewline(text: string): string {

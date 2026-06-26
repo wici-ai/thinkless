@@ -21,6 +21,7 @@ async function main(): Promise<void> {
     planner: await readFile('src/supervisor/planner.ts', 'utf8'),
     plannerPrompt: await readFile('prompts/planner.md', 'utf8'),
     plannerDiffPrompt: await readFile('prompts/planner-diff.md', 'utf8'),
+    chatPrompt: await readFile('prompts/chat.md', 'utf8'),
     continueVerdictPrompt: await readFile('prompts/continue-verdict.md', 'utf8'),
     sharedTypes: await readFile('src/shared/types.ts', 'utf8'),
     goalDocSource: await readFile('src/supervisor/goalDoc.ts', 'utf8'),
@@ -120,7 +121,7 @@ async function main(): Promise<void> {
     'TUI PTY verifier must prove planner clarification answers resume the planner session'
   );
   assert(files.app.includes('shouldAutoStartExistingRun'), 'TUI must distinguish attach-time auto-start from stopped runs');
-  assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'TUI must wake the supervisor after chat writes an inbox injection');
+  assert(files.app.includes('onInjection={() => launchSupervisor(undefined, undefined, undefined, activeTarget, activeSessionDir, true)}'), 'TUI must wake the supervisor after chat writes an inbox injection');
   assert(files.tuiHotreloadPty.includes('pty_hot_reload') && files.tuiHotreloadPty.includes('PLAN_DIFF_APPLIED'), 'TUI PTY verifier must prove follow-up Chat hot reload reaches plan diff');
   assert(files.app.includes('goal={state.goal}'), 'TUI must pass durable goal state into Chat');
   assert(files.chat.includes('parseRuntimeCommand'), 'ChatPane must parse runtime selection slash commands before ordinary Chat routing');
@@ -147,6 +148,29 @@ async function main(): Promise<void> {
   assert(files.plannerPrompt.includes('a PLAN.md-only workflow is valid'), 'planner prompt must not force optional .opt scripts');
   assert(files.plannerPrompt.includes('Treat research, debugging, and fallback strategy as planner/executor responsibilities'), 'planner prompt must own research/debug/fallback behavior instead of requiring Chat boilerplate');
   assert(files.plannerPrompt.includes('## ASSUMPTIONS.md') && files.plannerPrompt.includes('Self-grill'), 'planner prompt must require self-interrogation and ASSUMPTIONS.md');
+  assert(
+    files.plannerPrompt.includes('source of truth') &&
+      files.plannerPrompt.includes('ownership boundary') &&
+      files.plannerPrompt.includes('resource identity/lifecycle') &&
+      files.plannerPrompt.includes('fallback policy') &&
+      files.plannerPrompt.includes('Do not hardcode domain assumptions'),
+    'planner prompt must require architecture-invariant extraction without hardcoded domain rules'
+  );
+  assert(files.plannerPrompt.includes('RFC-style decision packet') && files.plannerPrompt.includes('options considered') && files.plannerPrompt.includes('chosen approach'), 'planner prompt must require RFC-style architecture/debug decisions');
+  assert(
+    files.plannerPrompt.includes('decision-quality receipts') &&
+      files.plannerPrompt.includes('narrowed root cause') &&
+      files.plannerPrompt.includes('falsified hypothesis') &&
+      files.plannerPrompt.includes('Adding logs without a new conclusion'),
+    'planner prompt must define diagnostic completion standards'
+  );
+  assert(
+    files.plannerPrompt.includes('same blocker') &&
+      files.plannerPrompt.includes('same evidence') &&
+      files.plannerPrompt.includes('same reject reason') &&
+      files.plannerPrompt.includes('one concrete discriminating next step'),
+    'planner prompt must require semantic loop escape'
+  );
   assert(files.plannerPrompt.includes('unresolvable by repository evidence'), 'planner prompt must reserve QUESTION for essential unresolvable unknowns');
   assert(files.plannerPrompt.includes('## Primary') && files.plannerPrompt.includes('## Stretch'), 'planner prompt must ask for primary/stretch goal sections');
   assert(files.plannerPrompt.includes('stop_when') && files.plannerPrompt.includes('continue improving'), 'planner prompt must bound continuing improvement as stretch scope');
@@ -169,10 +193,32 @@ async function main(): Promise<void> {
   assert(files.plannerClarification.includes('plan_diff_question') && files.plannerClarification.includes('plan_diff_resumed_session'), 'planner clarification verifier must cover hot-reload plan diff questions');
   assert(files.plannerDiffPrompt.includes('## QUESTION'), 'planner diff prompt must allow clarification through Chat');
   assert(files.plannerDiffPrompt.includes('living self-interrogation artifact') && files.plannerDiffPrompt.includes('override an adopted assumption'), 'planner diff prompt must maintain ASSUMPTIONS.md through steering');
+  assert(
+    files.plannerDiffPrompt.includes('source of truth') &&
+      files.plannerDiffPrompt.includes('ownership boundary') &&
+      files.plannerDiffPrompt.includes('resource identity/lifecycle') &&
+      files.plannerDiffPrompt.includes('Do not turn examples or prior task details into hardcoded product/domain rules'),
+    'planner-diff prompt must preserve inferred architecture invariants task-agnostically'
+  );
+  assert(files.plannerDiffPrompt.includes('RFC-style decision packet') && files.plannerDiffPrompt.includes('decision-quality evidence') && files.plannerDiffPrompt.includes('one concrete discriminating next step'), 'planner-diff prompt must enforce RFC diagnostics and loop escape');
   assert(files.plannerDiffPrompt.includes('not blindly append') && files.plannerDiffPrompt.includes('compact it while applying the new requirement'), 'planner diff prompt must compact noisy PLAN.md updates instead of endlessly appending');
   assert(files.plannerDiffPrompt.includes('native plan-mode tools remain available'), 'planner diff prompt must preserve native Claude tools during hot reload planning');
   assert(files.plannerDiffPrompt.includes('- [ ] S3 Short imperative step title') && files.plannerDiffPrompt.includes('### S3'), 'planner diff prompt must preserve WiCi-discoverable step shape for added steps');
   assert(files.chat.includes('latestQuestion') && files.chat.includes("kind: 'answer'"), 'ChatPane must route open planner questions through chat answers');
+  assert(
+    files.chatPrompt.includes('Architecture proposals phrased as questions') &&
+      files.chatPrompt.includes('answer feasibility briefly') &&
+      files.chatPrompt.includes('source of truth') &&
+      files.chatPrompt.includes('fallback policy') &&
+      files.chatPrompt.includes('kind: steer'),
+    'Chat prompt must treat actionable architecture questions as update-worthy steering'
+  );
+  assert(
+    files.tuiChat.includes('status_question_reply_only') &&
+      files.tuiChat.includes('architecture_question_emits_steer') &&
+      files.tuiChat.includes('fallback_policy_emits_steer'),
+    'TUI Chat intake verifier must cover status questions versus architecture steering questions'
+  );
 
   assert(files.supervisor.includes("waitReason: 'PLAN_READY'"), 'fresh V1 setup must be able to return PLAN_READY without a baseline');
   assert(files.supervisor.includes('return runDirectPlanExecution'), 'fresh V1 setup must directly enter PLAN.md execution');
@@ -190,6 +236,35 @@ async function main(): Promise<void> {
   assert(files.plannerPrompt.includes('executor-owned git commit action') && files.plannerDiffPrompt.includes('executor-owned git commit action'), 'planner prompts must put commit responsibility into PLAN.md');
   assert(files.executor.includes('You may edit ${planPath}') && files.executor.includes('Do not stop at the first failing command'), 'executor prompt must authorize recovery/debug/plan updates');
   assert(files.executor.includes('research the relevant documentation or tutorials yourself'), 'executor prompt must make research/debugging a Codex responsibility, not a Chat input requirement');
+  assert(
+    files.executor.includes('infer the target system invariants') &&
+      files.executor.includes('source of truth') &&
+      files.executor.includes('ownership boundary') &&
+      files.executor.includes('translation or mapping points') &&
+      files.executor.includes('fallback policy'),
+    'executor prompt must infer architecture invariants before sensitive changes'
+  );
+  assert(
+    files.executor.includes('Aggressive debugging is allowed') &&
+      files.executor.includes('bounded and evidence-producing') &&
+      files.executor.includes('no unlabelled fallback') &&
+      files.executor.includes('no masking missing ownership/resource mappings'),
+    'executor prompt must permit deep debugging while respecting invariants'
+  );
+  assert(
+    files.executor.includes('Only mark diagnostic work done') &&
+      files.executor.includes('earliest suspicious point') &&
+      files.executor.includes('next highest-value test') &&
+      files.executor.includes('adding logs without a new conclusion'),
+    'executor prompt must enforce diagnostic completion quality'
+  );
+  assert(
+    files.executor.includes('same blocker') &&
+      files.executor.includes('same evidence') &&
+      files.executor.includes('same reject reason') &&
+      files.executor.includes('plan/harness/receipt path'),
+    'executor prompt must require semantic loop escape'
+  );
   assert(files.executor.includes('Current ${goalPath}:') && files.executor.includes('Current ${planPath}:'), 'executor prompt must embed GOAL.md and PLAN.md as Codex goal input');
   assert(files.executor.includes('as one Codex goal') && files.executor.includes('Supervisor receipt focus'), 'executor prompt must feed GOAL.md + PLAN.md as one Codex goal while keeping only a thin receipt focus');
   assert(!files.executor.includes('Execute plan step ${stepId} from PLAN.md.'), 'executor prompt must not reduce fresh V1 execution to a single supervisor-controlled plan step');

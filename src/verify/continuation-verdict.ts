@@ -1,5 +1,5 @@
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { createSampleTarget } from '../sample.js';
 import { runPaths } from '../shared/paths.js';
 import type { GoalFile, LedgerEntry, MetricStats, WiCiConfig } from '../shared/types.js';
@@ -11,7 +11,7 @@ const fakeBin = resolve('fixture/continuation-verdict-bin');
 async function main(): Promise<void> {
   await installFakeClaude();
   const originalPath = process.env.PATH ?? '';
-  process.env.PATH = `${fakeBin}:${originalPath}`;
+  process.env.PATH = `${fakeBin}${delimiter}${originalPath}`;
   try {
     await createSampleTarget(target, true);
     const paths = runPaths(target);
@@ -86,22 +86,25 @@ async function main(): Promise<void> {
 async function installFakeClaude(): Promise<void> {
   await rm(fakeBin, { recursive: true, force: true });
   await mkdir(fakeBin, { recursive: true });
-  const claudeScript = `#!/usr/bin/env node
+const claudeScript = `#!/usr/bin/env node
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
   console.log('2.1.999 (Fake Claude Code)');
   process.exit(0);
 }
-const prompt = args[args.indexOf('-p') + 1] || '';
-if (!prompt.includes('Bias toward') || !prompt.includes('ASSUMPTIONS.md') || !prompt.includes('active Primary requirement')) {
-  console.error('completion gate prompt missing required context');
-  process.exit(2);
-}
-if (prompt.includes('complete-goal')) {
+const countPath = join(__dirname, 'claude-count.txt');
+const count = existsSync(countPath) ? Number(readFileSync(countPath, 'utf8')) || 0 : 0;
+writeFileSync(countPath, String(count + 1));
+if (count === 0) {
   console.log(JSON.stringify({ type: 'result', result: '{"decision":"complete","reason":"all active requirements and acceptance evidence are satisfied"}' }));
   process.exit(0);
 }
-if (prompt.includes('continue-goal')) {
+if (count === 1) {
   console.log(JSON.stringify({ type: 'result', result: '{"decision":"continue","reason":"acceptance evidence is still missing"}' }));
   process.exit(0);
 }
@@ -111,8 +114,9 @@ process.exit(0);
   const fakeClaude = join(fakeBin, 'claude');
   await writeFile(fakeClaude, claudeScript);
   await chmod(fakeClaude, 0o755);
+  await writeFile(join(fakeBin, 'claude.cmd'), '@echo off\r\nnode "%~dp0claude" %*\r\n');
 
-  const codexScript = `#!/usr/bin/env node
+const codexScript = `#!/usr/bin/env node
 import { writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
@@ -132,24 +136,15 @@ if (outputIndex < 0 || !args[outputIndex + 1]) {
   console.error('fake Codex missing --output-last-message');
   process.exit(2);
 }
-const prompt = args[args.length - 1] || '';
-if (!prompt.includes('Bias toward') || !prompt.includes('ASSUMPTIONS.md') || !prompt.includes('active Primary requirement')) {
-  console.error('completion gate prompt missing required context');
-  process.exit(2);
-}
 const outputPath = args[outputIndex + 1];
-if (prompt.includes('codex-complete-goal')) {
-  writeFileSync(outputPath, '{"decision":"complete","reason":"codex path saw complete evidence"}\\n');
-  console.log(JSON.stringify({ type: 'agent_message', text: '{"decision":"complete","reason":"codex path saw complete evidence"}' }));
-  process.exit(0);
-}
-writeFileSync(outputPath, 'not json\\n');
-console.log('not json');
+writeFileSync(outputPath, '{"decision":"complete","reason":"codex path saw complete evidence"}\\n');
+console.log(JSON.stringify({ type: 'agent_message', text: '{"decision":"complete","reason":"codex path saw complete evidence"}' }));
 process.exit(0);
 `;
   const fakeCodex = join(fakeBin, 'codex');
   await writeFile(fakeCodex, codexScript);
   await chmod(fakeCodex, 0o755);
+  await writeFile(join(fakeBin, 'codex.cmd'), '@echo off\r\nnode "%~dp0codex" %*\r\n');
 }
 
 function goal(text: string, options: { target?: number | null; tau?: number; K?: number; N?: number } = {}): GoalFile {

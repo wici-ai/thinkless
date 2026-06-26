@@ -78,6 +78,7 @@ npm run verify:v1-core
 npm run verify:v1-slice
 npm run verify:direct-no-scripts
 npm run verify:direct-recovery
+npm run verify:direct-context-reset
 npm run verify:direct-preempt
 npm run verify:direct-plan-continuation
 npm run verify:direct-rollback

@@ -1,5 +1,5 @@
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { execa } from 'execa';
 
 const repo = resolve('fixture/release-tag-target');
@@ -60,6 +60,10 @@ exit 64
 `
   );
   await chmod(path, 0o755);
+  await writeFile(
+    join(fakeBin, 'npm.cmd'),
+    '@echo off\r\nif "%~1"=="run" if "%~2"=="release:preflight" exit /b %WICI_FAKE_PREFLIGHT_EXIT%\r\necho unexpected fake npm invocation: %* 1>&2\r\nexit /b 64\r\n'
+  );
 }
 
 async function runTag(tag: string, preflightExit: string): Promise<{ exitCode?: number; all?: string }> {
@@ -69,7 +73,7 @@ async function runTag(tag: string, preflightExit: string): Promise<{ exitCode?: 
     reject: false,
     env: {
       ...process.env,
-      PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
       WICI_FAKE_PREFLIGHT_EXIT: preflightExit
     },
     timeout: 30_000

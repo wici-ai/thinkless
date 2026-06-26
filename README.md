@@ -103,6 +103,47 @@ npm run dev
 - [Full reference](docs/reference.md)
 - [V1 completion audit](docs/v1-completion-audit.md)
 
+## V1 Operational Notes
+
+The TUI top Chat History / Goal/Plan / Execution workspace starts empty. A blank run does not invent a goal, metric, plan, baseline, or fake execution status before the first concrete Chat request.
+
+The absence of `.opt` scripts is a valid fresh V1 path: no-script plans still execute directly from `PLAN.md`. Planner-provided scripts are optional validation artifacts, and no-script plans still execute directly when the plan itself carries the validation steps.
+
+For real runs, the default `max_iters` is `0`; this is used to disable WiCi's own cost and iteration hard stops so the goal is governed by `GOAL.md`, `PLAN.md`, user steering, and tool/runtime limits. Thinkless automatically checks for Codex/Claude updates at run boundaries, but pending updates are not a WiCi supervisor start gate.
+
+Planner clarification answers sent through Chat wake the stopped supervisor and resume the same Claude planner session. Chat answer resume wakes the stopped supervisor and resumes the same Claude planner session. Direct V1 crash recovery can revert unconfirmed direct-path work, resets the active `PLAN.md` step for replay, records recoverable crash ledger rows, and lets Codex inspect logs and remote state. For long-goal executor recovery, Codex is allowed to inspect logs and remote state, update `PLAN.md`, and continue the same `GOAL.md`.
+
+## Resume Or Re-Run
+
+Run `thinkless resume` to continue the current target without a new `--goal`. Use `--resume-iteration 1` when you need to rewind to an earlier direct execution iteration for recovery testing or controlled replay.
+
+Hot reload can steer an active app-server turn through `turn/steer`; if that path is unavailable, Thinkless keeps Codex continuity through `codex exec resume --last`.
+
+Release and resume verification commands:
+
+```bash
+npm run verify:resume-selector
+npm run verify:tui-resume-selector-pty
+npm run verify:tui-resume-selector-built
+npm run verify:tui-resume-legacy-candidate
+npm run verify:tui-resume-current-candidate
+npm run verify:tui-resume-interrupted-blocked
+npm run verify:tui-resume-interrupted-runnable
+npm run verify:tui-resume-command-isolation
+npm run verify:tui-resume-planner-context
+npm run verify:tui-resume-empty-selector
+npm run verify:tui-resume-many-candidates
+npm run verify:tui-resume-stale-candidate
+npm run verify:tui-resume-stale-agent-state
+npm run verify:tui-resume-blocked-then-runnable
+npm run verify:tui-resume-cross-target
+npm run verify:resume-rerunnable
+```
+
+## Release Gate
+
+Every release tag must pass a real TUI canary. Keep that first Chat as the real user request only, without meta instructions that tell the agent how to debug or research. A non-zero result is expected while the latest canary is still failed; the guarded tag command should block until canary evidence is clean.
+
 ## Contributing
 
 Keep changes scoped, run the relevant verifier, and include the command output in the pull request. For release-facing changes, run:

@@ -341,6 +341,15 @@ function chatArtifactStamp(): string {
 }
 
 export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Chat agent unavailable.'): ChatTurnResult {
+  if (hasArchitectureSteeringIntent(ctx.userText)) {
+    const kind: ChatUpdate['kind'] = isBlankRunContext(ctx) ? 'add_requirement' : 'steer';
+    const target = kind === 'steer' ? 'steering for the active run' : 'a new requirement for planning';
+    return {
+      reply: `Chat agent is currently unavailable (${reason}). This looks like concrete architecture steering rather than a status question, so I queued it as ${target}.`,
+      update: { kind, text: ctx.userText },
+      degraded: true
+    };
+  }
   if (isLikelyQuestion(ctx.userText)) {
     return {
       reply: buildFallbackStatusReply(ctx, reason),
@@ -369,14 +378,33 @@ export function buildFallbackChatTurn(ctx: ChatTurnContext, reason = 'Chat agent
 export function shouldStartPlannerFromBlankChat(userText: string, update: ChatUpdate | undefined): boolean {
   if (!update) return false;
   if (isLikelyContextGatheringOnly(userText)) return false;
-  if (isLikelyQuestion(userText) && !hasConcreteActionIntent(userText) && !hasConcreteActionIntent(update.text)) return false;
-  return hasConcreteActionIntent(userText) || hasConcreteActionIntent(update.text);
+  if (
+    isLikelyQuestion(userText) &&
+    !hasConcreteActionIntent(userText) &&
+    !hasConcreteActionIntent(update.text) &&
+    !hasArchitectureSteeringIntent(userText) &&
+    !hasArchitectureSteeringIntent(update.text)
+  ) {
+    return false;
+  }
+  return hasConcreteActionIntent(userText) || hasConcreteActionIntent(update.text) || hasArchitectureSteeringIntent(userText) || hasArchitectureSteeringIntent(update.text);
 }
 
 function hasConcreteActionIntent(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   if (!normalized) return false;
   return /(plan|goal|requirement|execute|start|run|implement|build|create|add|remove|delete|change|update|fix|repair|optimi[sz]e|test|verify|deploy|ship|commit|push|规划|计划|制定|执行|开始|启动|运行|实现|开发|构建|创建|新增|添加|删除|移除|修改|更新|修复|优化|测试|验证|部署|发布|提交|推送|完成|做到|要求|目标)/i.test(normalized);
+}
+
+function hasArchitectureSteeringIntent(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  const policyLanguage = /(can we|could we|should we|would it be better|instead|must|should|need to|do not|don't|never|avoid|forbid|fail close|fail closed|preserve|keep|maintain|require|enforce)/i.test(normalized);
+  const architectureTerms = /(source of truth|authoritative|ownership|owner|boundary|lifecycle|identity|resource|mapping|translation|fallback|fail close|fail closed|invariant|compatibility|canonical|provenance)/i.test(normalized);
+  const pureStatus =
+    /^(what|why|how|status|progress|is it|are we|did it)\b/i.test(normalized) &&
+    !/(instead|should|must|do not|don't|never|avoid|fail close|fail closed|preserve|keep|maintain|enforce)/i.test(normalized);
+  return policyLanguage && architectureTerms && !pureStatus;
 }
 
 function buildFallbackStatusReply(ctx: ChatTurnContext, reason: string): string {

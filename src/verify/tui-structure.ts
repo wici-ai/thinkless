@@ -344,6 +344,30 @@ function verifyChatFallback(): void {
   assert(result.reply.trim().length > 0, 'Chat fallback must never produce an empty assistant reply');
   assert(!result.update, `Question fallback must not queue an add_requirement update: ${JSON.stringify(result)}`);
   assert(result.reply.includes('S6 Tune speed'), `Question fallback should summarize current plan step:\n${result.reply}`);
+
+  const architectureQuestion = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: 'Should we preserve resource identity and fail close instead of using a fallback mapping?',
+      goalDoc: '# GOAL\n\nship it',
+      plan: '# PLAN\n\n- [>] S6 Tune speed\n- [ ] S7 Verify',
+      recentEvents: [fakeEvent(1), { ...fakeEvent(2), type: 'EXECUTE_PROGRESS', message: 'Codex is still running S6' }]
+    },
+    'test fallback'
+  );
+  assert(architectureQuestion.update?.kind === 'steer', `Architecture proposal question fallback must emit steer: ${JSON.stringify(architectureQuestion)}`);
+
+  const fallbackPolicy = buildFallbackChatTurn(
+    {
+      paths: {} as never,
+      userText: 'Do not fallback; preserve the translation mapping and fail closed.',
+      goalDoc: '# GOAL\n\nship it',
+      plan: '# PLAN\n\n- [>] S6 Tune speed\n- [ ] S7 Verify',
+      recentEvents: [fakeEvent(1), { ...fakeEvent(2), type: 'EXECUTE_PROGRESS', message: 'Codex is still running S6' }]
+    },
+    'test fallback'
+  );
+  assert(fallbackPolicy.update?.kind === 'steer', `Fallback policy steering must emit steer: ${JSON.stringify(fallbackPolicy)}`);
 }
 
 function verifyChatPlannerGuard(): void {
@@ -358,6 +382,10 @@ function verifyChatPlannerGuard(): void {
   assert(
     shouldStartPlannerFromBlankChat('可以，开始修复这个问题', { kind: 'add_requirement', text: 'Fix the discussed issue.' }),
     'blank-run planner guard must allow explicit start/fix turns'
+  );
+  assert(
+    shouldStartPlannerFromBlankChat('Can we preserve mapping at the translation boundary?', { kind: 'add_requirement', text: 'Preserve mapping at the translation boundary.' }),
+    'blank-run planner guard must allow architecture proposal questions'
   );
 }
 

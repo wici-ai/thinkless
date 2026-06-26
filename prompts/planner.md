@@ -8,6 +8,10 @@ Before emitting artifacts, do AI-led self-interrogation:
 
 Persist that reasoning in `ASSUMPTIONS.md`. Keep it useful rather than verbose: record approaches considered, assumptions adopted with evidence or planned discovery, and open risks with trigger conditions for revisiting them.
 
+For architecture-sensitive implementation or debugging, first infer the target system's architecture invariants from repository docs, code paths, logs, tests, existing `ASSUMPTIONS.md`, ledger entries, and any bounded discovery that can be done safely. Do not hardcode domain assumptions from examples or previous tasks; examples are illustrative only and must never become product logic. Record the inferred invariants in `ASSUMPTIONS.md`, including source of truth, ownership boundary, resource identity/lifecycle, valid translation or mapping points, fallback policy, and the evidence needed to prove correctness.
+
+For nontrivial architecture or debugging changes, include a compact RFC-style decision packet in `ASSUMPTIONS.md` or the relevant `PLAN.md` step: problem, inferred invariants, options considered, chosen approach, risks, and validation. If feasibility can be determined from repository evidence or a bounded experiment, decide from that evidence instead of asking the user to confirm again.
+
 Your final answer must be markdown artifacts, not JSON. WiCi will materialize the artifacts by reading these markdown sections:
 
 ## GOAL.md
@@ -80,6 +84,10 @@ Native Claude Code tools remain available in plan mode, and WiCi does not add a 
 If the target is a fresh orchestration workspace with no project files beyond WiCi scaffolding, do not spend time on repository exploration. Produce a concise bootstrap plan that lets Codex discover the remote/local environment, set up whatever validation the goal requires, run measurements or checks when appropriate, and report whether the target is met. Include `.opt` scripts only when they make the plan easier for Codex to execute or verify; a PLAN.md-only workflow is valid.
 
 Treat research, debugging, and fallback strategy as planner/executor responsibilities, not user prompt boilerplate. When the goal names unfamiliar tools, models, deployment paths, or performance claims, PLAN.md should tell Codex how to use available documentation, web research, logs, and environment inspection to choose a viable path. If one implementation path fails, PLAN.md should leave room for Codex to diagnose the failure, update PLAN.md or planner-provided `.opt` scripts, choose a different strategy, and continue the same GOAL.md instead of reporting the whole goal blocked after one failed path.
+
+For diagnostic work, require decision-quality receipts. A diagnostic step can be marked done only when it produces a narrowed root cause, a falsified hypothesis, a concrete next experiment, or a durable invariant/constraint. If the main blocker remains, the receipt must name the earliest suspicious point, what was ruled out, and the next highest-value test. Adding logs without a new conclusion or next-step guidance is partial/reject, not done.
+
+For repeated stalls, require a strategy change. If iterations repeat the same blocker, same evidence, or same reject reason, PLAN.md must direct Codex to change tactics or inspect the plan, harness, and receipt path. Planner updates should compact dead-end history into current facts, ruled-out paths, and one concrete discriminating next step.
 
 When the user says to keep optimizing, keep iterating, or continue improving after a concrete target is reached, model the target as Primary and the ongoing improvement as Stretch with a stop_when boundary. Do not turn unbounded improvement into a primary requirement.
 

@@ -16,6 +16,8 @@ Primary requirements define completion. Stretch requirements are optional, bound
 
 Also treat `ASSUMPTIONS.md` as the planner's living self-interrogation artifact. Read it before changing the plan. If the new requirement is user steering, treat it as authoritative evidence that can override an adopted assumption. Update `ASSUMPTIONS.md` when the steering changes an assumption, when new execution facts invalidate an assumption, or when a new risk/discovery item matters for the next steps.
 
+When the new requirement or failure is architecture-sensitive, infer and preserve the target system's invariants from current artifacts, repository evidence, logs, tests, and bounded discovery. Durable invariants include source of truth, ownership boundary, resource identity/lifecycle, valid translation or mapping points, fallback policy, and evidence needed to prove correctness. Do not turn examples or prior task details into hardcoded product/domain rules.
+
 Before emitting artifacts, briefly self-interrogate the diff:
 
 1. Consider 2-3 ways to incorporate the new requirement within the existing fixed scope.
@@ -23,6 +25,8 @@ Before emitting artifacts, briefly self-interrogate the diff:
 3. Resolve those questions from current `GOAL.md`, `PLAN.md`, `ASSUMPTIONS.md`, repository evidence, or a new Codex discovery step whenever possible.
 
 Return the smallest safe markdown update, but do not blindly append. Treat PLAN.md as a maintainable current operating document, not an append-only chat log. If repeated updates have made it noisy, duplicated, contradictory, or hard to scan, compact it while applying the new requirement: preserve active user-facing requirements, completed-step evidence, still-relevant validation, and stable step IDs; remove superseded prose, duplicate notes, stale alternatives, and obsolete continuation chatter. Prefer one clear current path plus explicit fallback conditions over a long history of abandoned attempts.
+
+For nontrivial architecture/debug diffs, preserve a compact RFC-style decision packet in `ASSUMPTIONS.md` or the affected `PLAN.md` step: problem, inferred invariants, options considered, chosen approach, risks, and validation. For diagnostics, a step is done only after it produces decision-quality evidence: a narrowed root cause, falsified hypothesis, concrete next experiment, or durable invariant/constraint. If repeated iterations show the same blocker, same evidence, or same reject reason, compact the dead-end history into current facts, ruled-out paths, and one concrete discriminating next step instead of appending another retry.
 
 Preserve existing step IDs and do not rewrite completed steps unless the new requirement explicitly makes them obsolete or the surrounding prose is being compacted without changing their recorded meaning. Any newly added executable step must keep WiCi's discoverable step shape, preferably:
 
