@@ -46,6 +46,9 @@ async function main(): Promise<void> {
   await appendJsonLine(chatOnlyWithRunNoisePaths.ledger, { id: 'noise', ts: ts(), status: 'chat-only' });
   await atomicWriteJson(chatOnlyWithRunNoisePaths.runtimeSelection, { chat: { agent: 'codex', model: 'gpt-5.5' } });
 
+  const reflectWithStaleExecutor = join(target, '.thinkless6');
+  await writeRun(runPaths(target, reflectWithStaleExecutor), checkpoint('REFLECT', { executor: 'stale-executor-session' }, 'S1'), true);
+
   const candidates = await discoverResumeCandidates({ currentTarget: target, limit: 20 });
   const currentCandidate = candidates.find((candidate) => candidate.stateDir === current.stateDir);
   const numberedCandidate = candidates.find((candidate) => candidate.sessionDir === numbered);
@@ -53,6 +56,7 @@ async function main(): Promise<void> {
   const blockedCandidate = candidates.find((candidate) => candidate.sessionDir === blockedPlanner);
   const chatCandidate = candidates.find((candidate) => candidate.sessionDir === chatOnly);
   const chatNoiseCandidate = candidates.find((candidate) => candidate.sessionDir === chatOnlyWithRunNoise);
+  const reflectCandidate = candidates.find((candidate) => candidate.sessionDir === reflectWithStaleExecutor);
 
   assert(currentCandidate?.runnable, `current run should be runnable: ${JSON.stringify(currentCandidate)}`);
   assert(currentCandidate.hasChat && currentCandidate.hasRuntimeSelection, 'candidate should expose chat/runtime presence');
@@ -71,6 +75,12 @@ async function main(): Promise<void> {
       chatNoiseCandidate.reason.includes('without GOAL.md') &&
       chatNoiseCandidate.goalSummary.includes('chat only without goal'),
     `chat-only run with events/ledger and no goal should still resume Chat: ${JSON.stringify(chatNoiseCandidate)}`
+  );
+  assert(
+    reflectCandidate?.runnable &&
+      reflectCandidate.fallback === 'executor_rerun' &&
+      reflectCandidate.reason.includes('reflect context can replay'),
+    `REFLECT checkpoint with stale executor session should replay from durable PLAN/ledger state: ${JSON.stringify(reflectCandidate)}`
   );
 
   const context = await loadResumeContext(numberedCandidate);

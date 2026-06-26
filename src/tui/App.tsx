@@ -319,6 +319,7 @@ export function App({
               injections={state.injections}
               goal={state.goal}
               supervisorState={state.checkpoint?.supervisor_state}
+              events={state.events}
               chat={state.chat}
               contentWidth={workspaceContentWidth}
               viewportHeight={chatViewportHeight}
@@ -364,7 +365,7 @@ export function App({
         blankRun={blankRunChat}
         hasExistingRun={Boolean(state.goal)}
         onPlanningRequested={(goal, planningContext) => launchSupervisor(goal, 'tui_chat', planningContext)}
-        onInjection={() => launchSupervisor(undefined)}
+        onInjection={() => launchSupervisor(undefined, undefined, undefined, activeTarget, activeSessionDir, true)}
         onResumeRequested={openResumeSelector}
         onRuntimeChange={setRuntimeSelection}
         onBusyChange={setChatBusy}

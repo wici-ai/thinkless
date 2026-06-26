@@ -61,7 +61,10 @@ async function main(): Promise<void> {
   assert(files.app.includes('CHAT') && files.app.includes('PLAN') && files.app.includes('EXECUTION') && files.app.includes('showTitle={false}'), 'App must expose Chat/Plan/Execution as one top tabbed workspace');
   assert(files.app.includes('shouldUseChatAgentForBlankRun'), 'App must route blank-run input through the Chat agent before planning starts');
   assert(files.app.includes('shouldAutoStartExistingRun'), 'App must avoid auto-restarting stopped runs while still supporting resume on attach');
-  assert(files.app.includes('onInjection={() => launchSupervisor(undefined)}'), 'App must wake the supervisor after Chat writes an inbox injection');
+  assert(
+    files.app.includes('onInjection={() => launchSupervisor(undefined, undefined, undefined, activeTarget, activeSessionDir, true)}'),
+    'App must wake an existing supervisor context through an explicit resume boundary after Chat writes an inbox injection'
+  );
   assert(files.app.includes('pendingSupervisorLaunchRef') && files.app.includes('setTimeout(() => launchSupervisor'), 'App must not drop Chat wakeups that arrive while the supervisor is still exiting');
   assert(files.app.includes('runtimeSelection') && files.app.includes('formatRuntimeSelectorLine') && files.app.includes('runtimeSelectorOpen'), 'App must expose a visible per-workspace runtime selector in the TUI');
   assert(files.app.includes('readPersistedRuntimeSelection') && files.app.includes('writePersistedRuntimeSelection') && files.app.includes('runtimeHydrated'), 'App must restore persisted runtime before resuming Chat/supervisor sessions');
@@ -85,7 +88,13 @@ async function main(): Promise<void> {
   assert(files.chat.includes('writeInjection'), 'Chat input must write chat input through writeInjection');
   assert(files.chat.includes('buildChatHistory'), 'ChatPane must render persisted chat history');
   assert(files.chat.includes('currentGoalSummary'), 'ChatPane must keep current goal in a compact header outside transcript history');
-  assert(files.chat.includes('isActiveOutboxMessage') && files.chat.includes("supervisorState !== 'STOP'") && files.chat.includes("supervisorState !== 'FAILED'"), 'ChatPane must hide stale error outbox messages after terminal run states');
+  assert(
+    files.chat.includes('isActiveOutboxMessage') &&
+      files.chat.includes("supervisorState === 'STOP'") &&
+      files.chat.includes("supervisorState === 'FAILED'") &&
+      files.chat.includes('event.ts > message.ts'),
+    'ChatPane must hide stale error outbox messages after terminal states or later run progress'
+  );
   assert(files.chat.includes('wrappedViewport') && files.chat.includes('line.color') && files.chat.includes('line.bold'), 'ChatPane must preserve per-line role styling instead of guessing colors from text prefixes');
   assert(files.chat.includes('activityStatus') && files.chat.includes("blockLines('activity'"), 'ChatPane must render compact live activity without writing it into chat history');
   assert(!files.chat.includes('localStatus') && !files.chat.includes("blockLines('queued command'"), 'ChatPane must not render the removed local status / queued command block');
@@ -644,6 +653,22 @@ function verifyChatHistory(): void {
   assert(text.includes('UPDATE APPLIED\n  Keep the public API stable.'), `Chat history missing attached update status:\n${text}`);
   assert(text.includes('QUESTION\n  Planner needs clarification'), `Chat history missing planner question:\n${text}`);
   assert(text.includes('ANSWER\n  Use the host from the original chat.'), `Chat history missing answered text:\n${text}`);
+  const receiptHistory = buildChatHistory([], [], null, [
+    {
+      ts: '2026-06-14T00:00:02.000Z',
+      role: 'assistant',
+      text: JSON.stringify({
+        step_done: true,
+        tests_pass: false,
+        notes: 'Executor produced a diagnostic receipt.',
+        changed_files: [],
+        next: 'Retry S8 with server-backed metadata.'
+      })
+    }
+  ]);
+  const receiptText = receiptHistory.map((line) => line.text).join('\n');
+  assert(!receiptText.includes('"step_done"'), `Executor receipt JSON should be formatted for Chat display:\n${receiptText}`);
+  assert(receiptText.includes('Step done: yes') && receiptText.includes('Tests: fail'), `Executor receipt summary missing expected status:\n${receiptText}`);
   assert(currentGoalSummary({
     run_id: 'run-chat-history',
     version: 1,

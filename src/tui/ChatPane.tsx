@@ -34,6 +34,7 @@ export function ChatHistoryPane({
   injections = [],
   goal = null,
   supervisorState,
+  events = [],
   chat = [],
   contentWidth = 32,
   viewportHeight = 12,
@@ -48,6 +49,7 @@ export function ChatHistoryPane({
   injections?: Injection[];
   goal?: GoalFile | null;
   supervisorState?: string;
+  events?: RunEvent[];
   chat?: ChatLogEntry[];
   contentWidth?: number;
   viewportHeight?: number;
@@ -61,7 +63,7 @@ export function ChatHistoryPane({
   const isActive = active || isFocused;
   const history = buildChatHistory(outbox, injections, goal, chat);
   const goalSummary = currentGoalSummary(goal);
-  const activeOutbox = outbox.filter((message) => isActiveOutboxMessage(message, supervisorState, goal));
+  const activeOutbox = outbox.filter((message) => isActiveOutboxMessage(message, supervisorState, goal, events));
   const sourceLines = [
     ...history,
     ...buildActiveOutboxLines(activeOutbox),
@@ -369,6 +371,7 @@ export function ChatPane({
         injections={injections}
         goal={goal}
         supervisorState={supervisorState}
+        events={events}
         chat={chat}
         contentWidth={contentWidth}
         viewportHeight={viewportHeight}
@@ -474,7 +477,7 @@ export function buildChatHistory(
     injectionStatus.set(`${injection.kind}:${injection.text}`, injection.applied ? 'applied' : 'queued');
   }
   const chatLines = chat.flatMap((entry, index): ChatHistoryLine[] => {
-    const text = entry.text.trim();
+    const text = formatChatHistoryText(entry).trim();
     if (!text) return [];
     const label = entry.role === 'user' ? 'you' : 'assistant';
     const color: ChatColor = entry.role === 'user' ? 'green' : 'cyanBright';
@@ -517,12 +520,45 @@ function buildActiveOutboxLines(outbox: OutboxMessage[]): ChatHistoryLine[] {
     .flatMap((message) => blockLines(message.kind, message.text, message.kind === 'error' ? 'red' : 'magenta', `active-${message.id}`, message.ts));
 }
 
-function isActiveOutboxMessage(message: OutboxMessage, supervisorState: string | undefined, goal: GoalFile | null): boolean {
+function isActiveOutboxMessage(message: OutboxMessage, supervisorState: string | undefined, goal: GoalFile | null, events: RunEvent[] = []): boolean {
   if (message.answered) return false;
   if (message.kind === 'question') return true;
   if (message.kind !== 'error') return false;
   if (!goal && message.text.includes(INITIAL_GOAL_REQUIRED_MESSAGE)) return false;
-  return supervisorState !== 'STOP' && supervisorState !== 'FAILED';
+  if (supervisorState === 'STOP' || supervisorState === 'FAILED') return false;
+  const newerProgress = [...events].reverse().find((event) => event.ts > message.ts && event.type !== 'FAILED');
+  return !newerProgress;
+}
+
+function formatChatHistoryText(entry: ChatLogEntry): string {
+  if (entry.role !== 'assistant') return entry.text;
+  const receipt = parseExecutorReceipt(entry.text);
+  if (!receipt) return entry.text;
+  return [
+    `Step done: ${receipt.stepDone ? 'yes' : 'no'}`,
+    `Tests: ${receipt.testsPass ? 'pass' : 'fail'}`,
+    receipt.notes ? `Notes: ${receipt.notes}` : '',
+    receipt.changedFiles.length > 0 ? `Changed files: ${receipt.changedFiles.join(', ')}` : 'Changed files: none',
+    receipt.next ? `Next: ${receipt.next}` : ''
+  ].filter(Boolean).join('\n');
+}
+
+function parseExecutorReceipt(text: string): { stepDone: boolean; testsPass: boolean; notes: string; changedFiles: string[]; next: string | null } | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    if (typeof parsed.step_done !== 'boolean' || typeof parsed.tests_pass !== 'boolean' || typeof parsed.notes !== 'string') return null;
+    return {
+      stepDone: parsed.step_done,
+      testsPass: parsed.tests_pass,
+      notes: parsed.notes,
+      changedFiles: Array.isArray(parsed.changed_files) ? parsed.changed_files.filter((item): item is string => typeof item === 'string') : [],
+      next: typeof parsed.next === 'string' ? parsed.next : null
+    };
+  } catch {
+    return null;
+  }
 }
 
 function blockLines(

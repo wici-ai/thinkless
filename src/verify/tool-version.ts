@@ -87,6 +87,31 @@ async function main(): Promise<void> {
       acceptedWiCiBoundary.accepted.some((item) => item.includes('wici dirty')),
     `expected explicit resume boundary to accept WiCi drift, got ${JSON.stringify(acceptedWiCiBoundary)}`
   );
+  const acceptedRuntimeBoundary = reconcileToolVersionDrift(
+    checkpoint('EXECUTE', {
+      mode: 'auto',
+      wici: {
+        package_version: '0.1.1',
+        git_commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        git_dirty: false
+      },
+      checked_at: '2026-06-14T00:00:00.000Z'
+    }),
+    {
+      mode: 'real',
+      wici: {
+        package_version: '0.1.1',
+        git_commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        git_dirty: false
+      },
+      checked_at: new Date().toISOString()
+    },
+    { allowWiCiBoundary: true }
+  );
+  assert(
+    acceptedRuntimeBoundary.accepted.some((item) => item === 'mode auto -> real'),
+    `expected explicit resume boundary to accept runtime mode drift, got ${JSON.stringify(acceptedRuntimeBoundary)}`
+  );
 
   const stopped = checkpoint('STOP', active.tool_versions!);
   assertNoActiveToolVersionDrift(stopped, {
@@ -163,6 +188,7 @@ async function main(): Promise<void> {
         external_tool_drift_accepted: true,
         wici_drift_rejected: true,
         wici_drift_resume_boundary_accepted: true,
+        mode_drift_resume_boundary_accepted: true,
         wici_version_recorded: true,
         stopped_drift_allowed: true,
         unpinned_allowed: true,

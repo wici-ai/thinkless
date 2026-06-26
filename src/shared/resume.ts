@@ -206,7 +206,12 @@ function buildPreflight(input: {
     if (pendingPlannerQuestion) return runnable('planner can rerun from durable goal state because the clarification session was not persisted', 'planner_rerun');
     return runnable('planner can rerun from durable goal state', 'planner_rerun');
   }
-  if (checkpoint.supervisor_state === 'EXECUTE' || checkpoint.supervisor_state === 'REFLECT') {
+  if (checkpoint.supervisor_state === 'REFLECT') {
+    if (!input.plan) return runnable('post-execution reflect context can be reopened as Chat because PLAN.md is missing', 'chat_only');
+    if (checkpoint.next_step || input.ledger) return runnable('post-execution reflect context can replay from checkpointed PLAN/ledger state', 'executor_rerun');
+    return runnable('post-execution reflect context can be reopened as Chat because no replayable PLAN step exists', 'chat_only');
+  }
+  if (checkpoint.supervisor_state === 'EXECUTE') {
     if (!input.plan) return runnable('execution context can be reopened as Chat because PLAN.md is missing', 'chat_only');
     if (checkpoint.sessions.executor || checkpoint.sessions.executorApp?.threadId) {
       if (!input.executorTranscript) return runnable('executor context can be reopened as Chat because durable transcript state is missing', 'chat_only');

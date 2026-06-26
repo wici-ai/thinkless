@@ -20,7 +20,12 @@ export async function atomicWriteFile(path: string, content: string, mode?: numb
   await ensureDir(dirname(path));
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tmp, content, mode === undefined ? undefined : { mode });
-  await rename(tmp, path);
+  try {
+    await renameWithTransientRetry(tmp, path);
+  } catch (error) {
+    await rm(tmp, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function atomicWriteJson(path: string, value: unknown): Promise<void> {
@@ -123,4 +128,29 @@ async function isStalePidLock(path: string): Promise<boolean> {
   } catch {
     return true;
   }
+}
+
+async function renameWithTransientRetry(source: string, target: string): Promise<void> {
+  const delays = [25, 50, 100, 200, 400, 800];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      await rename(source, target);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientFileAccessError(error) || attempt === delays.length) break;
+      await delay(delays[attempt]);
+    }
+  }
+  throw lastError;
+}
+
+function isTransientFileAccessError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -115,7 +115,11 @@ export function reconcileToolVersionDrift(
   const pinned = checkpoint.tool_versions;
   const accepted: string[] = [];
   const rejected: string[] = [];
-  if (pinned.mode !== current.mode) rejected.push(`mode ${pinned.mode} -> ${current.mode}`);
+  if (pinned.mode !== current.mode) {
+    const item = `mode ${pinned.mode} -> ${current.mode}`;
+    if (options.allowWiCiBoundary) accepted.push(item);
+    else rejected.push(item);
+  }
   if (pinned.codex !== current.codex) accepted.push(`codex ${pinned.codex ?? 'unknown'} -> ${current.codex ?? 'unknown'}`);
   if (pinned.claude !== current.claude) accepted.push(`claude ${pinned.claude ?? 'unknown'} -> ${current.claude ?? 'unknown'}`);
   if (pinned.github !== current.github) accepted.push(`github ${pinned.github ?? 'unknown'} -> ${current.github ?? 'unknown'}`);
