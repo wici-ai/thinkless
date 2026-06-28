@@ -56,10 +56,30 @@ async function resolveExplicitPath(path: string): Promise<string | null> {
 }
 
 async function resolveWindowsPath(command: string): Promise<string | null> {
+  const manual = await resolveWindowsPathFromEnv(command);
+  if (manual) return manual;
   const result = await execa('where.exe', [command], { reject: false });
   if (result.exitCode !== 0) return null;
   const candidates = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   return candidates.find((candidate) => windowsExecutableExtensions().includes(extname(candidate).toLowerCase())) ?? candidates[0] ?? null;
+}
+
+async function resolveWindowsPathFromEnv(command: string): Promise<string | null> {
+  const extensions = windowsExecutableExtensions();
+  const commandExt = extname(command).toLowerCase();
+  const names = commandExt ? [command] : extensions.map((ext) => `${command}${ext}`);
+  const pathValues = Object.entries(process.env)
+    .filter(([key]) => key.toLowerCase() === 'path')
+    .map(([, value]) => value ?? '');
+  for (const pathValue of pathValues) {
+    for (const dir of pathValue.split(';').map((item) => item.trim()).filter(Boolean)) {
+      for (const name of names) {
+        const candidate = join(dir, name);
+        if (await fileExists(candidate)) return candidate;
+      }
+    }
+  }
+  return null;
 }
 
 async function resolveWindowsShell(): Promise<string | null> {

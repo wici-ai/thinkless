@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { createSampleTarget } from '../sample.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, WiCiConfig } from '../shared/types.js';
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   await writeFakeCodex();
 
   const originalPath = process.env.PATH ?? '';
-  process.env.PATH = `${fakeBin}:${originalPath}`;
+  process.env.PATH = `${fakeBin}${delimiter}${originalPath}`;
   try {
     const paths = runPaths(target);
     await ensureRunDirs(paths);
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
 }
 
 async function writeFakeCodex(): Promise<void> {
-  const path = join(fakeBin, 'codex');
+  const path = await fakeCommandPath('codex');
   await writeFile(
     path,
     `#!/usr/bin/env node
@@ -124,7 +124,8 @@ if (args[0] === 'exec') {
     console.error('missing --output-last-message');
     process.exit(2);
   }
-  const prompt = args[args.length - 1] || '';
+  const promptArg = args.at(-1) || '';
+  const prompt = promptArg === '-' ? readFileSync(0, 'utf8') : promptArg;
   if (prompt.includes('capacity-retry-goal')) {
     const attemptPath = outputPath + '.attempt';
     const attempt = existsSync(attemptPath) ? Number(readFileSync(attemptPath, 'utf8')) : 0;
@@ -152,6 +153,13 @@ process.exit(2);
 `
   );
   await chmod(path, 0o755);
+}
+
+async function fakeCommandPath(name: string): Promise<string> {
+  if (process.platform !== 'win32') return join(fakeBin, name);
+  const cmd = join(fakeBin, `${name}.cmd`);
+  await writeFile(cmd, `@echo off\r\nnode "%~dp0\\${name}.js" %*\r\n`);
+  return join(fakeBin, `${name}.js`);
 }
 
 function goal(text = 'Recover when app-server reconnects forever.'): GoalFile {

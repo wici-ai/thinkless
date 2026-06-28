@@ -18,6 +18,7 @@ import { parsePlanSteps } from '../supervisor/plan.js';
 import { atomicWriteJson, exists } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { readPersistedRuntimeSelection } from '../shared/chatSession.js';
+import { runtimeAgentFromCommand } from '../shared/runtime.js';
 import type { GoalFile, WiCiConfig } from '../shared/types.js';
 import { resolveMaxIters } from '../supervisor/index.js';
 import { formatDelay, isTransientNetworkFailure, transientFailureReason, transientRetryMessage } from '../supervisor/transientRetry.js';
@@ -352,6 +353,8 @@ async function main(): Promise<void> {
   assert(switchedConfig.tools.planner.model === 'gpt-5.5' && switchedConfig.tools.planner.effort === 'fast', 'codex agent selection must force gpt-5.5 and codex effort options');
   assert(switchedConfig.tools.executor.command === 'claude', 'runtime agent switch must allow execution pane to select claude');
   assert(switchedConfig.tools.executor.model === 'claude-opus-4-8' && switchedConfig.tools.executor.effort === 'ultracode', 'claude agent selection must force claude-opus-4-8 and claude effort options');
+  assert(runtimeAgentFromCommand('C:\\tmp\\claude.cmd', 'codex') === 'claude', 'runtime command detection must recognize Windows Claude shim paths');
+  assert(runtimeAgentFromCommand('/tmp/codex', 'claude') === 'codex', 'runtime command detection must recognize POSIX Codex paths');
   assert(loadedConfig.budget.max_iters === 0, 'default config max_iters=0 should disable WiCi iteration hard caps for real runs');
   assert(resolveMaxIters(undefined, loadedConfig.budget.max_iters) === Number.POSITIVE_INFINITY, 'configured max_iters=0 should resolve to unbounded');
   assert(resolveMaxIters(0, loadedConfig.budget.max_iters) === 0, 'explicit --max-iters 0 should remain a setup-only run limit');
@@ -708,6 +711,10 @@ function verifyTransientRetryDetection(): void {
   assert(isTransientNetworkFailure('HTTP 502 Bad Gateway from upstream'), '502 bad gateway should be retried as transient');
   assert(isTransientNetworkFailure('Cloudflare 524 gateway timeout'), '524 gateway timeout should be retried as transient');
   assert(isTransientNetworkFailure('error_status=400 request failed before provider routing'), '400 provider/routing failures should be retried as transient');
+  assert(isTransientNetworkFailure('codex app-server request timed out: thread/start'), 'Codex app-server request timeouts should be retried as transient');
+  assert(isTransientNetworkFailure('{"method":"connection/reconnecting","params":{"attempt":3}}'), 'Codex app-server reconnect loops should be retried as transient');
+  assert(isTransientNetworkFailure('SSE event stream disconnected while reading model output'), 'SSE stream disconnects should be retried as transient');
+  assert(isTransientNetworkFailure('TypeError: fetch failed'), 'fetch failures should be retried as transient');
   assert(!isTransientNetworkFailure('Planner output did not contain structured plan artifacts'), 'structured planner failures must not be retried as network failures');
   assert(transientFailureReason('noise\nAPI Error: 502 Bad Gateway').includes('502'), 'transient retry reason should preserve the useful failing status');
   assert(formatDelay(10 * 60_000) === '10m', 'default transient retry delay should format as 10m');

@@ -23,8 +23,9 @@ export function isRuntimeAgent(value: string | undefined): value is RuntimeAgent
 
 export function runtimeAgentFromCommand(command: string | undefined, fallback: RuntimeAgent): RuntimeAgent {
   const normalized = command?.trim().toLowerCase();
-  if (normalized === 'codex' || normalized?.endsWith('/codex')) return 'codex';
-  if (normalized === 'claude' || normalized?.endsWith('/claude')) return 'claude';
+  const basename = normalized?.split(/[\\/]/).at(-1)?.replace(/\.(?:cmd|exe|bat|ps1)$/i, '');
+  if (basename === 'codex') return 'codex';
+  if (basename === 'claude') return 'claude';
   return fallback;
 }
 

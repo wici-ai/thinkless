@@ -18,7 +18,7 @@ export function isTransientNetworkFailure(text: string | undefined): boolean {
   const normalized = text?.trim();
   if (!normalized) return false;
   return TRANSIENT_STATUS_CODES.some((status) => transientStatusPattern(status).test(normalized)) ||
-    /\b(server_error|bad gateway|gateway timeout|cloudflare.*timeout|temporarily unavailable|connection reset|socket hang up|econnreset|etimedout|at capacity|selected model is at capacity|try a different model)\b/i.test(normalized);
+    /\b(server_error|bad gateway|gateway timeout|cloudflare.*timeout|temporarily unavailable|connection reset|connection error|socket hang up|econnreset|econnaborted|etimedout|enotfound|eai_again|und_err_[a-z_]+|at capacity|selected model is at capacity|try a different model|request timed out|request-timeout|reconnect|reconnecting|network error|fetch failed|failed to fetch|eventsource|sse|event stream|stream disconnected|stream interrupted)\b|codex app-server request timed out|connection\/reconnecting/i.test(normalized);
 }
 
 export function transientFailureReason(text: string | undefined): string {

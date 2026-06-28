@@ -259,10 +259,44 @@ export async function runPlanDiff(
 
   const plan = await readFile(paths.plan, 'utf8');
   const nextId = `S${(plan.match(/-\s+\[[ x>!]\]\s+S\d+/g)?.length ?? 0) + 1}`;
+  const requiresBottleneckReview = /bottleneck review|safe-validation|holdout-safe|no accepted improvement|GOAL\/PLAN update/i.test(newText);
+  const bottleneckSummary = bottleneckReviewSummary(newText);
+  if (requiresBottleneckReview) {
+    const currentGoal = await readPlannerGoalText(paths, goal);
+    await atomicWriteFile(
+      paths.goalDoc,
+      `${currentGoal.replace(/\n+$/, '')}\n\n## Bottleneck Review\n- ${bottleneckSummary}\n`
+    );
+  }
   await applyPlanDiff(paths, {
-    add: [{ after: 'S9999', id: nextId, text: `Incorporate new requirement: ${newText}` }]
+    add: [{
+      after: 'S9999',
+      id: nextId,
+      text: requiresBottleneckReview ? `Review bottleneck and update PLAN/GOAL: ${bottleneckSummary}` : `Incorporate new requirement: ${newText}`
+    }]
   });
   return { ok: true, sessionId: plannerSessionId ?? 'stub-planner', stdout: 'stub planner applied requirement diff' };
+}
+
+function bottleneckReviewSummary(text: string): string {
+  const head = text
+    .split(/\bFrozen acceptance spec\b|\bFrozen benchmark selection\b|\bCondensed WiCi run context\b|\bRecent WiCi lessons\b/i)[0] ?? text;
+  const reason = singleLine(head).split(/\bAnalyze GOAL\.md\b/i)[0]?.trim() || singleLine(head);
+  return truncate(
+    [
+      reason,
+      'Review the current bottleneck, update GOAL/PLAN framing (GOAL.md and PLAN.md), compact ruled-out attempts, then choose the next highest-value attempt or a bounded deeper debugging step with targeted experiments.'
+    ].join(' '),
+    900
+  );
+}
+
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function truncate(text: string, maxChars: number): string {
+  return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
 export function buildInitialPlannerArgs(input: { goalText: string; effort: string; model?: string; systemPrompt: string; safetyText?: string }): string[] {

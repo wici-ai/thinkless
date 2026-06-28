@@ -28,6 +28,8 @@ Return the smallest safe markdown update, but do not blindly append. Treat PLAN.
 
 For nontrivial architecture/debug diffs, preserve a compact RFC-style decision packet in `ASSUMPTIONS.md` or the affected `PLAN.md` step: problem, inferred invariants, options considered, chosen approach, risks, and validation. For diagnostics, a step is done only after it produces decision-quality evidence: a narrowed root cause, falsified hypothesis, concrete next experiment, or durable invariant/constraint. If repeated iterations show the same blocker, same evidence, or same reject reason, compact the dead-end history into current facts, ruled-out paths, and one concrete discriminating next step instead of appending another retry.
 
+When the new input says there was no accepted improvement, repeated safe-validation/holdout rejection, or a performance plateau, do not mark the goal or step blocked and do not just append another similar retry. Treat it as a bottleneck-review event: update `GOAL.md` when the active optimization target, stop boundary, validation contract, or bottleneck framing should change; update `PLAN.md` with the reviewed bottleneck, ruled-out path, and the next highest-value attempt or a bounded deeper-debugging step.
+
 Preserve existing step IDs and do not rewrite completed steps unless the new requirement explicitly makes them obsolete or the surrounding prose is being compacted without changing their recorded meaning. Any newly added executable step must keep WiCi's discoverable step shape, preferably:
 
 ```markdown
@@ -70,4 +72,4 @@ Do not ask the operator to do side probes, deployment, SSH setup, model discover
 
 Claude Code's native plan-mode tools remain available for planning-time context gathering, including web research or remote discovery when useful. Do not complete the user's deployment, benchmark target, application build, or optimization task as the final execution outcome during plan diff; encode those actions as PLAN.md steps for Codex.
 
-Research, debugging, and fallback strategy are planner/executor responsibilities, not extra phrases the user must type into Chat. When new execution facts show the current path is weak, update PLAN.md so Codex can inspect logs/state, consult relevant documentation or tutorials, repair `.opt` scripts when useful, choose another strategy, and continue the same GOAL.md instead of treating one failed path as a final block.
+Research, debugging, bottleneck review, and fallback strategy are planner/executor responsibilities, not extra phrases the user must type into Chat. When new execution facts show the current path is weak or produces no accepted improvement, update GOAL.md when needed and update PLAN.md so Codex can inspect logs/state, consult relevant documentation or tutorials, repair `.opt` scripts when useful, choose another strategy, and continue the same goal contract instead of treating one failed path as a final block.

@@ -785,7 +785,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
             best_commit: baseline.best_commit
           }, archiveParent.nonBest ? 'warn' : 'info');
         }
-        await setPlanStepStatus(paths, step.id, 'blocked', checkpoint.iter);
+        await setPlanStepStatus(paths, step.id, 'done', checkpoint.iter);
         checkpoint.active_branch = {
           parent_id: branchParentId,
           selected_at: new Date().toISOString(),
@@ -802,9 +802,13 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         const replanText = withLessons(
           [
             `${stuck.reason}.`,
-            `Step ${step.id} is blocked after ${stuck.attempts} attempt(s) and ${stuck.consecutiveFailures} consecutive failure(s).`,
+            `Step ${step.id} has stalled after ${stuck.attempts} failed attempt(s) and ${stuck.consecutiveFailures} consecutive failure(s); this is not a user-blocking condition.`,
             branchParentId ? `Branch parent ledger id: ${branchParentId}.` : '',
-            'Analyze GOAL.md, PLAN.md, the ledger, and lessons, then produce a minimal plan diff with a new planner-chosen direction.',
+            'Analyze GOAL.md, PLAN.md, the ledger, validation output, performance evidence, and lessons, then produce a bottleneck review plus updated GOAL.md and PLAN.md.',
+            'No accepted improvement or repeated holdout-safe rejection may only trigger this bottleneck review and GOAL/PLAN update; do not label the run or step blocked.',
+            'Update GOAL.md when the review changes the active optimization target, stop boundary, validation contract, or the way the bottleneck should be stated to future executors.',
+            'Summarize the current bottleneck or failed hypothesis, compact dead-end history, and choose the next highest-value attempt from the evidence.',
+            'If the best next move is deeper debugging, add a bounded but aggressive diagnostic step: instrument, bisect, inspect logs/state/call paths, profile, or run targeted experiments while respecting architecture invariants.',
             'Do not rely on a supervisor-provided category; choose the next approach from the evidence.',
             'Preserve completed steps and keep planner-provided validation artifacts consistent with PLAN.md.'
           ].filter(Boolean).join(' '),
@@ -855,12 +859,13 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         };
         await saveCheckpoint(paths, checkpoint);
         await saveStableIterationSnapshot(paths, goal, checkpoint, baseline);
-        await events.emit('REPLAN_STUCK', stuck.reason, {
+        await events.emit('REPLAN_STUCK', `Replanning ${step.id} after repeated failed attempts without blocking the step: ${stuck.reason}`, {
           step_id: step.id,
           attempts: stuck.attempts,
           consecutive_failures: stuck.consecutiveFailures,
           parent_id: branchParentId,
-          planner_selects_direction: true
+          planner_selects_direction: true,
+          blocked: false
         }, 'warn');
         steerText = undefined;
         continue;
