@@ -715,6 +715,8 @@ function verifyTransientRetryDetection(): void {
   assert(isTransientNetworkFailure('{"method":"connection/reconnecting","params":{"attempt":3}}'), 'Codex app-server reconnect loops should be retried as transient');
   assert(isTransientNetworkFailure('SSE event stream disconnected while reading model output'), 'SSE stream disconnects should be retried as transient');
   assert(isTransientNetworkFailure('TypeError: fetch failed'), 'fetch failures should be retried as transient');
+  assert(isTransientNetworkFailure('executor error: exceed retry limit'), 'Codex upstream retry-limit exhaustion should be retried as transient');
+  assert(isTransientNetworkFailure('max retries exceeded while reading response stream'), 'max retry exhaustion should be retried as transient');
   assert(!isTransientNetworkFailure('Planner output did not contain structured plan artifacts'), 'structured planner failures must not be retried as network failures');
   assert(transientFailureReason('noise\nAPI Error: 502 Bad Gateway').includes('502'), 'transient retry reason should preserve the useful failing status');
   assert(formatDelay(10 * 60_000) === '10m', 'default transient retry delay should format as 10m');

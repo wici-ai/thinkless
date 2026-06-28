@@ -1062,6 +1062,32 @@ async function runDirectPlanExecution(
       });
       await appendLedger(paths, ledgerEntry);
       const ledgerAfterIteration = await readLedger(paths);
+      const directNoProgress = directNoProgressStall(ledgerAfterIteration, step.id, config);
+      checkpoint = {
+        ...checkpoint,
+        consecutive_duplicate_direct_rejects: directNoProgress.count,
+        events_seq: events.seq
+      };
+      await saveCheckpoint(paths, checkpoint);
+      if (directNoProgress.stalled) {
+        const replan = await replanDirectNoProgress({
+          paths,
+          goal,
+          checkpoint,
+          config,
+          events,
+          plan,
+          step,
+          iter: nextIter,
+          stall: directNoProgress,
+          ledger: ledgerAfterIteration
+        });
+        goal = replan.goal;
+        checkpoint = replan.checkpoint;
+        steerText = undefined;
+        if (replan.stop) return replan.stop;
+        if (replan.continued) continue;
+      }
       const satisfiedGoal = markSatisfiedPrimaryRequirements(goal, ledgerAfterIteration);
       if (satisfiedGoal) {
         const requirementIds = goal.requirements
@@ -1461,6 +1487,185 @@ async function continueDirectExhaustedPlan(
   return { goal, checkpoint, continued: true };
 }
 
+async function replanDirectNoProgress(input: {
+  paths: ReturnType<typeof runPaths>;
+  goal: GoalFile;
+  checkpoint: Checkpoint;
+  config: WiCiConfig;
+  events: EventWriter;
+  plan: string;
+  step: { id: string; text: string };
+  iter: number;
+  stall: { count: number; threshold: number; reason: string };
+  ledger: LedgerEntry[];
+}): Promise<{ goal: GoalFile; checkpoint: Checkpoint; continued: boolean; stop?: SupervisorResult }> {
+  const reason = `Direct executor produced ${input.stall.count} consecutive no-progress reject receipt(s) for ${input.step.id}: ${input.stall.reason}`;
+  await input.events.emit('DIRECT_NO_PROGRESS_REPLAN_REQUEST', `${reason}; requesting planner bottleneck review before pausing.`, {
+    iter: input.iter,
+    step_id: input.step.id,
+    mode: 'direct',
+    consecutive_duplicate_direct_rejects: input.stall.count,
+    threshold: input.stall.threshold
+  }, 'warn');
+  await setPlanStepStatus(input.paths, input.step.id, 'done', input.iter);
+  await refreshContextSummary(input.paths, input.goal, input.events);
+  let checkpoint: Checkpoint = {
+    ...input.checkpoint,
+    supervisor_state: 'PLAN' as const,
+    next_step: null,
+    ledger_seq: await lineCount(input.paths.ledger),
+    events_seq: input.events.seq,
+    plan_hash: await hashFile(input.paths.plan)
+  };
+  await saveCheckpoint(input.paths, checkpoint);
+
+  const steerText = await buildDirectNoProgressReplanSteerText(input.paths, input.goal, input.plan, input.step, input.stall, input.ledger);
+  const diff = await runPlanDiff(
+    input.paths,
+    input.goal,
+    checkpoint.sessions.planner,
+    steerText,
+    input.config,
+    (progress) => emitPlannerUsage(input.events, progress, { phase: 'direct_no_progress_replan', step_id: input.step.id }),
+    (retry) => emitPlannerRetry(input.events, retry, { phase: 'direct_no_progress_replan', step_id: input.step.id }),
+    () => hasPendingUrgentAbort(input.paths, checkpoint)
+  );
+  const stoppedForAbort = await stopIfPlannerAborted(input.paths, input.goal, checkpoint, input.events, diff);
+  if (stoppedForAbort) return { goal: stoppedForAbort.goal, checkpoint: stoppedForAbort.checkpoint, continued: false, stop: stoppedForAbort.result };
+  const waitingForPlanner = await stopForPlannerDiffClarification(input.paths, input.events, input.goal, checkpoint, diff);
+  if (waitingForPlanner) {
+    return { goal: input.goal, checkpoint, continued: false, stop: { state: 'STOP', reason: PLANNER_CLARIFY_WAIT_REASON, iter: waitingForPlanner.iter } };
+  }
+  if (!diff.ok) {
+    return stopDirectNoProgressForHuman(input.paths, input.goal, checkpoint, input.events, input.step.id, input.iter, input.stall, `Planner bottleneck review failed: ${diff.error ?? 'unknown planner failure'}`);
+  }
+
+  const updatedPlan = await readPlan(input.paths);
+  const nextStep = nextExecutableStep(updatedPlan);
+  checkpoint = {
+    ...checkpoint,
+    sessions: {
+      ...checkpoint.sessions,
+      planner: diff.sessionId ?? checkpoint.sessions.planner
+    },
+    supervisor_state: nextStep ? 'EXECUTE' : 'STOP',
+    next_step: nextStep?.id ?? null,
+    consecutive_duplicate_direct_rejects: 0,
+    ledger_seq: await lineCount(input.paths.ledger),
+    events_seq: input.events.seq,
+    plan_hash: await hashFile(input.paths.plan)
+  };
+  await saveCheckpoint(input.paths, checkpoint);
+  if (!nextStep) {
+    return stopDirectNoProgressForHuman(input.paths, input.goal, checkpoint, input.events, input.step.id, input.iter, input.stall, 'Planner bottleneck review completed but PLAN.md still has no pending executable step.');
+  }
+
+  await input.events.emit('DIRECT_NO_PROGRESS_REPLAN_APPLIED', `Planner bottleneck review selected ${nextStep.id} after repeated no-progress receipts for ${input.step.id}`, {
+    iter: input.iter,
+    previous_step_id: input.step.id,
+    next_step: nextStep,
+    mode: 'direct'
+  }, 'warn');
+  return { goal: input.goal, checkpoint, continued: true };
+}
+
+async function stopDirectNoProgressForHuman(
+  paths: ReturnType<typeof runPaths>,
+  goal: GoalFile,
+  checkpoint: Checkpoint,
+  events: EventWriter,
+  stepId: string,
+  iter: number,
+  stall: { count: number; threshold: number; reason: string },
+  reason: string
+): Promise<{ goal: GoalFile; checkpoint: Checkpoint; continued: boolean; stop: SupervisorResult }> {
+  const replyKey = `stop-${goal.version}-${iter}-direct-stall`;
+  const question = await writeOutbox(paths, {
+    kind: 'question',
+    text: `${reason} Reply with a steer or new requirement to force a more concrete PLAN.md step, or answer stop to leave the run stopped.`,
+    replyKey,
+    data: {
+      mode: 'direct',
+      step_id: stepId,
+      consecutive_duplicate_direct_rejects: stall.count,
+      threshold: stall.threshold,
+      latest_reason: stall.reason
+    }
+  });
+  checkpoint = {
+    ...checkpoint,
+    supervisor_state: 'STOP',
+    next_step: stepId,
+    ledger_seq: await lineCount(paths.ledger),
+    events_seq: events.seq,
+    plan_hash: await hashFile(paths.plan)
+  };
+  await saveCheckpoint(paths, checkpoint);
+  await events.emit('DIRECT_NO_PROGRESS_ESCALATED', reason, {
+    iter,
+    step_id: stepId,
+    mode: 'direct',
+    reply_key: replyKey,
+    outbox_id: question.id,
+    consecutive_duplicate_direct_rejects: stall.count,
+    threshold: stall.threshold
+  }, 'warn');
+  await events.emit('STOP', reason, { mode: 'direct', reply_key: replyKey, outbox_id: question.id }, 'warn');
+  return { goal, checkpoint, continued: false, stop: { state: 'STOP', reason, iter: checkpoint.iter } };
+}
+
+async function buildDirectNoProgressReplanSteerText(
+  paths: ReturnType<typeof runPaths>,
+  goal: GoalFile,
+  plan: string,
+  step: { id: string; text: string },
+  stall: { count: number; threshold: number; reason: string },
+  ledger: LedgerEntry[]
+): Promise<string> {
+  const recentLedger = ledger.slice(-8).map((entry) => ({
+    iter: entry.iter,
+    step_id: entry.step_id,
+    status: entry.status,
+    step_done: entry.guards.step_done,
+    tests_pass: entry.guards.tests_pass,
+    changed_files: entry.guards.changed_files,
+    reason: entry.guards.reason,
+    reflection: entry.reflection
+  }));
+  const contextText = await readContextForPrompt(paths);
+  const assumptionsText = await readOptionalText(paths.assumptions);
+  const lessonsText = formatLessonsForPrompt(await readRecentLessons(paths));
+  return [
+    'Direct execution is stuck in a no-progress loop and needs a planner bottleneck review before more executor turns are allowed.',
+    `The repeated step is ${step.id}: ${step.text}.`,
+    `Observed stall: ${stall.count} consecutive no-progress reject receipts reached threshold ${stall.threshold}.`,
+    `Repeated receipt signature: ${stall.reason}`,
+    '',
+    'Planner task:',
+    '- Re-read GOAL.md, PLAN.md, ASSUMPTIONS.md, recent ledger, lessons, and context.',
+    '- Restate the actual bottleneck and update GOAL.md if the current goal/validation contract is missing an active requirement, stop boundary, or acceptance gap.',
+    '- Update PLAN.md to close the ineffective repeated step and add the next concrete executable step.',
+    '- Do not just ask for human input because executor repeated status checks; first try to recover by planning.',
+    '- Brainstorm and select a bounded next method when useful: instrumentation, targeted trace, log audit, state/path inspection, smaller validation, or an alternate hypothesis within the existing user scope.',
+    '- Preserve completed evidence and constraints. Do not repeat known-bad full gates, invent product scope, push, or perform destructive cleanup unless GOAL.md explicitly allows it.',
+    '- Leave exactly one next high-value step pending unless the work is truly blocked.',
+    '',
+    'Example class of failure to handle: the initial user may have asked to SSH into a server and follow a remote plan file, while executor later repeated drift/status/evidence summaries instead of activating the next instrumentation or validation step. Planner should identify the missing active substep, not merely stop.',
+    '',
+    `Active requirement summary: ${requirementText(goal) || 'see GOAL.md'}`,
+    '',
+    `Current ASSUMPTIONS.md:\n${assumptionsText || '(missing)'}`,
+    '',
+    `Current PLAN.md:\n${plan}`,
+    '',
+    `Recent ledger rows:\n${JSON.stringify(recentLedger, null, 2)}`,
+    '',
+    `Lessons:\n${lessonsText || '(none)'}`,
+    '',
+    `Context:\n${contextText}`
+  ].join('\n');
+}
+
 async function buildDirectPlanContinuationSteerText(
   paths: ReturnType<typeof runPaths>,
   goal: GoalFile,
@@ -1626,6 +1831,7 @@ async function runDirectExecutorWithHotReload(input: {
   const forceFreshExecutor = Boolean(executorReset && (!executorReset.stepId || executorReset.stepId === input.stepId));
   const controller = await startExecutorStep(input.paths, goal, input.stepId, input.iter, input.config, checkpoint, steerText, input.contextText, {
     resume: forceFreshExecutor ? false : undefined,
+    freshFallback: forceFreshExecutor,
     onProgress: async (progress) => {
       const now = Date.now();
       await input.events.emit('EXECUTE_PROGRESS', formatExecutorProgress(progress), {
@@ -1838,6 +2044,57 @@ function consecutiveCrashCount(ledger: LedgerEntry[], stepId: string, reason: st
     count += 1;
   }
   return count;
+}
+
+function directNoProgressStall(ledger: LedgerEntry[], stepId: string, config: WiCiConfig): { stalled: boolean; count: number; threshold: number; reason: string } {
+  const threshold = directNoProgressThreshold(config);
+  let count = 0;
+  let reason = '';
+  for (let index = ledger.length - 1; index >= 0; index -= 1) {
+    const entry = ledger[index];
+    if (!isNoProgressDirectReject(entry, stepId)) break;
+    const currentReason = normalizeDirectRejectReason(String(entry.guards.reason ?? ''));
+    if (!reason) reason = currentReason;
+    if (currentReason !== reason) break;
+    count += 1;
+  }
+  return {
+    stalled: count >= threshold,
+    count,
+    threshold,
+    reason: reason || 'latest direct reject was not a repeated no-progress receipt'
+  };
+}
+
+function directNoProgressThreshold(config: WiCiConfig): number {
+  const raw = process.env.WICI_DIRECT_NO_PROGRESS_THRESHOLD;
+  const parsed = raw === undefined ? NaN : Number(raw);
+  if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  return Math.max(3, config.retry.stall_replan_after);
+}
+
+function isNoProgressDirectReject(entry: LedgerEntry, stepId: string): boolean {
+  return (
+    entry.step_id === stepId &&
+    entry.status === 'reject' &&
+    entry.confidence === 'direct-executor-receipt' &&
+    entry.metric === null &&
+    entry.guards.direct === true &&
+    entry.guards.step_done === true &&
+    entry.guards.tests_pass === false &&
+    Number(entry.guards.changed_files ?? 0) === 0
+  );
+}
+
+function normalizeDirectRejectReason(reason: string): string {
+  return reason
+    .replace(/\biter(?:ation)?[-\s:]*\d+\b/gi, 'iter#')
+    .replace(/\bS\d+[a-z]?\b/g, 'S#')
+    .replace(/\b\d{4}-\d{2}-\d{2}T[0-9:.+-]+Z\b/g, 'timestamp')
+    .replace(/\b\d+\b/g, '#')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
 }
 
 function directMetricDeltaPct(base: MetricStats, next: MetricStats, direction: GoalFile['metric']['direction']): number {
@@ -2327,6 +2584,7 @@ async function handlePendingStopQuestion(
   const pending = await pendingStopQuestion(paths);
   if (!pending?.reply_key) return { action: 'proceed', reason: 'no pending stop question', checkpoint };
   const continuationStall = pending.reply_key.startsWith(CONTINUATION_STALL_REPLY_PREFIX);
+  const directStall = pending.reply_key.includes('-direct-stall');
 
   const questionTs = Date.parse(pending.ts);
   const pendingInputs = (await readPendingInjections(paths, checkpoint.drained_inbox, ['answer', 'add_requirement', 'steer']))
@@ -2358,6 +2616,7 @@ async function handlePendingStopQuestion(
       drained_inbox: [...checkpoint.drained_inbox, ...injectionIds(drained)],
       consecutive_continuation_fallbacks: continuationStall ? 0 : checkpoint.consecutive_continuation_fallbacks,
       consecutive_duplicate_continuation_steps: continuationStall ? 0 : checkpoint.consecutive_duplicate_continuation_steps,
+      consecutive_duplicate_direct_rejects: directStall ? 0 : checkpoint.consecutive_duplicate_direct_rejects,
       events_seq: events.seq
     };
     await saveCheckpoint(paths, next);
@@ -2377,6 +2636,7 @@ async function handlePendingStopQuestion(
     ...checkpoint,
     consecutive_continuation_fallbacks: continuationStall ? 0 : checkpoint.consecutive_continuation_fallbacks,
     consecutive_duplicate_continuation_steps: continuationStall ? 0 : checkpoint.consecutive_duplicate_continuation_steps,
+    consecutive_duplicate_direct_rejects: directStall ? 0 : checkpoint.consecutive_duplicate_direct_rejects,
     events_seq: events.seq
   };
   await saveCheckpoint(paths, next);

@@ -154,7 +154,7 @@ writeFileSync(countPath, String(count));
 
 console.log(JSON.stringify({ type: 'turn.started' }));
 if (count <= 3) {
-  console.error('codex app-server request timed out: thread/start');
+  console.error('executor error: exceed retry limit');
   process.exit(42);
 }
 

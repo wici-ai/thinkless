@@ -344,6 +344,7 @@ export interface Checkpoint {
   };
   consecutive_continuation_fallbacks?: number;
   consecutive_duplicate_continuation_steps?: number;
+  consecutive_duplicate_direct_rejects?: number;
   drained_inbox: string[];
   updated_at: string;
 }

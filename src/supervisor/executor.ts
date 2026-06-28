@@ -34,6 +34,7 @@ export interface ExecutorProgress {
 export interface ExecutorRunOptions {
   artifactId?: string;
   resume?: boolean;
+  freshFallback?: boolean;
   onProgress?: (progress: ExecutorProgress) => Promise<void>;
   onBackendFallback?: (fallback: ExecutorBackendFallback) => Promise<void>;
   shouldPreempt?: () => Promise<boolean>;
@@ -216,7 +217,7 @@ export async function startExecutorStep(
             });
             return runExecutorStep(paths, goal, stepId, iter, config, steerText, lessonsText, {
               ...options,
-              resume: options.resume ?? iter > 1
+              resume: options.freshFallback ? false : options.resume ?? iter > 1
             });
           }),
         steer: turn.steer,

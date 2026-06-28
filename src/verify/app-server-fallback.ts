@@ -50,6 +50,32 @@ async function main(): Promise<void> {
       'capacity errors must be classified as transient failures'
     );
 
+    const freshFallbacks: ExecutorBackendFallback[] = [];
+    const freshController = await startExecutorStep(paths, goal(), 'S1', 2, config(), checkpointWithExecutorApp(), undefined, undefined, {
+      resume: false,
+      freshFallback: true,
+      heartbeatMs: 50,
+      idleTimeoutMs: 2_000,
+      hardTimeoutMs: 5_000,
+      firstMeaningfulEventTimeoutMs: 300,
+      artifactId: 'iter-2',
+      onBackendFallback: async (fallback) => {
+        freshFallbacks.push(fallback);
+      }
+    });
+    const freshResult = await freshController.done;
+    assert(freshResult.step_done && freshResult.tests_pass, `fresh fallback executor did not complete: ${JSON.stringify(freshResult)}`);
+    assert(freshFallbacks.length === 1, `expected one fresh app-server fallback, got ${JSON.stringify(freshFallbacks)}`);
+
+    const argsLog = (await readFile(join(paths.wici, 'fake-codex-args.jsonl'), 'utf8'))
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { args: string[] });
+    const freshExecArgs = argsLog.at(-1)?.args ?? [];
+    assert(freshExecArgs[0] === 'exec', `fresh fallback did not call codex exec: ${JSON.stringify(freshExecArgs)}`);
+    assert(freshExecArgs[1] !== 'resume', `fresh fallback must not use codex exec resume --last: ${JSON.stringify(freshExecArgs)}`);
+    assert(freshExecArgs.includes('-C'), `fresh fallback must set target cwd with -C: ${JSON.stringify(freshExecArgs)}`);
+
     const originalRetryDelay = process.env.WICI_TRANSIENT_RETRY_DELAY_MS;
     process.env.WICI_TRANSIENT_RETRY_DELAY_MS = '0';
     try {
@@ -63,7 +89,7 @@ async function main(): Promise<void> {
       else process.env.WICI_TRANSIENT_RETRY_DELAY_MS = originalRetryDelay;
     }
 
-    console.log(JSON.stringify({ ok: true, app_server_reconnect_fallback: true, capacity_retry: true, fallback: fallbacks[0] }, null, 2));
+    console.log(JSON.stringify({ ok: true, app_server_reconnect_fallback: true, fresh_fallback: true, capacity_retry: true, fallback: fallbacks[0] }, null, 2));
   } finally {
     process.env.PATH = originalPath;
     await rm(target, { recursive: true, force: true });
@@ -124,6 +150,10 @@ if (args[0] === 'exec') {
     console.error('missing --output-last-message');
     process.exit(2);
   }
+  mkdirSync(dirname(outputPath), { recursive: true });
+  const stateDir = dirname(dirname(outputPath));
+  mkdirSync(stateDir, { recursive: true });
+  writeFileSync(stateDir + '/fake-codex-args.jsonl', JSON.stringify({ args }) + '\\n', { flag: 'a' });
   const promptArg = args.at(-1) || '';
   const prompt = promptArg === '-' ? readFileSync(0, 'utf8') : promptArg;
   if (prompt.includes('capacity-retry-goal')) {
@@ -138,7 +168,6 @@ if (args[0] === 'exec') {
     console.log(JSON.stringify({ type: 'agent_message', text: '{"decision":"complete","reason":"capacity cleared after retry"}' }));
     process.exit(0);
   }
-  mkdirSync(dirname(outputPath), { recursive: true });
   const resultPath = outputPath.replace(/\\.txt$/, '.json');
   writeFileSync(resultPath, JSON.stringify({ step_done: true, tests_pass: true, notes: 'exec fallback completed', changed_files: [], next: null }, null, 2) + '\\n');
   writeFileSync(outputPath, 'exec fallback completed\\n');
@@ -188,6 +217,26 @@ function checkpoint(): Checkpoint {
     sessions: {},
     drained_inbox: [],
     updated_at: new Date().toISOString()
+  };
+}
+
+function checkpointWithExecutorApp(): Checkpoint {
+  return {
+    ...checkpoint(),
+    sessions: {
+      executorApp: {
+        threadId: 'thread-reconnect',
+        workspace: target,
+        updatedAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        phase: 'idle'
+      },
+      executorReset: {
+        reason: 'manual_restart',
+        stepId: 'S1',
+        at: new Date().toISOString()
+      }
+    }
   };
 }
 
