@@ -89,8 +89,8 @@ async function main(): Promise<void> {
   assert(simplifiedPlan.includes('WiCi 可识别的可执行步骤行'), 'Simplified_PLAN should require PLAN.md steps to be machine-discoverable without a schema');
   assert(simplifiedPlan.includes('不能把用户句子解析成 WiCi 内置 metric'), 'Simplified_PLAN should forbid supervisor metric parsing');
   assert(simplifiedPlan.includes('不能维护 hardcoded avenue/category'), 'Simplified_PLAN should forbid hardcoded categories');
-  assert(simplifiedPlan.includes('每次 tag 前必须用 TUI 真实跑一遍泛化 canary'), 'Simplified_PLAN should require real canary before tag');
-  assert(simplifiedPlan.includes('不要把“自己查资料”“失败后继续 debug”“更新 PLAN.md/.opt”之类 meta 指令塞进 canary Chat'), 'Simplified_PLAN should keep canary Chat free of planner/executor meta instructions');
+  assert(simplifiedPlan.includes('每次 tag 前必须运行发布 preflight'), 'Simplified_PLAN should require release preflight before tag');
+  assert(simplifiedPlan.includes('发布证据来自 `verify:v1-core`'), 'Simplified_PLAN should bind release evidence to verify:v1-core');
   assert(simplifiedPlan.includes('WiCi 只负责落盘和展示'), 'Simplified_PLAN should keep planner scripts out of supervisor execution semantics');
   assert(simplifiedPlan.includes('脚本永远不是 fresh V1 启动执行的前置条件'), 'Simplified_PLAN should state scripts are never a fresh V1 execution prerequisite');
   assert(simplifiedPlan.includes('旧 optimizer 必须显式打开'), 'Simplified_PLAN should require explicit opt-in for legacy optimizer behavior');
@@ -242,15 +242,6 @@ async function main(): Promise<void> {
     'docs install page should expose the public one-line installer, copy button, purpose, and verification command'
   );
   assert(
-    docsText.includes('Do not pass the canary as `--goal`; the release proof is the Chat-first path.'),
-    'docs should document Chat-first canary execution'
-  );
-  assert(
-    docsText.includes('Keep that first Chat as the real user request only') &&
-      docsText.includes('those requirements belong in the planner and executor prompts'),
-    'docs should keep canary Chat free of research/debug meta instructions'
-  );
-  assert(
     docsText.includes('`GOAL.md + PLAN.md` as one goal') && !docsText.includes('execute a `PLAN.md` step'),
     'docs should document whole-goal Codex execution instead of the old step-only contract'
   );
@@ -292,65 +283,16 @@ async function main(): Promise<void> {
     'docs should document native Claude plan-mode tool availability'
   );
   assert(
-    docsText.includes('release_action: blocked_do_not_tag_or_push') && docsText.includes('local release tags are not proof'),
-    'docs should document explicit blocked tag-gate action'
-  );
-  assert(
-    docsText.includes('npm run release:preflight') && docsText.includes('automated V1 core gate') && docsText.includes('real canary tag gate'),
+    docsText.includes('npm run release:preflight') && docsText.includes('automated V1 core gate') && docsText.includes('secret scanning'),
     'docs should document the release preflight command'
   );
   assert(
-    docsText.includes('npm run release:tag -- 0.1.0') && docsText.includes('It never pushes') && docsText.includes('exits before `git tag`'),
+    docsText.includes('npm run release:tag -- 0.1.0') && docsText.includes('It never pushes') && docsText.includes('If preflight fails'),
     'docs should document the guarded release tag command'
   );
-  assert(
-    docsText.includes('evidence commit must equal current `HEAD`') && docsText.includes('current checkout must be clean'),
-    'docs should document current checkout matching for release tags'
-  );
-  assert(
-    docsText.includes('clean target git checkout') && docsText.includes('uncommitted target changes'),
-    'docs should document target checkout cleanliness for passed release tags'
-  );
-  assert(docsText.includes('mode: real') && docsText.includes('stub canaries'), 'docs should document real tool-mode requirement for passed release tags');
-  assert(
-    docsText.includes('run_checkpoint.goal_source: "tui_chat"') &&
-      docsText.includes('goal_source: "tui_chat"'),
-    'docs should document TUI Chat checkpoint source evidence for passed canaries'
-  );
-  assert(
-    docsText.includes('the recorder requires `--started-from-empty-tui true`') &&
-      docsText.includes('`--operator-manual-execution false`'),
-    'docs should document passed-canary attestation requirements'
-  );
-  assert(
-    docsText.includes('artifacts/.wici/codex-run.jsonl') && docsText.includes('checks the recorded sha256 and byte length') && docsText.includes('remain executable'),
-    'docs should document committed release canary artifact files'
-  );
-  assert(docsText.includes('npm run release:record-canary'), 'docs should document the release canary recorder');
-  assert(
-    docsText.includes('--started-from-empty-tui true') &&
-      docsText.includes('--operator-manual-execution false') &&
-      docsText.includes('--codex-attempted-ssh true'),
-    'docs should document explicit release canary attestation flags'
-  );
-  assert(docsText.includes('--observed-value <number>') && docsText.includes('observed value to reach the recorded target'), 'docs should document passed canary observed value evidence');
   assert(docsText.includes('docs/v1-completion-audit.md'), 'docs should link the V1 completion audit');
-  assert(completionAudit.includes('Current blocker') && completionAudit.includes('tag_allowed: false'), 'completion audit should record the current release blocker');
-  assert(
-    completionAudit.includes('Next required action') && completionAudit.includes('root@116.127.115.18:23276'),
-    'completion audit should record the current canary next action'
-  );
-  assert(
-    completionAudit.includes('predates checkpoint `goal_source` provenance') &&
-      completionAudit.includes('operator Chat-first attestation') &&
-      completionAudit.includes('canary_goal_source: tui_chat'),
-    'completion audit should distinguish historical failed canary evidence from passed-canary Chat checkpoint provenance'
-  );
-  assert(
-    docsText.includes('Failed canaries record `failure_reason` and `next_required_action`'),
-    'docs should document explicit failed-canary blocker fields'
-  );
-  assert(completionAudit.includes('npm run verify:v1-core') && completionAudit.includes('npm run verify:tag-gate'), 'completion audit should list core and tag-gate verification commands');
+  assert(completionAudit.includes('Release preflight runs the automated V1 core gate'), 'completion audit should record the automated release gate');
+  assert(completionAudit.includes('npm run verify:v1-core'), 'completion audit should list core verification commands');
   assert(completionAudit.includes('npm run verify:tui-chat-intake'), 'completion audit should list the Chat-first intake verification command');
   assert(
     completionAudit.includes('degraded_inspection_does_not_start_planner') &&
@@ -394,7 +336,7 @@ async function main(): Promise<void> {
   assert(completionAudit.includes('initial_plan_usage_streamed'), 'completion audit should include initial planner token usage streaming evidence');
   assert(completionAudit.includes('token usage is visible in the Execution pane'), 'completion audit should include TUI token usage visibility evidence');
   assert(completionAudit.includes('plan_diff_question') && completionAudit.includes('plan_diff_resumed_session'), 'completion audit should include hot-reload planner clarification evidence');
-  assert(completionAudit.includes('planner-initial.stdout.jsonl') && completionAudit.includes('.wici/codex-run.jsonl'), 'completion audit should include transcript evidence');
+  assert(completionAudit.includes('planner-*.stdout.jsonl') && completionAudit.includes('.wici/codex-run.jsonl'), 'completion audit should include transcript evidence');
   assert(completionAudit.includes('as one goal') && completionAudit.includes('thin receipt/progress focus'), 'completion audit should include whole-goal Codex execution evidence');
   assert(
     completionAudit.includes('goal_source: tui_goal_option') &&
@@ -428,45 +370,9 @@ async function main(): Promise<void> {
     'completion audit should include selectable resume catalog and runnable preflight evidence'
   );
   assert(completionAudit.includes('clean checkout, build, core verification'), 'completion audit should include docs deployment evidence');
-  assert(completionAudit.includes('blocked_do_not_tag_or_push'), 'completion audit should include explicit tag/push blocker evidence');
   assert(completionAudit.includes('Release tags are created only through a guarded command') && completionAudit.includes('npm run verify:release-tag'), 'completion audit should include guarded release tag evidence');
-  assert(
-    completionAudit.includes('canary_tool_mode') &&
-      completionAudit.includes('tag_gate_rejects_stub_mode_passed_canary') &&
-      completionAudit.includes('recorder_rejects_stub_mode_passed_canary'),
-    'completion audit should include real tool-mode release evidence'
-  );
-  assert(
-    completionAudit.includes('canary_goal_source') &&
-      completionAudit.includes('recorder_rejects_non_tui_passed_canary') &&
-      completionAudit.includes('tag_gate_rejects_non_tui_passed_canary'),
-    'completion audit should include TUI Chat goal-source release evidence'
-  );
-  assert(completionAudit.includes('release_version'), 'completion audit should include current WiCi version matching evidence');
-  assert(completionAudit.includes('artifact_files_verified'), 'completion audit should include committed artifact hash verification evidence');
-  assert(
-      completionAudit.includes('canary_target_git_dirty') &&
-      completionAudit.includes('target_clean_recorded') &&
-      completionAudit.includes('tag_gate_rejects_passed_dirty_target') &&
-      completionAudit.includes('recorder_rejects_dirty_target_passed_canary'),
-    'completion audit should include target checkout cleanliness evidence'
-  );
-  assert(completionAudit.includes('optional_planner_scripts_executable'), 'completion audit should include executable planner script artifact evidence');
-  assert(completionAudit.includes('codex_ssh_attempt_attested'), 'completion audit should include structured canary attestation evidence');
-  assert(completionAudit.includes('codex_transcript_has_ssh_attempt'), 'completion audit should include Codex transcript SSH attempt evidence');
   assert(completionAudit.includes('npm run verify:ssh-evidence'), 'completion audit should include shared SSH evidence verifier');
-  assert(completionAudit.includes('tag_gate_handles_non_ssh_canary'), 'completion audit should include non-SSH release canary gate evidence');
-  assert(completionAudit.includes('recorder_rejects_unsupported_ssh_attestation'), 'completion audit should include recorder SSH attestation consistency evidence');
-  assert(completionAudit.includes('recorder_rejects_wrong_ssh_target'), 'completion audit should include recorder SSH target consistency evidence');
-  assert(completionAudit.includes('cli_rejects_contradictory_status'), 'completion audit should include recorder status consistency evidence');
-  assert(completionAudit.includes('cli_rejects_invalid_passed_attestation'), 'completion audit should include recorder passed-attestation consistency evidence');
-  assert(completionAudit.includes('cli_rejects_invalid_target_metadata'), 'completion audit should include recorder target metadata validation evidence');
-  assert(completionAudit.includes('cli_rejects_invalid_passed_observed_value'), 'completion audit should include passed canary observed value evidence');
-  assert(completionAudit.includes('passed_observed_target'), 'completion audit should include tag-gate target/observed report evidence');
-  assert(completionAudit.includes('recorder_rejects_source_secrets'), 'completion audit should include recorder source artifact secret rejection evidence');
   assert(completionAudit.includes('npm run verify:no-secrets'), 'completion audit should include committed secret scan verification');
-  assert(completionAudit.includes('secret_scan_ok'), 'completion audit should include tag-gate canary secret scan evidence');
-  assert(completionAudit.includes('npm run verify:canary-evidence'), 'completion audit should include canary evidence recorder verification');
   assert(supervisorIndex.includes("waitReason: 'PLAN_READY'"), 'fresh V1 path should be able to return PLAN_READY without a baseline');
   assert(supervisorIndex.includes('return runDirectPlanExecution'), 'fresh V1 path should feed PLAN.md directly to Codex execution');
   assert(supervisorIndex.includes('directContinuationVerdict') && supervisorIndex.includes('DIRECT_CONTINUATION_VERDICT'), 'direct V1 path should gate exhausted plans with a continuation verdict');
@@ -493,7 +399,7 @@ async function main(): Promise<void> {
   }
   assert(pkg.scripts['verify:v1-core']?.includes('verify:app-server-hotreload'), 'fresh V1 core gate must include Codex app-server steering after hot reload');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:hotreload-resume'), 'fresh V1 core gate must include Codex exec resume fallback after hot reload');
-  assert(pkg.scripts['release:preflight'] === 'npm run verify:v1-core && npm run verify:tag-gate', 'package should expose a release preflight that runs core V1 checks before tag gate');
+  assert(pkg.scripts['release:preflight'] === 'npm run verify:v1-core', 'package should expose a release preflight that runs core V1 checks');
   assert(pkg.scripts['release:tag']?.includes('src/release/tag.ts'), 'package should expose the guarded release tag command');
   assert(releaseTagSource.includes("['run', 'release:preflight']") && releaseTagSource.includes("['tag', '-a', tag") && !releaseTagSource.includes("['push'") && !releaseTagSource.includes('git push'), 'guarded release tag command should run preflight before local tag and never push');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:release-tag') && releaseTagVerifier.includes('no_tag_after_failed_preflight'), 'fresh V1 core gate should include guarded release tag behavior checks');

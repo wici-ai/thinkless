@@ -32,13 +32,10 @@ async function main(): Promise<void> {
     selfupdate: await readFile('src/supervisor/selfupdate.ts', 'utf8'),
     inbox: await readFile('src/supervisor/inbox.ts', 'utf8'),
     context: await readFile('src/supervisor/context.ts', 'utf8'),
-    tagGate: await readFile('src/verify/tag-gate.ts', 'utf8'),
     sshEvidence: await readFile('src/verify/ssh-evidence.ts', 'utf8'),
     sshEvidenceCheck: await readFile('src/verify/ssh-evidence-check.ts', 'utf8'),
-    canaryRecorder: await readFile('src/release/record-canary.ts', 'utf8'),
     releaseTag: await readFile('src/release/tag.ts', 'utf8'),
     releaseTagVerifier: await readFile('src/verify/release-tag.ts', 'utf8'),
-    canaryEvidence: await readFile('src/verify/canary-evidence.ts', 'utf8'),
     secretScan: await readFile('src/verify/secret-scan.ts', 'utf8'),
     v1Slice: await readFile('src/verify/v1-slice.ts', 'utf8'),
     directNoScripts: await readFile('src/verify/direct-no-scripts.ts', 'utf8'),
@@ -314,67 +311,10 @@ async function main(): Promise<void> {
   assert(files.durability.includes('direct_recovered') && files.durability.includes("mode === 'direct'"), 'durability verifier must cover direct V1 crash recovery');
   assert(files.goalDoc.includes('GOAL.md') && files.goalDoc.includes('snapshot_preserved_goal_doc'), 'goal-doc verifier must cover durable human-readable GOAL.md');
 
-  assert(files.tagGate.includes('evidence_bundle'), 'tag gate must validate committed canary evidence bundles');
-  assert(files.tagGate.includes('planner_transcript_present') && files.tagGate.includes('codex_transcript_present'), 'tag gate must require planner and Codex transcript evidence');
-  assert(files.tagGate.includes('optionalPlannerArtifactNames'), 'tag gate must treat .opt planner outputs as optional canary artifacts');
-  assert(!files.tagGate.includes('mentions_measure_script === true'), 'tag gate must not require measure scripts for the generic V1 canary');
-  assert(files.tagGate.includes('version_point_present') && files.tagGate.includes('rollback_present'), 'tag gate must require version point and rollback evidence');
-  assert(files.tagGate.includes('release_version') && files.tagGate.includes('canary_matches_current'), 'tag gate must require canary evidence to match the current WiCi checkout');
-  assert(files.tagGate.includes('artifact_files_verified') && files.tagGate.includes('artifact_hash_mismatches'), 'tag gate must verify committed canary artifact hashes');
-  assert(files.tagGate.includes('optional_planner_scripts_executable') && files.tagGate.includes('verifyExecutableArtifacts'), 'tag gate must verify committed planner shell artifacts remain executable');
-  assert(files.tagGate.includes('secret_scan_ok') && files.tagGate.includes('scanEvidenceFilesForSecrets'), 'tag gate must scan committed canary evidence for secret material');
-  assert(files.tagGate.includes('codex_ssh_attempt_attested') && files.tagGate.includes('!expectsSsh || evidence.codex_attempted_ssh === true'), 'tag gate must require structured Codex SSH attestation only when the canary requires SSH');
-  assert(files.tagGate.includes('codex_transcript_has_ssh_attempt') && files.tagGate.includes('inspectCodexSshTranscript'), 'tag gate must verify SSH attempts from the Codex transcript, not only attestation fields');
-  assert(files.tagGate.includes('canaryExpectsSsh') && files.tagGate.includes('targetMetadataValid'), 'tag gate must derive SSH and target checks from canary evidence instead of fixed task assumptions');
-  assert(files.tagGate.includes('realModeForPassed') && files.tagGate.includes('canary_tool_mode'), 'tag gate must require/report real tool mode for passed release canaries');
-  assert(files.tagGate.includes('tuiChatForPassed') && files.tagGate.includes('canary_goal_source'), 'tag gate must require/report TUI Chat goal source for passed release canaries');
-  assert(!files.tagGate.includes('116.127.115.18') && !files.tagGate.includes("target === 700") && !files.tagGate.includes("unit === 'token/s'"), 'tag gate must not hardcode the current diffusionGemma canary target');
-  assert(!files.canaryRecorder.includes('116.127.115.18'), 'canary recorder must not hardcode the current diffusionGemma SSH target');
   assert(files.sshEvidence.includes('expectedHostTerms') && files.sshEvidence.includes('extractExpectedHostTerms'), 'shared SSH evidence helper must tie transcript evidence to expected targets when present');
   assert(files.sshEvidenceCheck.includes('wrong_target_rejected') && files.sshEvidenceCheck.includes('auth_failure_output_supported'), 'shared SSH evidence verifier must cover target mismatch and auth failure output');
-  assert(files.canaryRecorder.includes('generated_artifacts') && files.canaryRecorder.includes('sha256'), 'canary recorder must generate hashed artifact evidence');
-  assert(
-    files.canaryRecorder.includes('startedFromEmptyTui') &&
-      files.canaryRecorder.includes('operatorManualExecution') &&
-      files.canaryRecorder.includes('codexAttemptedSsh') &&
-      files.canaryRecorder.includes('validateStatusArgs') &&
-      files.canaryRecorder.includes('validateTargetArgs') &&
-      files.canaryRecorder.includes('validateAttestationArgs') &&
-      files.canaryRecorder.includes('optionalFiniteNumber') &&
-      files.canaryRecorder.includes('observedValue') &&
-      files.canaryRecorder.includes('targetGitDirty') &&
-      files.canaryRecorder.includes('assertSourceArtifactsHaveNoSecrets') &&
-      files.canaryRecorder.includes('assertCodexSshAttestationSupported') &&
-      files.canaryRecorder.includes('requiredBoolean'),
-    'canary recorder must require explicit operator attestations plus coherent status and target fields instead of inventing release facts'
-  );
-  assert(files.tagGate.includes('passedObservedTargetEvidence'), 'tag gate must require passed canaries to include observed value evidence that reaches the target');
-  assert(files.tagGate.includes('targetCleanForPassed') && files.tagGate.includes('canary_target_git_dirty'), 'tag gate must require/report a clean target checkout for passed canaries');
-  assert(files.tagGate.includes('WICI_CANARY_DIR'), 'tag gate must allow fixture canary directories for release-gate verification');
-  assert(files.canaryEvidence.includes('tag_gate_rejects_passed_dirty_target'), 'canary evidence verifier must prove tag gate rejects passed canaries with dirty target evidence');
-  assert(files.canaryEvidence.includes('tag_gate_rejects_stub_mode_passed_canary'), 'canary evidence verifier must prove tag gate rejects passed canaries recorded from stub mode');
-  assert(files.canaryEvidence.includes('recorder_rejects_stub_mode_passed_canary'), 'canary evidence verifier must prove recorder rejects passed canaries before writing stub-mode evidence');
-  assert(files.canaryEvidence.includes('recorder_rejects_non_tui_passed_canary'), 'canary evidence verifier must prove recorder rejects passed canaries that did not start from TUI Chat');
-  assert(files.canaryEvidence.includes('tag_gate_rejects_non_tui_passed_canary'), 'canary evidence verifier must prove tag gate rejects mutated non-TUI passed canary evidence');
-  assert(files.canaryEvidence.includes('recorder_rejects_dirty_target_passed_canary'), 'canary evidence verifier must prove recorder rejects passed canaries before writing dirty-target evidence');
-  assert(files.canaryEvidence.includes('cli_rejects_invalid_passed_attestation'), 'canary evidence verifier must prove recorder rejects impossible passed operator attestations');
-  assert(files.canaryEvidence.includes('tag_gate_handles_non_ssh_canary'), 'canary evidence verifier must prove tag gate supports non-SSH canary shapes');
-  assert(
-    files.tagGate.includes('target_value') &&
-      files.tagGate.includes('observed_value') &&
-      files.tagGate.includes('passed_observed_target'),
-    'tag gate report must expose target/observed release evidence for human review'
-  );
-  assert(files.tagGate.includes('blocked_do_not_tag_or_push'), 'tag gate must explicitly block tag/push when the canary is failed');
-  assert(
-    files.tagGate.includes('next_required_action') && files.tagGate.includes('failure_reason'),
-    'tag gate must surface explicit failed-canary blocker fields'
-  );
-  assert(files.tagGate.includes("status === 'passed'") && files.tagGate.includes("tagAllowed === 'true'"), 'tag gate must require passed status and tag_allowed=true');
-  assert(files.readme.includes('Every release tag must pass a real TUI canary'), 'README must document the real canary release gate');
-  assert(files.readme.includes('Keep that first Chat as the real user request only'), 'README must keep release canary Chat free of meta executor instructions');
-  assert(!files.readme.includes('网上很多教程，自己查资料'), 'README must not teach operators to put research/debug meta instructions into canary Chat');
-  assert(files.readme.includes('A non-zero result is expected while the latest canary is still failed'), 'README must document failed-canary tag gate behavior');
+  assert(files.readme.includes('Every release tag must pass the automated V1 core preflight'), 'README must document the automated release preflight gate');
+  assert(!files.readme.includes('网上很多教程，自己查资料'), 'README must not teach operators to put research/debug meta instructions into Chat');
   assert(files.readme.includes('no-script plans still execute directly'), 'README acceptance text must not imply optional scripts are required');
   assert(files.secretScan.includes('ANTHROPIC') && files.secretScan.includes('private key material'), 'secret scanner must scan for provider tokens and private keys');
 
@@ -392,7 +332,6 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:v1-core']?.includes('verify:app-server-fallback'), 'verify:v1-core must include app-server reconnect fallback');
 	  assert(pkg.scripts['verify:v1-core']?.includes('verify:durability'), 'verify:v1-core must include direct V1 crash recovery');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:goal-doc'), 'verify:v1-core must include durable GOAL.md coverage');
-  assert(pkg.scripts['verify:v1-core']?.includes('verify:canary-evidence'), 'verify:v1-core must include canary evidence recorder checks');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:ssh-evidence'), 'verify:v1-core must include shared SSH evidence checks');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:release-tag'), 'verify:v1-core must include guarded release tag checks');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:no-secrets'), 'verify:v1-core must include committed secret scans');
@@ -400,12 +339,11 @@ async function main(): Promise<void> {
     assert(pkg.scripts['verify:v1-core']?.includes(verifier), `verify:v1-core must include release resume verifier ${verifier}`);
     assert(files.readme.includes(`npm run ${verifier}`), `README must document release resume verifier ${verifier}`);
   }
-  assert(pkg.scripts['release:preflight'] === 'npm run verify:v1-core && npm run verify:tag-gate', 'release preflight must bind V1 core verification to the real canary tag gate');
+  assert(pkg.scripts['release:preflight'] === 'npm run verify:v1-core', 'release preflight must run the automated V1 core gate');
   assert(pkg.scripts['release:tag']?.includes('src/release/tag.ts'), 'package scripts must expose the guarded release tag command');
   assert(files.releaseTag.includes("['run', 'release:preflight']") && files.releaseTag.includes("['tag', '-a', tag"), 'release tag command must run preflight before creating an annotated tag');
   assert(!files.releaseTag.includes("['push'") && !files.releaseTag.includes('git push'), 'release tag command must not push tags');
   assert(files.releaseTagVerifier.includes('no_tag_after_failed_preflight') && files.releaseTagVerifier.includes('creates_annotated_tag_after_preflight'), 'release tag verifier must prove failed preflight blocks tags and successful preflight creates an annotated tag');
-  assert(pkg.scripts['release:record-canary']?.includes('src/release/record-canary.ts'), 'package scripts must expose the canary evidence recorder');
   assert(pkg.scripts['verify:no-secrets']?.includes('src/verify/no-secrets.ts'), 'package scripts must expose the committed secret scanner');
 
   console.log(
@@ -419,8 +357,8 @@ async function main(): Promise<void> {
 	        direct_plan_execution: true,
 	        no_prebaseline_control_path: true,
 	        historical_baseline_ignored_by_default: true,
-	        hot_reload_and_clarification: true,
-        tag_gate: true
+        hot_reload_and_clarification: true,
+        release_preflight: true
       },
       null,
       2

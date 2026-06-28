@@ -185,7 +185,7 @@ emit([
   await writeFile(
     fakeCodex,
     `#!/usr/bin/env node
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
@@ -207,7 +207,11 @@ if (!out) {
   process.exit(2);
 }
 mkdirSync(dirname(out), { recursive: true });
-const prompt = args.at(-1) || '';
+let stdin = '';
+try {
+  stdin = readFileSync(0, 'utf8');
+} catch {}
+const prompt = stdin || args.at(-1) || '';
 const isResume = args[0] === 'exec' && args[1] === 'resume';
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-planner-session' }));
 if (!isResume && prompt.includes('${firstChat}')) {
@@ -238,7 +242,7 @@ writeFileSync(out, [
 
 async function installFakeCodex(): Promise<void> {
   const script = `#!/usr/bin/env node
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
@@ -255,7 +259,11 @@ if (outIndex < 0) {
   process.exit(2);
 }
 const out = args[outIndex + 1];
-const prompt = args.at(-1) || '';
+let stdin = '';
+try {
+  stdin = readFileSync(0, 'utf8');
+} catch {}
+const prompt = stdin || args.at(-1) || '';
 mkdirSync(dirname(out), { recursive: true });
 if (prompt.includes('${answerText}')) {
   writeFileSync(out, [

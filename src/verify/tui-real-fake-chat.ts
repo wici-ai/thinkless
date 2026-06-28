@@ -64,8 +64,8 @@ async function main(): Promise<void> {
   const argsLog = (await readFile(join(paths.wici, 'fake-codex-args.jsonl'), 'utf8'))
     .split('\n')
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as { args: string[] });
-  const plannerCall = argsLog.find((entry) => entry.args.some((arg) => arg.includes('Run as the Thinkless planner through Codex.')));
+    .map((line) => JSON.parse(line) as { args: string[]; planner?: boolean });
+  const plannerCall = argsLog.find((entry) => entry.planner);
   assert(plannerCall, `fake Codex did not receive a planner call: ${JSON.stringify(argsLog)}`);
   const execCall = argsLog.find((entry) => entry.args[0] === 'exec' && entry.args.includes('--dangerously-bypass-approvals-and-sandbox'));
   assert(execCall, `fake Codex did not receive an exec call: ${JSON.stringify(argsLog)}`);
@@ -171,7 +171,7 @@ async function writeFakeCodex(): Promise<void> {
   await writeFile(
     path,
     `#!/usr/bin/env node
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 const args = process.argv.slice(2);
 if (args.includes('--version')) {
@@ -196,9 +196,14 @@ mkdirSync(wici, { recursive: true });
 const outIndex = args.indexOf('--output-last-message');
 const out = outIndex >= 0 ? args[outIndex + 1] : join(wici, 'artifacts', 'iter-1.txt');
 mkdirSync(dirname(out), { recursive: true });
-const prompt = args.at(-1) || '';
-appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args }) + '\\n');
-if (prompt.includes('Run as the Thinkless planner through Codex.')) {
+let stdin = '';
+try {
+  stdin = readFileSync(0, 'utf8');
+} catch {}
+const prompt = stdin || args.at(-1) || '';
+const isPlanner = prompt.includes('Run as the Thinkless planner through Codex.');
+appendFileSync(join(wici, 'fake-codex-args.jsonl'), JSON.stringify({ args, planner: isPlanner }) + '\\n');
+if (isPlanner) {
   writeFileSync(out, [
     '## GOAL.md',
     '',

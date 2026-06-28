@@ -39,7 +39,7 @@ const auth = inspectCodexSshTranscript(matchingAuthOutput, expected);
 assert(auth.hasSshAttempt, 'matching SSH auth failure output should prove a Codex SSH attempt');
 
 const wrong = inspectCodexSshTranscript(wrongTarget, expected);
-assert(!wrong.hasSshAttempt, 'SSH command to the wrong host must not prove this canary target');
+assert(!wrong.hasSshAttempt, 'SSH command to the wrong host must not prove this target');
 assert(!wrong.hasExpectedTarget, 'wrong host transcript should not match expected target terms');
 
 const generic = inspectCodexSshTranscript(noExpectedText);

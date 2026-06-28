@@ -18,8 +18,7 @@ async function main(): Promise<void> {
       {
         ok: true,
         files_scanned: files.length,
-        secret_patterns: secretPatterns.length,
-        canary_artifacts_scanned: files.some((path) => path.startsWith('docs/release-canaries/'))
+        secret_patterns: secretPatterns.length
       },
       null,
       2

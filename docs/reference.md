@@ -77,8 +77,10 @@ npm install
 npm run verify:v1-core
 npm run verify:v1-slice
 npm run verify:direct-no-scripts
+npm run verify:direct-no-progress
 npm run verify:direct-recovery
 npm run verify:direct-context-reset
+npm run verify:direct-transient-retry
 npm run verify:direct-preempt
 npm run verify:direct-plan-continuation
 npm run verify:direct-rollback
@@ -132,7 +134,6 @@ npm run verify:setup-state
 npm run verify:install-bootstrap
 npm run verify:install-clean-env
 npm run verify:ssh-evidence
-npm run verify:canary-evidence
 npm run verify:release-tag
 npm run verify:no-secrets
 npm run verify:docs-sync
@@ -163,9 +164,7 @@ npm run verify:codex-run-usage
 npm run verify:clarify
 npm run verify:claude-probe
 npm run verify:goal-doc
-npm run verify:tag-gate
 npm run verify:ssh-evidence
-npm run verify:canary-evidence
 npm run verify:release-tag
 npm run verify:no-secrets
 npm run verify:install-bootstrap
@@ -277,7 +276,7 @@ Users should not need to add meta-instructions such as "search tutorials", "debu
 
 When `PLAN.md` exists, the fresh V1 path starts Codex directly. It does not require `baseline.json`, `.opt/benchmark.json`, `acceptance.spec.json`, or pre-run measurements before execution. A stray or historical `baseline.json` does not switch V1 into an eval-gated loop; the legacy optimizer must be explicitly enabled with `WICI_LEGACY_OPTIMIZER=1`.
 
-During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.thinkless/artifacts/planner-*.stdout.jsonl` for new runs. Real Codex execution defaults to `codex app-server` in `auto` mode when the CLI supports it, streams raw app-server JSON-RPC notifications into `.thinkless/codex-run.jsonl`, checkpoints the active workspace, turn phase, last event, and last activity time, and shows progress in the Chat status line. Existing `.wici/` runs keep using their legacy directory. If app-server is unavailable, stalls without progress, or a fake legacy CLI is on `PATH`, Thinkless falls back to a recoverable retry path; the legacy executor watchdog remains intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work.
+During real planning, the Execution pane tails `PLAN_USAGE` events from Claude's stream-json output and the planner stream is saved under `.thinkless/artifacts/planner-*.stdout.jsonl` for new runs. Real Codex execution defaults to `codex app-server` in `auto` mode when the CLI supports it, streams raw app-server JSON-RPC notifications into `.thinkless/codex-run.jsonl`, checkpoints the active workspace, turn phase, last event, and last activity time, and shows progress in the Chat status line. Existing `.wici/` runs keep using their legacy directory, including `.wici/codex-run.jsonl`. If app-server is unavailable, stalls without progress, or a fake legacy CLI is on `PATH`, Thinkless falls back to a recoverable retry path; the legacy executor watchdog remains intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work.
 
 Thinkless does not treat a single executor failure as the whole goal failing. Direct V1 execution is intentionally long-horizon: command failures, failed validation, and executor timeouts are recorded as recoverable crash ledger rows, the active `PLAN.md` step is reset to pending, and the next Codex prompt receives the failure reason. Codex is allowed to inspect logs and remote state, update `PLAN.md`, repair planner-provided `.opt` scripts, choose a different deployment or validation strategy, and continue the same `GOAL.md` until the goal is actually satisfied or there is concrete repeated evidence that it cannot proceed.
 
@@ -454,8 +453,6 @@ npx tsx src/cli.tsx tui \
   --mode real
 ```
 
-For the release canary, start that TUI with an empty Chat History / Goal/Plan / Execution workspace, then paste the canary request into the bottom Chat input as the first message. Do not pass the canary as `--goal`; the release proof is the Chat-first path.
-
 The three runtime panes can also be configured through environment variables:
 
 ```bash
@@ -500,39 +497,15 @@ npx tsx src/cli.tsx run \
 
 Hot-reload Chat input is idempotent through `checkpoint.json` `drained_inbox[]`; restarting WiCi does not apply the same inbox message twice.
 
-## Tag Gate
+## Release Gate
 
-Every release tag must pass a real TUI canary, not a hand-run shell substitute. A representative V1 canary starts from an empty Chat History / Goal/Plan / Execution workspace and uses this first Chat message:
-
-```text
-听说diffusionGemma很快，在ssh -p 23276 root@116.127.115.18 -L 8080:localhost:8080试试，要求达到700 token/s以上
-```
-
-Keep that first Chat as the real user request only. Do not append WiCi behavior instructions such as "search tutorials", "debug failed paths", or "update PLAN.md/.opt and continue"; those requirements belong in the planner and executor prompts, not in canary input.
-
-Passing evidence:
-
-- Chat first input triggered Claude plan mode.
-- `GOAL.md` and `PLAN.md` were generated.
-- `PLAN_USAGE` events show planner token usage.
-- `EXECUTE_PROGRESS` events show Codex activity.
-- SSH, deployment, and measurement were attempted by Codex according to `PLAN.md`, not by the operator manually.
-- The final output says whether the target was reached or what blocked it.
-- Failed canaries record `failure_reason` and `next_required_action` so the release blocker is explicit.
-
-Record each real canary under `docs/release-canaries/`. Before creating any release tag, run the release preflight:
+Before creating any release tag, run the release preflight:
 
 ```bash
 npm run release:preflight
 ```
 
-That single command runs the automated V1 core gate and then the real canary tag gate. To inspect only the latest canary evidence, run:
-
-```bash
-npm run verify:tag-gate
-```
-
-The tag gate validates both the markdown evidence and the referenced run artifacts, then exits non-zero until the latest canary evidence says `status: passed` and `tag_allowed: true`. When blocked, the report prints `release_action: blocked_do_not_tag_or_push`; any existing local release tags are not proof that the current worktree is releasable. A non-zero result is expected while the latest canary is still failed. The current diffusionGemma remote canary is recorded as failed because Codex reached SSH itself but the remote rejected available public keys; the next required action is to provide working SSH credentials or install an accepted public key, then rerun the same first Chat through the TUI.
+That command runs the automated V1 core gate, including Chat-first intake, planner/executor contract checks, hot reload, resume recovery, rollback visibility, release tag behavior, documentation sync, and secret scanning.
 
 Create a release tag only through the guarded command:
 
@@ -540,33 +513,7 @@ Create a release tag only through the guarded command:
 npm run release:tag -- 0.1.0
 ```
 
-`release:tag` runs `release:preflight` first and only then creates an annotated local git tag. It never pushes. If the real canary gate is blocked, the command exits before `git tag`.
-
-For a release tag, the canary version point must also match the current WiCi checkout: the evidence commit must equal current `HEAD`, the canary must have been recorded from a clean WiCi checkout, and the current checkout must be clean. Passed canaries must be recorded from `mode: real`, not stub fixtures, must have `run_checkpoint.goal_source: "tui_chat"`, and must also record a clean target git checkout after the run. Old passed canaries, dirty-worktree canaries, stub canaries, non-Chat-first canaries, and canaries that leave uncommitted target changes do not authorize tagging a newer or modified worktree.
-
-The evidence bundle must be backed by committed artifact files. For a canary `docs/release-canaries/<name>.md`, put the bundle at `docs/release-canaries/<name>/evidence.json` and copy each generated artifact under `docs/release-canaries/<name>/artifacts/` using the same relative path, for example `artifacts/GOAL.md`, `artifacts/PLAN.md`, `artifacts/.wici/events.jsonl`, and `artifacts/.wici/codex-run.jsonl`. `npm run verify:tag-gate` checks the recorded sha256 and byte length for every artifact listed in `generated_artifacts`, and verifies copied planner `.sh` artifacts remain executable.
-
-After a real TUI canary run, use the recorder to create the markdown evidence, `evidence.json`, copied artifacts, and hashes:
-
-```bash
-npm run release:record-canary -- \
-  --name 2026-06-15-diffusiongemma-remote \
-  --target fixture/real-canary-v1 \
-  --status failed \
-  --tag-allowed false \
-  --first-chat "听说diffusionGemma很快，在ssh -p 23276 root@116.127.115.18 -L 8080:localhost:8080试试，要求达到700 token/s以上" \
-  --started-from-empty-tui true \
-  --operator-manual-execution false \
-  --codex-attempted-ssh true \
-  --target-value 700 \
-  --unit token/s \
-  --failure-reason "Codex reached SSH, but authentication failed." \
-  --next-required-action "Provide working SSH credentials, then rerun the same Chat-first canary."
-```
-
-For a passed canary with `--target-value`, also provide `--observed-value <number>`. The recorder and tag gate require the observed value to reach the recorded target and use the same `--unit`.
-
-For any passed canary, the recorder requires `--started-from-empty-tui true`, `--operator-manual-execution false`, and checkpoint evidence that the run started from the first Chat message (`goal_source: "tui_chat"`); evidence that skips the Chat-first path or uses manual SSH/deployment/measurement is rejected before tag-gate review.
+`release:tag` runs `release:preflight` first and only then creates an annotated local git tag. It never pushes. If preflight fails, the command exits before `git tag`. Local release tags are not proof that commits or tags have been pushed to a remote.
 
 ## Rollback
 

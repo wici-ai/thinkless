@@ -1,8 +1,6 @@
 # Thinkless
 
-Thinkless is a local terminal app for AI software work. It keeps the human in a simple chat loop while Claude Code plans and Codex executes against a real repository.
-
-The idea is literal: think less at the keyboard, reason better in the system. You describe the outcome in normal language; Thinkless turns that intent into durable markdown artifacts, runs the implementation loop, and lets later messages steer the same goal instead of starting over.
+Thinkless is a local terminal app for AI software work. You describe the outcome in chat; Thinkless writes durable `GOAL.md`, `ASSUMPTIONS.md`, and `PLAN.md` artifacts, lets Claude Code plan, and lets Codex execute against a real repository.
 
 ## Install
 
@@ -19,10 +17,6 @@ thinkless doctor --deep
 
 ## Why
 
-AI coding often makes users do control work that should belong to the tool: polishing prompts, deciding every recovery command, remembering which path failed, and adding meta-instructions like "search the docs" or "debug if it breaks".
-
-Thinkless separates the modes:
-
 - Chat captures intent in normal language.
 - `GOAL.md` preserves the human-readable target.
 - `ASSUMPTIONS.md` records planner reasoning and risks.
@@ -30,19 +24,7 @@ Thinkless separates the modes:
 - Codex executes, validates, recovers from failures, and continues.
 - Follow-up chat updates the same run instead of rewriting the original prompt.
 
-Submitted chat is treated like speech: after a turn is sent, you clarify by sending the next turn. The history stays auditable, and the plan improves from evidence rather than pretending the first prompt was perfect.
-
-## Example
-
-```text
-You: Build a local dashboard for support triage and make sure it runs.
-Thinkless: writes GOAL.md, ASSUMPTIONS.md, and PLAN.md, then Codex builds and validates it.
-
-You: Also make the mobile view dense enough for triage.
-Thinkless: updates the live goal and plan, then steers the active execution.
-```
-
-For bounded questions or small repo tasks, Chat can answer directly. Longer app builds, deployments, benchmark loops, and iterative debugging become planner/executor work.
+Submitted chat is append-only: clarify with the next turn, keep the history auditable, and let the plan improve from evidence.
 
 ## Usage
 
@@ -58,7 +40,7 @@ Resume an existing run:
 thinkless resume
 ```
 
-If a saved session is missing `GOAL.md`, `PLAN.md`, or persisted planner/executor state, Thinkless opens the Chat transcript instead of blocking; the next concrete request can start a new planner/execution path from that restored conversation.
+If a saved session is missing `GOAL.md`, `PLAN.md`, or persisted planner/executor state, Thinkless opens the Chat transcript instead of blocking.
 
 Run headlessly over a target:
 
@@ -68,7 +50,7 @@ npx tsx src/cli.tsx run \
   --goal "Build the requested app and verify it runs locally"
 ```
 
-Useful TUI controls:
+TUI controls:
 
 - `Ctrl+R` selects agent and effort for the active pane.
 - `Ctrl+O` toggles terminal pointer mode between text selection and app scrolling.
@@ -77,7 +59,7 @@ Useful TUI controls:
 
 ## Safety
 
-Real mode can run Claude Code and Codex with broad local permissions. Use a disposable VM/container for untrusted targets, or a clean git repository when running on a primary machine. Thinkless records checkpoints and rollback metadata, but it is still executing real tools against real files.
+Real mode runs Claude Code and Codex with broad local permissions. Use a disposable VM/container for untrusted targets, or a clean git repository on a primary machine.
 
 ## Development
 
@@ -88,6 +70,20 @@ npm install
 npm run build
 npm run verify:v1-core
 ```
+
+## macOS Bootstrap
+
+The public release installer is:
+
+```bash
+curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
+```
+
+On macOS, `npm install` runs `scripts/postinstall.mjs` as a postinstall bootstrap; use `THINKLESS_BOOTSTRAP=0 npm install` to opt out. For a fresh Mac with no `npm` yet, run `scripts/bootstrap-macos.sh` from a source checkout.
+
+The bootstrap waits for Apple Command Line Tools, installs missing host commands, may update `~/.zprofile` and `~/.zshrc`, and exposes `node`, `npm`, `thinkless`, `codex`, `claude`, and `gh` from clean zsh login and interactive shells. It prints `export PATH=... && thinkless` for the current terminal.
+
+Auth onboarding uses `/dev/tty`, prints an auth onboarding status, can start `codex login` and `gh auth login`, and can report that auth is pending. Use it to authenticate Codex, Claude, and GitHub CLI; set `THINKLESS_AUTH_ONBOARDING=0` to skip prompts. For isolated installs, `THINKLESS_CONFIG_BUNDLE` can copy `~/.codex/config.toml`, `~/.codex/auth.json`, `~/.claude/settings.json`, and `~/.claude/.credentials.json`; keep them out of the repository. Real-mode health expects Codex, Claude, and GitHub CLI commands.
 
 For a faster local loop:
 
@@ -105,19 +101,19 @@ npm run dev
 
 ## V1 Operational Notes
 
-The TUI top Chat History / Goal/Plan / Execution workspace starts empty. A blank run does not invent a goal, metric, plan, baseline, or fake execution status before the first concrete Chat request.
+The top Chat History / Goal/Plan / Execution workspace starts empty. A blank run does not invent a goal, metric, plan, baseline, or fake execution status before the first concrete Chat request.
 
-The absence of `.opt` scripts is a valid fresh V1 path: no-script plans still execute directly from `PLAN.md`. Planner-provided scripts are optional validation artifacts, and no-script plans still execute directly when the plan itself carries the validation steps.
+The absence of `.opt` scripts is a valid fresh V1 path: no-script plans still execute directly from `PLAN.md`; planner scripts are optional validation artifacts.
 
-For real runs, the default `max_iters` is `0`; this is used to disable WiCi's own cost and iteration hard stops so the goal is governed by `GOAL.md`, `PLAN.md`, user steering, and tool/runtime limits. Thinkless automatically checks for Codex/Claude updates at run boundaries, but pending updates are not a WiCi supervisor start gate.
+For real runs, the default `max_iters` is `0`; this is used to disable WiCi's own cost and iteration hard stops. Thinkless automatically checks for Codex/Claude updates at run boundaries, but pending updates are not a WiCi supervisor start gate.
 
-Planner clarification answers sent through Chat wake the stopped supervisor and resume the same Claude planner session. Chat answer resume wakes the stopped supervisor and resumes the same Claude planner session. Direct V1 crash recovery can revert unconfirmed direct-path work, resets the active `PLAN.md` step for replay, records recoverable crash ledger rows, and lets Codex inspect logs and remote state. For long-goal executor recovery, Codex is allowed to inspect logs and remote state, update `PLAN.md`, and continue the same `GOAL.md`.
+Planner clarification answers sent through Chat wake the stopped supervisor and resume the same Claude planner session; Chat answer resume wakes the stopped supervisor and resumes the same Claude planner session. Direct V1 crash recovery can revert unconfirmed direct-path work, resets the active `PLAN.md` step for replay, and records recoverable crash ledger rows; Codex is allowed to inspect logs and remote state, update `PLAN.md`, and continue the same `GOAL.md`.
 
 ## Resume Or Re-Run
 
 Run `thinkless resume` to continue the current target without a new `--goal`. Inside the TUI, `/resume` opens the resume selector, `/pause` stops the active executor at a recoverable boundary, and `/replan` asks the planner to review bottlenecks, repair `GOAL.md`/`PLAN.md`, and choose the next concrete step. Use `--resume-iteration 1` when you need to rewind to an earlier direct execution iteration for recovery testing or controlled replay.
 
-Hot reload can steer an active app-server turn through `turn/steer`; if that path is unavailable, Thinkless keeps Codex continuity through `codex exec resume --last`.
+Hot reload steers active app-server turns through `turn/steer`; otherwise Thinkless keeps continuity through `codex exec resume --last`.
 
 Release and resume verification commands:
 
@@ -142,7 +138,7 @@ npm run verify:resume-rerunnable
 
 ## Release Gate
 
-Every release tag must pass a real TUI canary. Keep that first Chat as the real user request only, without meta instructions that tell the agent how to debug or research. A non-zero result is expected while the latest canary is still failed; the guarded tag command should block until canary evidence is clean.
+Every release tag must pass the automated V1 core preflight. Use `npm run release:tag -- <version>` so Thinkless runs `npm run release:preflight` before creating an annotated local tag. The guarded tag command never pushes commits or tags.
 
 ## Contributing
 
@@ -152,4 +148,4 @@ Keep changes scoped, run the relevant verifier, and include the command output i
 npm run release:preflight
 ```
 
-Do not commit provider credentials, copied auth files, private SSH keys, or release canary artifacts that contain secrets.
+Do not commit provider credentials, copied auth files, private SSH keys, or generated artifacts that contain secrets.

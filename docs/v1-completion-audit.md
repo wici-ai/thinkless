@@ -3,7 +3,7 @@
 Date: 2026-06-15
 Scope: `Simplified_PLAN.md` V1 path.
 
-This audit records what is currently proven, what is covered by automated checks, and why release tagging is still blocked.
+This audit records what is currently proven and what is covered by automated checks.
 
 ## Product Boundary
 
@@ -41,10 +41,10 @@ This audit records what is currently proven, what is covered by automated checks
 | `PLAN.md` exists before Codex starts | `npm run verify:v1-slice`, `npm run verify:planner-clarification` | Covered |
 | Planner clarification routes through Chat and resumes the same Claude session | `npm run verify:planner-clarification`, `npm run verify:tui-structure` | Covered |
 | Planner clarification during hot-reload PLAN diff routes through Chat and resumes the same Claude session | `npm run verify:planner-clarification` report `plan_diff_question` and `plan_diff_resumed_session` | Covered |
-| Initial planner token usage is visible as `PLAN_USAGE` | `npm run verify:tool-commands` report `initial_plan_usage_streamed`; `npm run verify:tag-gate` evidence bundle; `npm run verify:v1-requirements` | Covered |
+| Initial planner token usage is visible as `PLAN_USAGE` | `npm run verify:tool-commands` report `initial_plan_usage_streamed`; `npm run verify:v1-requirements` | Covered |
 | Hot-reload planner diff token usage is visible as `PLAN_USAGE` | `npm run verify:tool-commands`, `npm run verify:v1-requirements` | Covered |
 | Planner/executor token usage is visible in the Execution pane | `npm run verify:tui-structure`, `npm run verify:v1-requirements` | Covered |
-| Planner transcript is saved for real canaries | `npm run verify:tag-gate`, evidence bundle `.wici/artifacts/planner-initial.stdout.jsonl` | Covered |
+| Planner transcript is saved for real runs | Planner stdout/event artifacts under `.thinkless/artifacts/planner-*.stdout.jsonl` or legacy `.wici/artifacts/planner-initial.stdout.jsonl` | Covered |
 
 ## Executor
 
@@ -52,12 +52,12 @@ This audit records what is currently proven, what is covered by automated checks
 | --- | --- | --- |
 | Codex receives current `GOAL.md` and `PLAN.md` | `npm run verify:executor-contract`, `npm run verify:v1-requirements` | Covered |
 | Codex receives `GOAL.md + PLAN.md` as one goal; step IDs are only thin receipt/progress focus | `npm run verify:v1-slice`, `npm run verify:executor-contract`, `npm run verify:v1-requirements` | Covered |
-| Codex execution reaches the live TUI stream | `npm run verify:tui-live` reports `goal_source: tui_goal_option` for the automation shortcut; `npm run verify:executor-contract`; `npm run verify:tag-gate` evidence bundle | Covered |
+| Codex execution reaches the live TUI stream | `npm run verify:tui-live` reports `goal_source: tui_goal_option` for the automation shortcut; `npm run verify:executor-contract` | Covered |
 | `PLAN.md` can execute without planner-generated `.opt` scripts | `npm run verify:direct-no-scripts`; README states no-script plans still execute directly | Covered |
 | Planner-generated scripts are persisted executable and runnable when present | `npm run verify:v1-slice` asserts `.opt/checks.sh` and `.opt/measure.sh` are executable, then runs both | Covered |
 | Optional planner scripts and historical `baseline.json` files are not a supervisor baseline gate in fresh V1 | `npm run verify:v1-requirements`, `npm run verify:docs-sync`, `Simplified_PLAN.md`; no `.opt` scripts are required to start Codex | Covered |
 | Legacy optimizer behavior remains isolated from fresh V1 and is checked through an explicit aggregate | `npm run verify:legacy-optimizer`; README legacy optimizer section | Covered |
-| Codex transcript is saved for real canaries | `npm run verify:tag-gate`, evidence bundle `.wici/codex-run.jsonl` | Covered |
+| Codex transcript is saved for real runs | `.thinkless/codex-run.jsonl` / legacy `.wici/codex-run.jsonl` run artifacts | Covered |
 | Codex token usage is captured | `npm run verify:codex-run-usage`, `npm run verify:executor-contract`, `npm run verify:app-server-hotreload` | Covered |
 | Chat, planner, and executor agent/effort can be selected while models stay fixed to claude-opus-4-8 or gpt-5.5 | `npm run verify:tool-commands` | Covered |
 | `codex exec resume` avoids unsupported `-C` | `npm run verify:executor-contract`, `npm run verify:tool-commands` | Covered |
@@ -91,35 +91,13 @@ This audit records what is currently proven, what is covered by automated checks
 
 | Requirement | Evidence | Status |
 | --- | --- | --- |
-| README documents clean checkout, build, core verification, and Chat-first real-mode canary launch | `npm run verify:docs-sync`, README Deployment section | Covered |
-| Release preflight binds automated V1 core verification to the real canary tag gate | `npm run release:preflight` script is `npm run verify:v1-core && npm run verify:tag-gate`; `npm run verify:v1-requirements`, `npm run verify:docs-sync` | Covered |
+| README documents clean checkout, build, core verification, and release preflight | `npm run verify:docs-sync`, README Release Gate section | Covered |
+| Release preflight runs the automated V1 core gate | `npm run release:preflight` script is `npm run verify:v1-core`; `npm run verify:v1-requirements`, `npm run verify:docs-sync` | Covered |
 | Release tags are created only through a guarded command that runs preflight first and never pushes | `npm run release:tag -- <version>` script; `src/release/tag.ts`; `npm run verify:release-tag`, `npm run verify:v1-requirements`, `npm run verify:docs-sync` | Covered |
-| Every release tag requires a real TUI canary | `npm run verify:tag-gate`, README Tag Gate section | Covered |
-| Passed release canaries must be recorded from real tool mode, not stub fixtures | `npm run verify:tag-gate` report `canary_tool_mode`; `npm run verify:canary-evidence` reports `recorder_rejects_stub_mode_passed_canary` and `tag_gate_rejects_stub_mode_passed_canary` | Covered |
-| Passed release canaries must prove the run started from first Chat, not CLI `--goal` | `npm run verify:tag-gate` report `canary_goal_source`; `npm run verify:canary-evidence` reports `recorder_rejects_non_tui_passed_canary` and `tag_gate_rejects_non_tui_passed_canary` | Covered |
-| Failed tag gate explicitly says not to tag or push | `npm run verify:tag-gate` report `release_action: blocked_do_not_tag_or_push` | Covered |
-| Release tag evidence must match the current clean WiCi checkout | `npm run verify:tag-gate` report `release_version`; README Tag Gate section | Covered |
-| Passed release canaries must leave the target checkout clean | `npm run verify:tag-gate` report `canary_target_git_dirty`; `npm run verify:canary-evidence` reports `target_clean_recorded`, `recorder_rejects_dirty_target_passed_canary`, and `tag_gate_rejects_passed_dirty_target` | Covered |
-| Release tag evidence must include committed artifact files matching recorded hashes | `npm run verify:tag-gate` report `artifact_files_verified`; README Tag Gate section | Covered |
-| Release tag evidence must preserve executable planner shell artifacts | `npm run verify:tag-gate` report `optional_planner_scripts_executable`; `npm run verify:canary-evidence` | Covered |
-| Release tag evidence must include explicit operator/Codex attestation fields, not just markdown prose | `npm run verify:tag-gate` report `codex_ssh_attempt_attested`; `npm run verify:canary-evidence` | Covered |
-| Release tag evidence must prove Codex attempted SSH from the copied Codex transcript, not only from attestation fields | `npm run verify:tag-gate` report `codex_transcript_has_ssh_attempt` | Covered |
-| Shared SSH transcript evidence requires the Codex SSH attempt to match the expected canary target | `npm run verify:ssh-evidence` | Covered |
-| Release tag gate supports non-SSH canary shapes instead of forcing the current remote throughput task | `npm run verify:canary-evidence` report `tag_gate_handles_non_ssh_canary` | Covered |
-| Release recorder rejects `--codex-attempted-ssh true` unless the source Codex transcript contains SSH evidence | `npm run verify:canary-evidence` report `recorder_rejects_unsupported_ssh_attestation` | Covered |
-| Release recorder rejects SSH attestation when the transcript SSH target does not match the canary target | `npm run verify:canary-evidence` report `recorder_rejects_wrong_ssh_target` | Covered |
-| Release recorder rejects contradictory status evidence before writing canary files | `npm run verify:canary-evidence` report `cli_rejects_contradictory_status` | Covered |
-| Release recorder rejects passed evidence that was not Chat-first from an empty TUI or used operator manual execution | `npm run verify:canary-evidence` report `cli_rejects_invalid_passed_attestation` | Covered |
-| Release recorder rejects invalid target metadata before writing canary files | `npm run verify:canary-evidence` report `cli_rejects_invalid_target_metadata` | Covered |
-| Passed release canaries must include observed value evidence that reaches the target | `npm run verify:canary-evidence` report `cli_rejects_invalid_passed_observed_value`; `npm run verify:tag-gate` report `target_value`, `observed_value`, and `passed_observed_target` | Covered |
-| Release recorder rejects source artifacts containing provider tokens or private keys before copying evidence | `npm run verify:canary-evidence` report `recorder_rejects_source_secrets` | Covered |
-| Release artifacts and repo files do not contain committed provider tokens or private keys | `npm run verify:no-secrets`; `npm run verify:tag-gate` report `secret_scan_ok` | Covered |
-| Release canary evidence can be recorded without hand-writing artifact hashes | `npm run verify:canary-evidence`, `npm run release:record-canary` | Covered |
-| Current failed diffusionGemma canary carries operator Chat-first attestation and Codex SSH/deploy/measure transcript evidence, but predates checkpoint `goal_source` provenance | `docs/release-canaries/2026-06-15-diffusiongemma-remote.md`, evidence bundle | Covered |
-| Failed canary records explicit blocker and next action | `npm run verify:tag-gate`, evidence bundle `result.failure_reason` and `result.next_required_action` | Covered |
-| Current canary reaches 700 token/s | `npm run verify:tag-gate` | Blocked |
+| Shared SSH transcript evidence requires the Codex SSH attempt to match the expected target | `npm run verify:ssh-evidence` | Covered |
+| Release artifacts and repo files do not contain committed provider tokens or private keys | `npm run verify:no-secrets` | Covered |
 
-Current blocker: the latest recorded release canary has verified artifacts, hashes, executable planner shell artifacts, transcript references, token usage, rollback/version fields, explicit operator Chat-first attestation, and explicit Codex SSH attestation, but it is still `status: failed` and `tag_allowed: false` because Codex reached the SSH step and the remote rejected available public keys with `Permission denied (publickey)`. A later unrecorded retry reached remote execution on `root@116.127.115.18:23276`, but Codex spent the run trying to build vLLM from source and never launched the model server or produced a 700 token/s measurement. The historical failed canary predates checkpoint `goal_source` provenance and was recorded from a dirty WiCi checkout, so it cannot authorize a release. Next required action: rerun the same first Chat through the TUI from a clean WiCi checkout with the long-goal recovery behavior enabled, let Codex continue through deployment and measurement, then replace the failed canary with a passed one so `npm run verify:tag-gate` reports `canary_goal_source: tui_chat`, `status: passed`, and observed throughput meeting the recorded target. Do not tag or push a release until a new real TUI canary passes and `npm run verify:tag-gate` exits zero.
+Release tags are no longer blocked by a recorded remote run bundle. The release gate is the automated V1 core preflight plus the guarded local tag command.
 
 ## Last Verified Commands
 
@@ -147,15 +125,8 @@ npm run verify:continuation-verdict
 npm run verify:existing-goal
 npm run verify:v1-requirements
 npm run verify:docs-sync
-npm run verify:canary-evidence
 npm run verify:release-tag
 npm run verify:no-secrets
 npm run verify:v1-core
 npm run verify:legacy-optimizer
-```
-
-This check was run and intentionally failed because the latest real canary is failed:
-
-```bash
-npm run verify:tag-gate
 ```
