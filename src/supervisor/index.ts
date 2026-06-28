@@ -1645,6 +1645,7 @@ async function buildDirectNoProgressReplanSteerText(
     '- Re-read GOAL.md, PLAN.md, ASSUMPTIONS.md, recent ledger, lessons, and context.',
     '- Restate the actual bottleneck and update GOAL.md if the current goal/validation contract is missing an active requirement, stop boundary, or acceptance gap.',
     '- Update PLAN.md to close the ineffective repeated step and add the next concrete executable step.',
+    '- If PLAN.md is only an external/remote-plan wrapper, repair it by preserving the referenced plan as an Original External Plan Snapshot and adding an Expanded Execution Plan with concrete technical steps before continuing.',
     '- Do not just ask for human input because executor repeated status checks; first try to recover by planning.',
     '- Brainstorm and select a bounded next method when useful: instrumentation, targeted trace, log audit, state/path inspection, smaller validation, or an alternate hypothesis within the existing user scope.',
     '- Preserve completed evidence and constraints. Do not repeat known-bad full gates, invent product scope, push, or perform destructive cleanup unless GOAL.md explicitly allows it.',

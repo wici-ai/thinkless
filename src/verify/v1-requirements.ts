@@ -146,6 +146,12 @@ async function main(): Promise<void> {
   assert(files.plannerPrompt.includes('Native Claude Code tools remain available in plan mode'), 'planner prompt must preserve native Claude plan-mode tools');
   assert(files.plannerPrompt.includes('web research or remote discovery'), 'planner prompt must allow planning-time web and remote discovery');
   assert(files.plannerPrompt.includes('a PLAN.md-only workflow is valid'), 'planner prompt must not force optional .opt scripts');
+  assert(
+    files.plannerPrompt.includes('Original External Plan Snapshot') &&
+      files.plannerPrompt.includes('Expanded Execution Plan') &&
+      files.plannerPrompt.includes('do not produce a shallow wrapper'),
+    'planner prompt must snapshot and expand external/remote plan references instead of emitting a shallow wrapper'
+  );
   assert(files.plannerPrompt.includes('Treat research, debugging, and fallback strategy as planner/executor responsibilities'), 'planner prompt must own research/debug/fallback behavior instead of requiring Chat boilerplate');
   assert(files.plannerPrompt.includes('## ASSUMPTIONS.md') && files.plannerPrompt.includes('Self-grill'), 'planner prompt must require self-interrogation and ASSUMPTIONS.md');
   assert(
@@ -202,6 +208,12 @@ async function main(): Promise<void> {
   );
   assert(files.plannerDiffPrompt.includes('RFC-style decision packet') && files.plannerDiffPrompt.includes('decision-quality evidence') && files.plannerDiffPrompt.includes('one concrete discriminating next step'), 'planner-diff prompt must enforce RFC diagnostics and loop escape');
   assert(files.plannerDiffPrompt.includes('not blindly append') && files.plannerDiffPrompt.includes('compact it while applying the new requirement'), 'planner diff prompt must compact noisy PLAN.md updates instead of endlessly appending');
+  assert(
+    files.plannerDiffPrompt.includes('Original External Plan Snapshot') &&
+      files.plannerDiffPrompt.includes('Expanded Execution Plan') &&
+      files.plannerDiffPrompt.includes('remote-plan-only bootstrap'),
+    'planner-diff prompt must repair shallow remote-plan wrappers into local snapshots plus expanded execution plans'
+  );
   assert(files.plannerDiffPrompt.includes('native plan-mode tools remain available'), 'planner diff prompt must preserve native Claude tools during hot reload planning');
   assert(files.plannerDiffPrompt.includes('- [ ] S3 Short imperative step title') && files.plannerDiffPrompt.includes('### S3'), 'planner diff prompt must preserve WiCi-discoverable step shape for added steps');
   assert(files.chat.includes('latestQuestion') && files.chat.includes("kind: 'answer'"), 'ChatPane must route open planner questions through chat answers');
@@ -264,6 +276,12 @@ async function main(): Promise<void> {
       files.executor.includes('same reject reason') &&
       files.executor.includes('plan/harness/receipt path'),
     'executor prompt must require semantic loop escape'
+  );
+  assert(
+    files.executor.includes('Original External Plan Snapshot') &&
+      files.executor.includes('Expanded Execution Plan') &&
+      files.executor.includes('status-only receipt'),
+    'executor prompt must repair shallow external-plan wrappers instead of returning repeated status-only receipts'
   );
   assert(files.executor.includes('Current ${goalPath}:') && files.executor.includes('Current ${planPath}:'), 'executor prompt must embed GOAL.md and PLAN.md as Codex goal input');
   assert(files.executor.includes('as one Codex goal') && files.executor.includes('Supervisor receipt focus'), 'executor prompt must feed GOAL.md + PLAN.md as one Codex goal while keeping only a thin receipt focus');
