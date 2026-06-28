@@ -124,6 +124,8 @@ async function main(): Promise<void> {
   assert(files.chat.includes("kind: 'steer'"), 'ChatPane must support steering injections');
   assert(files.chat.includes("kind: 'abort'"), 'ChatPane must support urgent abort injections');
   assert(files.chat.includes('isStopControlText') && files.chat.includes("priority: 'urgent'"), 'ChatPane must translate natural stop requests into urgent abort injections');
+  assert(files.chat.includes("text === '/pause'") && files.chat.includes('pauseControlReason') && files.chat.includes('allow later /resume'), 'ChatPane must support explicit /pause as a recoverable executor stop');
+  assert(files.chat.includes("text === '/replan'") && files.chat.includes('replanControlText') && files.chat.includes('Run planner-diff before more ordinary executor turns'), 'ChatPane must support explicit /replan bottleneck review');
   assert(files.supervisor.includes('hasPendingUrgentAbort') && files.supervisor.includes('stopIfPlannerAborted'), 'Supervisor must let Chat urgent abort stop active planner subprocesses');
   assertNoControlWrites('ChatPane', files.chat);
   assert(!files.chat.includes('initial goal:') && !files.chat.includes('`goal: ${text}`'), 'ChatPane transcript must not repeat the initial goal as history');

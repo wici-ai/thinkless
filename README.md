@@ -115,7 +115,7 @@ Planner clarification answers sent through Chat wake the stopped supervisor and 
 
 ## Resume Or Re-Run
 
-Run `thinkless resume` to continue the current target without a new `--goal`. Use `--resume-iteration 1` when you need to rewind to an earlier direct execution iteration for recovery testing or controlled replay.
+Run `thinkless resume` to continue the current target without a new `--goal`. Inside the TUI, `/resume` opens the resume selector, `/pause` stops the active executor at a recoverable boundary, and `/replan` asks the planner to review bottlenecks, repair `GOAL.md`/`PLAN.md`, and choose the next concrete step. Use `--resume-iteration 1` when you need to rewind to an earlier direct execution iteration for recovery testing or controlled replay.
 
 Hot reload can steer an active app-server turn through `turn/steer`; if that path is unavailable, Thinkless keeps Codex continuity through `codex exec resume --last`.
 

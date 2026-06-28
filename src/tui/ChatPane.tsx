@@ -224,6 +224,24 @@ export function ChatInputBox({
       return;
     }
 
+    if (text === '/pause' || text.startsWith('/pause ')) {
+      if (!hasExistingRun) {
+        return;
+      }
+      await writeInjection(paths, { kind: 'abort', text: pauseControlReason(text), priority: 'urgent' });
+      onInjection?.();
+      return;
+    }
+
+    if (text === '/replan' || text.startsWith('/replan ')) {
+      if (!hasExistingRun) {
+        return;
+      }
+      await writeInjection(paths, { kind: 'steer', text: replanControlText(text), priority: 'normal' });
+      onInjection?.();
+      return;
+    }
+
     if (isStopControlText(text)) {
       if (!hasExistingRun) {
         return;
@@ -605,4 +623,24 @@ export function isStopControlText(text: string): boolean {
 function stopControlReason(text: string): string {
   const trimmed = text.trim();
   return trimmed.startsWith('/') ? trimmed.slice(1).trim() || 'stop requested from Chat' : trimmed || 'stop requested from Chat';
+}
+
+function pauseControlReason(text: string): string {
+  const raw = text.trim().slice('/pause'.length).trim();
+  return raw
+    ? `Pause requested from Chat: ${raw}`
+    : 'Pause requested from Chat: stop the active executor at the next safe/preemptible point, preserve GOAL.md/PLAN.md/checkpoint state, and allow later /resume.';
+}
+
+function replanControlText(text: string): string {
+  const raw = text.trim().slice('/replan'.length).trim();
+  return [
+    'Manual /replan requested from Chat.',
+    raw ? `Operator reason: ${raw}` : 'Operator reason: review current progress and repair the plan before continuing.',
+    'Run planner-diff before more ordinary executor turns.',
+    'Perform a bottleneck review: re-read GOAL.md, PLAN.md, ASSUMPTIONS.md, recent ledger, events, lessons, and context.',
+    'If the current executor loop is repeating the same blocker, same evidence, status-only receipt, or shallow external-plan wrapper, close or repair the ineffective step.',
+    'Update PLAN.md with the current bottleneck, ruled-out paths, and exactly one next high-value executable technical step; update GOAL.md only if the active completion contract or stop boundary needs repair.',
+    'Do not ask for human side probes when the next step can be derived from existing artifacts, remote state, or a bounded Codex discovery step.'
+  ].join('\n');
 }
