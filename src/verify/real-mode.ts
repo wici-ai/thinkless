@@ -1,5 +1,5 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
@@ -11,6 +11,8 @@ import { runInitialPlanner, runPlanDiff } from '../supervisor/planner.js';
 const target = resolve('fixture/real-mode-target');
 const emptyTarget = resolve('fixture/real-mode-empty-target');
 const nonGitTarget = resolve('fixture/real-mode-non-git-target');
+const junctionRealTarget = resolve('fixture/real-mode-junction-real-target');
+const junctionLinkTarget = resolve('fixture/real-mode-junction-link-target');
 
 async function main(): Promise<void> {
   await createSampleTarget(target, true);
@@ -20,6 +22,7 @@ async function main(): Promise<void> {
 
   await verifyFreshTargetGitInit(config);
   await verifyNonEmptyNonGitTargetRejected(config);
+  await verifyLinkedTargetGitRepoAccepted(config);
 
   await expectRejects(() => runInitialPlanner(paths, goal, config), 'Planner command not found');
   await writeFile(paths.plan, '# Plan\n\n- [ ] S1 Existing real-mode step\n');
@@ -33,12 +36,34 @@ async function main(): Promise<void> {
           target,
           fresh_target_git_init: true,
           non_empty_non_git_rejected: true,
+          linked_target_git_repo_accepted: true,
           real_mode_does_not_fallback_to_stub: true
         },
       null,
       2
     )
   );
+}
+
+async function verifyLinkedTargetGitRepoAccepted(config: WiCiConfig): Promise<void> {
+  await rm(junctionLinkTarget, { recursive: true, force: true });
+  await rm(junctionRealTarget, { recursive: true, force: true });
+  try {
+    await mkdir(junctionRealTarget, { recursive: true });
+    await writeFile(join(junctionRealTarget, 'README.md'), 'linked target fixture\n');
+    await execa('git', ['-C', junctionRealTarget, 'init']);
+    await execa('git', ['-C', junctionRealTarget, 'config', 'user.name', 'WiCi Fixture']);
+    await execa('git', ['-C', junctionRealTarget, 'config', 'user.email', 'fixture@example.invalid']);
+    await execa('git', ['-C', junctionRealTarget, 'add', '-A']);
+    await execa('git', ['-C', junctionRealTarget, 'commit', '-m', 'chore: initial linked fixture']);
+    await symlink(junctionRealTarget, junctionLinkTarget, process.platform === 'win32' ? 'junction' : 'dir');
+    const paths = runPaths(junctionLinkTarget);
+    await ensureRunDirs(paths);
+    await ensureGitRepo(paths, config);
+  } finally {
+    await rm(junctionLinkTarget, { recursive: true, force: true });
+    await rm(junctionRealTarget, { recursive: true, force: true });
+  }
 }
 
 async function verifyFreshTargetGitInit(config: WiCiConfig): Promise<void> {

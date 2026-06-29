@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { execa } from 'execa';
 
 async function main(): Promise<void> {
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
       CI: '1',
       NPM_CONFIG_PREFIX: prefix,
       npm_config_prefix: prefix,
-      PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
       THINKLESS_TARBALL_URL: `file://${tarball}`,
       THINKLESS_AUTH_ONBOARDING: '0',
       THINKLESS_SELF_UPDATE: '0',
@@ -156,7 +156,7 @@ async function runCleanShell(home: string, cwd: string, command: string): Promis
     USER: 'thinkless-test',
     CI: '1',
     SHELL: process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash',
-    PATH: process.platform === 'darwin' ? '/usr/bin:/bin:/usr/sbin:/sbin' : `${join(dirname(process.execPath))}:${process.env.PATH ?? ''}`,
+    PATH: process.platform === 'darwin' ? '/usr/bin:/bin:/usr/sbin:/sbin' : `${join(dirname(process.execPath))}${delimiter}${process.env.PATH ?? ''}`,
     THINKLESS_SELF_UPDATE: '0',
     FORCE_COLOR: '0',
     TERM: 'xterm-256color'

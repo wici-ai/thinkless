@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { createSampleTarget } from '../sample.js';
 import { exists } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   await installFakePlanner();
   const originalPath = process.env.PATH ?? '';
   const originalAutoUpdate = process.env.WICI_AUTO_UPDATE_TOOLS;
-  process.env.PATH = `${fakeBin}:${originalPath}`;
+  process.env.PATH = `${fakeBin}${delimiter}${originalPath}`;
   process.env.WICI_AUTO_UPDATE_TOOLS = '0';
   try {
     await createSampleTarget(target, true);
@@ -118,9 +118,16 @@ console.log(JSON.stringify({
 }));
 process.exit(0);
 `;
-  const fakeClaude = join(fakeBin, 'claude');
+  const fakeClaude = await fakeCommandPath('claude');
   await writeFile(fakeClaude, script);
   await chmod(fakeClaude, 0o755);
+}
+
+async function fakeCommandPath(name: string): Promise<string> {
+  if (process.platform !== 'win32') return join(fakeBin, name);
+  const cmd = join(fakeBin, `${name}.cmd`);
+  await writeFile(cmd, `@echo off\r\nnode "%~dp0\\${name}.js" %*\r\n`);
+  return join(fakeBin, `${name}.js`);
 }
 
 function assert(condition: unknown, message: string): asserts condition {

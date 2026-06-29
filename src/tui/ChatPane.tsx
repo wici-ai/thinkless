@@ -13,6 +13,8 @@ import { appendDictationText, parseDictationRequest, runDictationCommand } from 
 type ChatColor = 'white' | 'gray' | 'cyan' | 'cyanBright' | 'green' | 'yellow' | 'red' | 'magenta';
 const PLANNING_CONTEXT_MAX_ENTRIES = 14;
 const PLANNING_CONTEXT_MAX_CHARS = 10_000;
+const RESTART_CONTEXT_MAX_ENTRIES = 10;
+const RESTART_CONTEXT_MAX_CHARS = 8_000;
 
 interface ChatContextProps {
   outbox?: OutboxMessage[];
@@ -221,6 +223,15 @@ export function ChatInputBox({
 
     if (text === '/resume' || text.startsWith('/resume ')) {
       onResumeRequested?.();
+      return;
+    }
+
+    if (text === '/restart' || text.startsWith('/restart ')) {
+      if (!hasExistingRun) {
+        return;
+      }
+      await writeInjection(paths, { kind: 'steer', text: buildRestartSteerText(text, chat, events), priority: 'normal' });
+      onInjection?.();
       return;
     }
 
@@ -643,4 +654,28 @@ function replanControlText(text: string): string {
     'Update PLAN.md with the current bottleneck, ruled-out paths, and exactly one next high-value executable technical step; update GOAL.md only if the active completion contract or stop boundary needs repair.',
     'Do not ask for human side probes when the next step can be derived from existing artifacts, remote state, or a bounded Codex discovery step.'
   ].join('\n');
+}
+
+export function buildRestartSteerText(text: string, chat: ChatLogEntry[] = [], events: RunEvent[] = []): string {
+  const raw = text.trim().slice('/restart'.length).trim();
+  const terminalEvent = [...events].reverse().find((event) => event.type === 'STOP' || event.type === 'FAILED');
+  const terminalAt = terminalEvent ? Date.parse(terminalEvent.ts) : Number.NaN;
+  const relevantChat = chat
+    .filter((entry) => !Number.isFinite(terminalAt) || Date.parse(entry.ts) > terminalAt)
+    .slice(-RESTART_CONTEXT_MAX_ENTRIES);
+  const chatContext = relevantChat.length > 0
+    ? relevantChat.map((entry) => {
+      const update = entry.update ? `\n${entry.role.toUpperCase()} UPDATE (${entry.update.kind}): ${entry.update.text.trim()}` : '';
+      return `${entry.role.toUpperCase()}: ${entry.text.trim()}${update}`;
+    }).join('\n\n')
+    : '(no Chat turns after the last terminal event)';
+  return truncate([
+    'Manual /restart requested from Chat after a stopped or failed run.',
+    raw ? `Operator restart instruction: ${raw}` : 'Operator restart instruction: use the post-stop Chat context below.',
+    terminalEvent ? `Last terminal event: ${terminalEvent.type} at ${terminalEvent.ts}: ${terminalEvent.message}` : 'Last terminal event: not found in the loaded event tail.',
+    'Before running another executor step, update GOAL.md/PLAN.md from the post-stop Chat context and current artifacts.',
+    'Run planner-diff first; preserve completed useful work, repair stale or incorrect assumptions, choose the next concrete executable step, then continue execution.',
+    'Post-stop Chat context:',
+    chatContext
+  ].join('\n'), RESTART_CONTEXT_MAX_CHARS);
 }

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
-import { buildBlankRunPlanningContext, buildChatHistory, currentGoalSummary, isStopControlText } from '../tui/ChatPane.js';
+import { buildBlankRunPlanningContext, buildChatHistory, buildRestartSteerText, currentGoalSummary, isStopControlText } from '../tui/ChatPane.js';
 import { codexDisplayLines, formatEvent, visibleEvents } from '../tui/ExecPane.js';
 import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
@@ -126,6 +126,8 @@ async function main(): Promise<void> {
   assert(files.chat.includes('isStopControlText') && files.chat.includes("priority: 'urgent'"), 'ChatPane must translate natural stop requests into urgent abort injections');
   assert(files.chat.includes("text === '/pause'") && files.chat.includes('pauseControlReason') && files.chat.includes('allow later /resume'), 'ChatPane must support explicit /pause as a recoverable executor stop');
   assert(files.chat.includes("text === '/replan'") && files.chat.includes('replanControlText') && files.chat.includes('Run planner-diff before more ordinary executor turns'), 'ChatPane must support explicit /replan bottleneck review');
+  assert(files.chat.includes("text === '/restart'") && files.chat.includes('buildRestartSteerText') && files.chat.includes('Post-stop Chat context'), 'ChatPane must support explicit /restart with post-stop Chat context');
+  verifyRestartSteerText();
   assert(files.supervisor.includes('hasPendingUrgentAbort') && files.supervisor.includes('stopIfPlannerAborted'), 'Supervisor must let Chat urgent abort stop active planner subprocesses');
   assertNoControlWrites('ChatPane', files.chat);
   assert(!files.chat.includes('initial goal:') && !files.chat.includes('`goal: ${text}`'), 'ChatPane transcript must not repeat the initial goal as history');
@@ -418,6 +420,26 @@ function verifyBlankRunPlanningContext(): void {
   assert(context.includes('ASSISTANT: TUI 现在是上方 workspace'), `planning context missing assistant turn:\n${context}`);
   assert(context.includes('USER: 开始按这个方向修'), `planning context missing trigger turn:\n${context}`);
   assert(context.includes('ASSISTANT UPDATE (add_requirement): Fix the TUI Chat intake context handoff.'), `planning context missing update:\n${context}`);
+}
+
+function verifyRestartSteerText(): void {
+  const steer = buildRestartSteerText(
+    '/restart continue with the corrected target repo',
+    [
+      { ts: '2026-06-17T09:59:00.000Z', role: 'user', text: 'old pre-stop context' },
+      { ts: '2026-06-17T10:01:00.000Z', role: 'user', text: 'why did this fail?' },
+      { ts: '2026-06-17T10:02:00.000Z', role: 'assistant', text: 'It failed before executor resumed.', update: { kind: 'steer', text: 'Use the real target repo.' } }
+    ],
+    [
+      { seq: 10, ts: '2026-06-17T10:00:00.000Z', type: 'FAILED', level: 'error', message: 'Target is not a git repository' }
+    ]
+  );
+  assert(steer.includes('Manual /restart requested'), `restart steer missing header:\n${steer}`);
+  assert(steer.includes('continue with the corrected target repo'), `restart steer missing operator instruction:\n${steer}`);
+  assert(steer.includes('Last terminal event: FAILED'), `restart steer missing terminal event:\n${steer}`);
+  assert(steer.includes('USER: why did this fail?'), `restart steer missing post-stop user context:\n${steer}`);
+  assert(steer.includes('ASSISTANT UPDATE (steer): Use the real target repo.'), `restart steer missing post-stop update:\n${steer}`);
+  assert(!steer.includes('old pre-stop context'), `restart steer must omit pre-stop chat context:\n${steer}`);
 }
 
 function verifyChatPromptCompression(): void {

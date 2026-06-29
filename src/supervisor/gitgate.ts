@@ -1,4 +1,4 @@
-import { mkdir, readdir } from 'node:fs/promises';
+import { mkdir, readdir, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { execa } from 'execa';
 import type { RunPaths } from '../shared/paths.js';
@@ -18,7 +18,30 @@ export async function isGitRepo(paths: RunPaths): Promise<boolean> {
   const result = await execa('git', ['-C', paths.target, 'rev-parse', '--show-toplevel'], {
     reject: false
   });
-  return result.exitCode === 0 && resolve(result.stdout.trim()) === resolve(paths.target);
+  if (result.exitCode !== 0) return false;
+  return sameExistingPath(result.stdout.trim(), paths.target);
+}
+
+async function sameExistingPath(left: string, right: string): Promise<boolean> {
+  const [canonicalLeft, canonicalRight] = await Promise.all([
+    canonicalExistingPath(left),
+    canonicalExistingPath(right)
+  ]);
+  return canonicalLeft === canonicalRight;
+}
+
+async function canonicalExistingPath(path: string): Promise<string> {
+  const resolved = resolve(path);
+  try {
+    return normalizePathForComparison(await realpath(resolved));
+  } catch {
+    return normalizePathForComparison(resolved);
+  }
+}
+
+function normalizePathForComparison(path: string): string {
+  const normalized = resolve(path);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
 export async function ensureGitRepo(paths: RunPaths, config: WiCiConfig): Promise<void> {

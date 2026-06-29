@@ -88,6 +88,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
   await ensureRunDirs(paths);
   const releaseLock = await acquireLock(paths.lock);
   const events = new EventWriter(paths.events);
+  await events.init();
 
   try {
     await ensureGitRepo(paths, config);

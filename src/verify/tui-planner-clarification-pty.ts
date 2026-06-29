@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
       ...process.env,
       FORCE_COLOR: '0',
       TERM: 'xterm-256color',
-      PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
       WICI_NODE: process.execPath,
       WICI_PTY_CHAT: firstChat,
       WICI_PTY_ANSWER: answerText,
@@ -177,11 +177,11 @@ emit([
   '  - Validation: Codex reports the remote runtime discovery result.'
 ].join('\\n'));
 `;
-  const fakeClaude = join(fakeBin, 'claude');
+  const fakeClaude = await fakeCommandPath('claude');
   await writeFile(fakeClaude, script);
   await chmod(fakeClaude, 0o755);
 
-  const fakeCodex = join(fakeBin, 'codex');
+  const fakeCodex = await fakeCommandPath('codex');
   await writeFile(
     fakeCodex,
     `#!/usr/bin/env node
@@ -286,9 +286,16 @@ if (prompt.includes('${firstChat}')) {
 console.error('fake codex planner received unexpected prompt');
 process.exit(3);
 `;
-  const fakeCodex = join(fakeBin, 'codex');
+  const fakeCodex = await fakeCommandPath('codex');
   await writeFile(fakeCodex, script);
   await chmod(fakeCodex, 0o755);
+}
+
+async function fakeCommandPath(name: string): Promise<string> {
+  if (process.platform !== 'win32') return join(fakeBin, name);
+  const cmd = join(fakeBin, `${name}.cmd`);
+  await writeFile(cmd, `@echo off\r\nnode "%~dp0\\${name}.js" %*\r\n`);
+  return join(fakeBin, `${name}.js`);
 }
 
 function stripAnsi(value: string): string {

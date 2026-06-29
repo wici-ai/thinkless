@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { execa } from 'execa';
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
       cwd: resolve('.'),
       env: {
         ...process.env,
-        PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
         WICI_FAKE_TARGET: target,
         WICI_FAKE_STATE_DIR: paths.wici,
         WICI_PLANNER_AGENT: 'claude',
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 }
 
 async function writeFakeClaude(): Promise<void> {
-  const path = join(fakeBin, 'claude');
+  const path = await fakeCommandPath('claude');
   await writeFile(
     path,
     `#!/usr/bin/env node
@@ -142,7 +142,7 @@ console.log(JSON.stringify({
 }
 
 async function writeFakeCodex(): Promise<void> {
-  const path = join(fakeBin, 'codex');
+  const path = await fakeCommandPath('codex');
   await writeFile(
     path,
     `#!/usr/bin/env node
@@ -229,6 +229,13 @@ async function waitForEvent(path: string, type: string, timeoutMs: number): Prom
     await delay(100);
   }
   throw new Error(`Timed out waiting for event ${type}`);
+}
+
+async function fakeCommandPath(name: string): Promise<string> {
+  if (process.platform !== 'win32') return join(fakeBin, name);
+  const cmd = join(fakeBin, `${name}.cmd`);
+  await writeFile(cmd, `@echo off\r\nnode "%~dp0\\${name}.js" %*\r\n`);
+  return join(fakeBin, `${name}.js`);
 }
 
 async function waitForExit(child: ReturnType<typeof spawn>, timeoutMs: number): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {

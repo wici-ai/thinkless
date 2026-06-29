@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
       ...process.env,
       FORCE_COLOR: '0',
       TERM: 'xterm-256color',
-      PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+      PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
       WICI_PLANNER_AGENT: 'claude',
       WICI_NODE: process.execPath,
       WICI_FAKE_TARGET: target,
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
 }
 
 async function writeFakeClaude(): Promise<void> {
-  const path = join(fakeBin, 'claude');
+  const path = await fakeCommandPath('claude');
   await writeFile(
     path,
     `#!/usr/bin/env node
@@ -167,7 +167,7 @@ console.log(JSON.stringify({
 }
 
 async function writeFakeCodex(): Promise<void> {
-  const path = join(fakeBin, 'codex');
+  const path = await fakeCommandPath('codex');
   await writeFile(
     path,
     `#!/usr/bin/env node
@@ -252,6 +252,13 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'message' } }
 `
   );
   await chmod(path, 0o755);
+}
+
+async function fakeCommandPath(name: string): Promise<string> {
+  if (process.platform !== 'win32') return join(fakeBin, name);
+  const cmd = join(fakeBin, `${name}.cmd`);
+  await writeFile(cmd, `@echo off\r\nnode "%~dp0\\${name}.js" %*\r\n`);
+  return join(fakeBin, `${name}.js`);
 }
 
 async function requireExpect(): Promise<void> {
