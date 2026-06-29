@@ -607,6 +607,10 @@ const resumed = resumeIndex >= 0;
 mkdirSync(dirname(out), { recursive: true });
 mkdirSync(stateDir, { recursive: true });
 appendFileSync(join(stateDir, 'fake-codex-chat-args.jsonl'), JSON.stringify({ args, prompt }) + '\\n');
+if (resumed && args.includes('stale-codex-session')) {
+  console.error('simulated stale Codex Chat session');
+  process.exit(1);
+}
 writeFileSync(out, [
   '## REPLY',
   '',
@@ -679,6 +683,30 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
     assert(session.runtime_selection === undefined, `Chat session file must not be overwritten by UI runtime persistence: ${JSON.stringify(session)}`);
     const restored = await readPersistedRuntimeSelection(paths);
     assert(restored?.chat?.agent === 'codex' && restored.chat.effort === 'xhigh', `persisted runtime did not restore Codex Chat settings: ${JSON.stringify(restored)}`);
+
+    await writeFile(paths.chatSession, `${JSON.stringify({ sessions: { codex: { session_id: 'stale-codex-session', updated_at: '2026-06-18T00:00:00.000Z' } } }, null, 2)}\n`);
+    const staleFallback = await runChatTurn({
+      paths,
+      userText: 'Recover from a stale Codex Chat session.',
+      goalDoc: '',
+      plan: '',
+      recentEvents: [],
+      mode: 'real',
+      runtime: { chat: { agent: 'codex', effort: 'medium' } },
+      writeUpdate: false
+    });
+    assert(!staleFallback.degraded, `Codex Chat stale resume should retry fresh instead of degrading: ${JSON.stringify(staleFallback)}`);
+    assert(staleFallback.reply.includes('Codex Chat can discuss'), `Codex Chat fresh retry reply not parsed: ${JSON.stringify(staleFallback)}`);
+    const retryArgsLog = (await readFile(join(paths.wici, 'fake-codex-chat-args.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { args: string[]; prompt: string });
+    const staleResumeCall = retryArgsLog.at(-2);
+    const freshRetryCall = retryArgsLog.at(-1);
+    assert(staleResumeCall?.args[0] === 'exec' && staleResumeCall.args[1] === 'resume' && staleResumeCall.args.includes('stale-codex-session'), `stale Codex Chat session should be attempted first: ${JSON.stringify(retryArgsLog)}`);
+    assert(freshRetryCall?.args[0] === 'exec' && freshRetryCall.args[1] !== 'resume' && freshRetryCall.args.includes('-C'), `stale Codex Chat resume should retry as fresh: ${JSON.stringify(retryArgsLog)}`);
+    const refreshedSession = JSON.parse(await readFile(paths.chatSession, 'utf8')) as { sessions?: { codex?: { session_id?: string } } };
+    assert(refreshedSession.sessions?.codex?.session_id === 'fake-codex-chat-session', `fresh retry should replace stale Codex Chat session: ${JSON.stringify(refreshedSession)}`);
 
     await writeFile(paths.chatSession, `${JSON.stringify({ sessions: { codex: { session_id: 'legacy-codex-session', updated_at: '2026-06-18T00:00:00.000Z' } } }, null, 2)}\n`);
     const legacyRestored = await readPersistedRuntimeSelection(paths);

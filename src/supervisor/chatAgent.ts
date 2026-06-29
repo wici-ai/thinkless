@@ -154,12 +154,14 @@ async function runCodexChatTurn(
   await ensureDir(ctx.paths.artifacts);
   const outputLastMessage = join(ctx.paths.artifacts, `chat-codex-${Date.now()}.txt`);
   let result = await runCodexChatProcess(ctx, command, input, outputLastMessage, input.sessionId);
-  if (input.sessionId && result.exitCode !== 0 && isContextWindowFailure(result.all)) {
+  let resumed = Boolean(input.sessionId);
+  if (input.sessionId && (result.timeoutReason || result.exitCode !== 0)) {
     await clearChatSession(ctx.paths, 'codex');
     result = await runCodexChatProcess(ctx, command, input, outputLastMessage, undefined);
+    resumed = false;
   }
   if (result.timeoutReason || result.exitCode !== 0) {
-    const action = input.sessionId ? 'resume failed' : 'exited';
+    const action = resumed ? 'resume failed' : 'exited';
     const detail = codexFailureDetail(result.all);
     return buildFallbackChatTurn(
       ctx,
@@ -175,10 +177,6 @@ async function runCodexChatTurn(
   const sessionId = parsed.sessionId ?? extractCodexSessionId(result.stdout) ?? input.sessionId;
   if (sessionId) await writeChatSession(ctx.paths, 'codex', sessionId, { agent: 'codex', model: input.model, effort: input.effort });
   return { reply: parsed.reply, update: parsed.update, degraded: false };
-}
-
-function isContextWindowFailure(output: string): boolean {
-  return /ran out of room|context window|model'?s context|context length|maximum context/i.test(output);
 }
 
 function codexFailureDetail(output: string): string {
