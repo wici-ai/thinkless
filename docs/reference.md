@@ -354,11 +354,17 @@ Install Thinkless from the public release artifact:
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
 ```
 
-That one-line installer downloads `thinkless.tgz` from the latest public release and installs it globally with npm. The release contains the built package and installer assets. If you need a different release host, set `THINKLESS_RELEASE_BASE` or `THINKLESS_TARBALL_URL` before running the installer.
+On Windows PowerShell:
+
+```powershell
+irm https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1 | iex
+```
+
+These one-line installers download `thinkless.tgz` from the latest public release and install it globally with npm. The release contains the built package and installer assets. If you need a different release host, set `THINKLESS_RELEASE_BASE` or `THINKLESS_TARBALL_URL` before running the installer.
 
 On startup, the `thinkless` CLI checks the latest GitHub release and self-updates when the release is newer than the local package version. Global installs update from the release `thinkless.tgz`; clean source checkouts fetch and detach to the release tag, then run `npm install` and `npm run build`. Dirty source checkouts are left alone, and network, GitHub, or update failures fail open so launch continues. Set `THINKLESS_SELF_UPDATE=0` to disable the startup check, `THINKLESS_SELF_UPDATE_VERBOSE=1` to print the decision, `THINKLESS_RELEASE_REPO=owner/repo` for a different release repository, or `THINKLESS_TARBALL_URL` for a custom tarball.
 
-The included `Publish public install release` workflow is manually triggered. It builds `thinkless.tgz` from the selected source tag with `fetch-depth: 1`, then uploads `thinkless.tgz` and `install.sh` to this public repository's GitHub release using the workflow token.
+The included `Publish public install release` workflow is manually triggered. It builds `thinkless.tgz` from the selected source tag with `fetch-depth: 1`, then uploads `thinkless.tgz`, `install.sh`, and `install.ps1` to this public repository's GitHub release using the workflow token.
 
 Install from a source checkout:
 
@@ -390,6 +396,16 @@ curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install
 That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, GitHub CLI, Codex CLI, and Claude Code CLI, then installs Thinkless with npm lifecycle scripts enabled. It adds the discovered command directories for `node`, `npm`, `thinkless`, `codex`, `claude`, and `gh` to `~/.zprofile` and `~/.zshrc` when needed, verifies those commands from clean zsh login and interactive shells, then prints the exact `export PATH=...` and `export PATH=... && thinkless` commands to update the current terminal or launch Thinkless immediately.
 
 After command verification, the public installer and `scripts/bootstrap-macos.sh` always print an auth onboarding status for Codex, GitHub CLI, and Claude. When a terminal is available, the installer prompts through `/dev/tty` so `curl | bash` can still run `codex login` or `codex`, `gh auth login`, and `claude` interactively. Set `THINKLESS_AUTH_ONBOARDING=0` to skip the prompts and finish auth later. If auth is skipped, declined, or unavailable in a non-interactive shell, the installer reports that auth is pending instead of claiming full setup is complete.
+
+## Windows Bootstrap
+
+On Windows, the public PowerShell installer uses `winget` for missing Node.js LTS, Git, and GitHub CLI, installs Codex CLI and Claude Code CLI through npm, downloads `thinkless.tgz`, and runs `npm install -g --foreground-scripts --ignore-scripts=false`. It adds the npm global command directory, normally `%APPDATA%\npm`, to the user PATH for new PowerShell sessions and verifies `node`, `npm`, `git`, `thinkless`, `codex`, `claude`, and `gh`.
+
+```powershell
+irm https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1 | iex
+```
+
+Use `THINKLESS_WINDOWS_INSTALL_DEPS=0` to skip dependency installation and only install Thinkless from the tarball. Use `THINKLESS_AUTH_ONBOARDING=0` to skip interactive Codex, Claude, and GitHub CLI auth prompts. If auth is skipped or unavailable, the installer prints the pending setup commands: `codex login`, `gh auth login`, and `claude`.
 
 If you already have trusted local config files, pass them during install with a private bundle:
 

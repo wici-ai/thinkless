@@ -9,6 +9,13 @@ curl -fsSL https://wici.ai/thinkless/install.sh | bash
 thinkless
 ```
 
+On Windows:
+
+```powershell
+irm https://wici.ai/thinkless/install.ps1 | iex
+thinkless
+```
+
 Then follow the Codex, Claude, and GitHub CLI auth prompts and verify the setup:
 
 ```bash
@@ -24,7 +31,7 @@ thinkless doctor --deep
 - Codex executes, validates, recovers from failures, and continues.
 - Follow-up chat updates the same run instead of rewriting the original prompt.
 
-Submitted chat is append-only: clarify with the next turn, keep the history auditable, and let the plan improve from evidence.
+Submitted chat is append-only: clarify next turn, keep the history auditable, and let the plan improve from evidence.
 
 ## Usage
 
@@ -73,13 +80,19 @@ npm run verify:v1-core
 
 ## macOS Bootstrap
 
-The public release installer is:
+The public release installers are:
 
 ```bash
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
 ```
 
+```powershell
+irm https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1 | iex
+```
+
 On macOS, `npm install` runs `scripts/postinstall.mjs` as a postinstall bootstrap; use `THINKLESS_BOOTSTRAP=0 npm install` to opt out. For a fresh Mac with no `npm` yet, run `scripts/bootstrap-macos.sh` from a source checkout.
+
+On Windows, `install.ps1` uses `winget` for Node.js LTS, Git, and GitHub CLI, installs Codex and Claude through npm, adds npm global commands to user PATH, and prints auth setup commands. Set `THINKLESS_WINDOWS_INSTALL_DEPS=0` to skip dependency installation.
 
 The bootstrap waits for Apple Command Line Tools, installs missing host commands, may update `~/.zprofile` and `~/.zshrc`, and exposes `node`, `npm`, `thinkless`, `codex`, `claude`, and `gh` from clean zsh login and interactive shells. It prints `export PATH=... && thinkless` for the current terminal.
 

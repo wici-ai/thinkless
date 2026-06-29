@@ -69,7 +69,12 @@ async function main(): Promise<void> {
   assert(missingFromDocs.length === 0, `docs command list missing package verify scripts: ${missingFromDocs.join(', ')}`);
   assert(extraInDocs.length === 0, `docs command list has unknown verify scripts: ${extraInDocs.join(', ')}`);
   assert(readme.includes('# Thinkless'), 'README should identify the project');
-  assert(readme.includes('## Install') && readme.includes('curl -fsSL https://wici.ai/thinkless/install.sh | bash'), 'README should keep a short install path');
+  assert(
+    readme.includes('## Install') &&
+      readme.includes('curl -fsSL https://wici.ai/thinkless/install.sh | bash') &&
+      readme.includes('irm https://wici.ai/thinkless/install.ps1 | iex'),
+    'README should keep short macOS/Linux and Windows install paths'
+  );
   assert(readme.includes('## Usage') && readme.includes('thinkless resume'), 'README should keep concise usage examples');
   assert(readme.includes('[Full reference](docs/reference.md)'), 'README should link the detailed reference docs');
   assert(readme.length < 7000, 'README should stay concise for an open-source repo landing page');
@@ -186,6 +191,7 @@ async function main(): Promise<void> {
   assert(
       docsText.includes('## macOS Bootstrap') &&
       docsText.includes('curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash') &&
+      docsText.includes('irm https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1 | iex') &&
       docsText.includes('THINKLESS_TARBALL_URL') &&
       docsText.includes('workflow is manually triggered') &&
       docsText.includes('Publish public install release') &&
@@ -209,6 +215,19 @@ async function main(): Promise<void> {
       docsText.includes('THINKLESS_AUTH_ONBOARDING=0') &&
       docsText.includes('auth is pending'),
     'docs should document public one-line install, automatic macOS install-time bootstrap, and the no-npm bootstrap path'
+  );
+  assert(
+    docsText.includes('## Windows Bootstrap') &&
+      docsText.includes('THINKLESS_WINDOWS_INSTALL_DEPS=0') &&
+      docsText.includes('winget') &&
+      docsText.includes('`node`, `npm`, `git`, `thinkless`, `codex`, `claude`, and `gh`'),
+    'docs should document the Windows PowerShell installer and dependency controls'
+  );
+  assert(
+    installPage.includes('irm https://wici.ai/thinkless/install.ps1 | iex') &&
+      installPage.includes('macOS / Linux') &&
+      installPage.includes('Windows PowerShell'),
+    'install page should expose both macOS/Linux and Windows install commands'
   );
   assert(
     docsText.includes('`brew`, `git`, `node`, `npm`, `gh`, `codex`, and `claude`') &&

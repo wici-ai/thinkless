@@ -77,13 +77,15 @@ async function main(): Promise<void> {
   const postinstall = await readFile('scripts/postinstall.mjs', 'utf8');
   const publicInstaller = await readFile('scripts/install.sh', 'utf8');
   const docsInstaller = await readFile('docs/install.sh', 'utf8');
+  const windowsInstaller = await readFile('scripts/install.ps1', 'utf8');
+  const docsWindowsInstaller = await readFile('docs/install.ps1', 'utf8');
   const publicReleaseWorkflow = await readFile('.github/workflows/public-release.yml', 'utf8');
   const oldReleaseRepoName = ['thinkless', 'releases'].join('-');
   const oldDevRepoName = ['thinkless', 'dev'].join('-');
   const oldSplitTokenName = ['THINKLESS', 'PUBLIC', 'RELEASE', 'TOKEN'].join('_');
   const oldSplitInputName = ['public', 'repo'].join('_');
   const forbiddenSudoNpm = ['sudo', 'npm'].join(' ');
-  const installTail = 'verify_required_commands\nprint_path_activation_note\nrun_auth_onboarding';
+  const installTail = ['verify_required_commands', 'print_path_activation_note', 'run_auth_onboarding'];
   const authPrompts = ['Sign in to Codex now?', 'Sign in to GitHub CLI now?', 'Sign in to Claude Code now?'];
   assert(postinstall.includes("join(homedir(), '.local', 'bin')") && postinstall.includes("join(homedir(), '.claude', 'local')") && postinstall.includes('/opt/homebrew/bin'), 'postinstall must check common native installer paths before verification');
   assert(postinstall.includes('xcode-select --install') && postinstall.includes('THINKLESS_XCODE_WAIT_SECONDS'), 'postinstall must wait for Apple Command Line Tools when Homebrew is needed');
@@ -94,7 +96,7 @@ async function main(): Promise<void> {
   assert(bootstrap.includes('npm prefix -g') && bootstrap.includes('activation_path_dirs') && bootstrap.includes('$HOME/.zprofile') && bootstrap.includes('$HOME/.zshrc'), 'zero-npm macOS bootstrap must persist discovered command paths to common zsh startup files');
   assert(bootstrap.includes('print_path_activation_note') && bootstrap.includes('open a new terminal') && bootstrap.includes('export PATH=\\"$path_prefix:\\$PATH\\"') && bootstrap.includes('&& thinkless'), 'zero-npm macOS bootstrap must tell users how to activate PATH and launch Thinkless in the current terminal');
   assert(bootstrap.includes('env -i HOME="$HOME"') && bootstrap.includes('/bin/zsh -lc') && bootstrap.includes('/bin/zsh -ic') && bootstrap.includes('for cmd in node npm thinkless codex claude gh') && bootstrap.includes('THINKLESS_SELF_UPDATE=0') && bootstrap.includes('codex --version >/dev/null') && bootstrap.includes('claude --version >/dev/null'), 'zero-npm macOS bootstrap must verify Node, npm, Thinkless, Codex, Claude, and GitHub CLI from clean zsh login and interactive shells');
-  assert(bootstrap.includes(installTail), 'zero-npm macOS bootstrap must verify commands, print PATH guidance, and run auth onboarding before reporting success');
+  assert(containsInOrder(bootstrap, installTail), 'zero-npm macOS bootstrap must verify commands, print PATH guidance, and run auth onboarding before reporting success');
   assert(bootstrap.includes('THINKLESS_AUTH_ONBOARDING') && bootstrap.includes('true 2>/dev/null < /dev/tty > /dev/tty') && bootstrap.includes('gh auth login') && bootstrap.includes('run_tty "$codex_cmd"') && bootstrap.includes('run_tty "claude"') && authPrompts.every((prompt) => bootstrap.includes(prompt)), 'zero-npm macOS bootstrap must offer terminal-backed auth onboarding for Codex, Claude, and GitHub CLI');
   assert(bootstrap.includes('auth onboarding status') && bootstrap.includes('setup command: gh auth login') && bootstrap.includes('auth onboarding skipped') && bootstrap.includes('THINKLESS_AUTH_PENDING=1') && bootstrap.includes('auth is pending') && bootstrap.includes('OPENAI_API_KEY') && bootstrap.includes('ANTHROPIC_API_KEY'), 'zero-npm macOS bootstrap must distinguish installed commands from pending auth and print setup commands');
   assert(bootstrap.includes('require_sudo_access') && bootstrap.includes('npm link failed') && !bootstrap.includes(forbiddenSudoNpm), 'zero-npm macOS bootstrap must verify sudo without running npm under elevated privileges');
@@ -107,7 +109,7 @@ async function main(): Promise<void> {
   assert(publicInstaller.includes('npm prefix -g') && publicInstaller.includes('activation_path_dirs') && publicInstaller.includes('$HOME/.zprofile') && publicInstaller.includes('$HOME/.zshrc'), 'public installer must persist discovered command paths to common zsh startup files');
   assert(publicInstaller.includes('print_path_activation_note') && publicInstaller.includes('open a new terminal') && publicInstaller.includes('export PATH=\\"$path_prefix:\\$PATH\\"') && publicInstaller.includes('&& thinkless'), 'public installer must tell users how to activate PATH and launch Thinkless in the current terminal');
   assert(publicInstaller.includes('env -i HOME="$HOME"') && publicInstaller.includes('/bin/zsh -lc') && publicInstaller.includes('/bin/zsh -ic') && publicInstaller.includes('for cmd in node npm thinkless codex claude gh') && publicInstaller.includes('THINKLESS_SELF_UPDATE=0') && publicInstaller.includes('codex --version >/dev/null') && publicInstaller.includes('claude --version >/dev/null'), 'public installer must verify Node, npm, Thinkless, Codex, Claude, and GitHub CLI from clean zsh login and interactive shells');
-  assert(publicInstaller.includes(installTail), 'public installer must verify commands, print PATH guidance, and run auth onboarding before reporting success');
+  assert(containsInOrder(publicInstaller, installTail), 'public installer must verify commands, print PATH guidance, and run auth onboarding before reporting success');
   assert(publicInstaller.includes('THINKLESS_AUTH_ONBOARDING') && publicInstaller.includes('true 2>/dev/null < /dev/tty > /dev/tty') && publicInstaller.includes('gh auth login') && publicInstaller.includes('run_tty "$codex_cmd"') && publicInstaller.includes('run_tty "claude"') && authPrompts.every((prompt) => publicInstaller.includes(prompt)), 'public installer must offer terminal-backed auth onboarding for Codex, Claude, and GitHub CLI');
   assert(publicInstaller.includes('auth onboarding status') && publicInstaller.includes('setup command: gh auth login') && publicInstaller.includes('auth onboarding skipped') && publicInstaller.includes('THINKLESS_AUTH_PENDING=1') && publicInstaller.includes('auth is pending') && publicInstaller.includes('OPENAI_API_KEY') && publicInstaller.includes('ANTHROPIC_API_KEY'), 'public installer must distinguish installed commands from pending auth and print setup commands');
   assert(publicInstaller.includes('require_sudo_access') && publicInstaller.includes('npm global install failed') && !publicInstaller.includes(forbiddenSudoNpm), 'public installer must verify sudo without running npm under elevated privileges');
@@ -119,12 +121,19 @@ async function main(): Promise<void> {
     'public installer must resolve the latest public release tag through the GitHub API before falling back to latest/download'
   );
   assert(docsInstaller === publicInstaller, 'GitHub Pages docs/install.sh must stay identical to the public installer script');
+  assert(windowsInstaller.includes('THINKLESS_TARBALL_URL') && windowsInstaller.includes("Invoke-Checked 'npm' @('install', '-g'") && windowsInstaller.includes('thinkless.tgz'), 'Windows installer must install Thinkless from the release tarball with npm');
+  assert(windowsInstaller.includes('OpenJS.NodeJS.LTS') && windowsInstaller.includes('Git.Git') && windowsInstaller.includes('GitHub.cli') && windowsInstaller.includes("Invoke-Checked 'winget'") && windowsInstaller.includes("'install'"), 'Windows installer must use winget for missing Node.js, Git, and GitHub CLI');
+  assert(windowsInstaller.includes("@openai/codex") && windowsInstaller.includes("@anthropic-ai/claude-code"), 'Windows installer must install Codex and Claude Code CLIs through npm');
+  assert(windowsInstaller.includes('THINKLESS_WINDOWS_INSTALL_DEPS') && windowsInstaller.includes('THINKLESS_AUTH_ONBOARDING') && windowsInstaller.includes('codex login') && windowsInstaller.includes('gh auth login') && windowsInstaller.includes('claude'), 'Windows installer must document dependency and auth controls');
+  assert(windowsInstaller.includes('SetEnvironmentVariable') && windowsInstaller.includes("verified node, npm, git, thinkless, codex, claude, and gh on PATH"), 'Windows installer must persist PATH and verify required commands');
+  assert(docsWindowsInstaller === windowsInstaller, 'GitHub Pages docs/install.ps1 must stay identical to the Windows installer script');
   assert(publicReleaseWorkflow.includes('workflow_dispatch:'), 'public release workflow must be manually triggered');
   assert(!publicReleaseWorkflow.includes('push:') && !publicReleaseWorkflow.includes('pull_request:'), 'public release workflow must not run on pushes or pull requests');
   assert(publicReleaseWorkflow.includes('permissions:') && publicReleaseWorkflow.includes('contents: write'), 'public release workflow must be able to publish releases in this repo');
   assert(publicReleaseWorkflow.includes('GH_TOKEN: ${{ github.token }}') && publicReleaseWorkflow.includes('--repo "$GITHUB_REPOSITORY"'), 'public release workflow must publish to the current public repo');
   assert(!publicReleaseWorkflow.includes(oldSplitTokenName) && !publicReleaseWorkflow.includes(oldSplitInputName), 'public release workflow must not require old split release credentials');
   assert(publicReleaseWorkflow.includes('ref: ${{ inputs.version }}'), 'public release workflow must build from the explicitly selected release tag');
+  assert(publicReleaseWorkflow.includes('release/install.ps1'), 'public release workflow must upload the Windows installer asset');
   assert(!publicReleaseWorkflow.includes(oldReleaseRepoName), 'release workflow must not reference the old split repo name');
   assert(!publicReleaseWorkflow.includes(oldDevRepoName), 'public release workflow must not reference the old dev repo name');
 
@@ -134,6 +143,7 @@ async function main(): Promise<void> {
   assert(readme.includes('scripts/bootstrap-macos.sh') && readme.includes('no `npm` yet'), 'README must document the no-npm bootstrap path');
   assert(readme.includes('THINKLESS_CONFIG_BUNDLE') && readme.includes('THINKLESS_BOOTSTRAP=0'), 'README must document config bundle and opt-out environment variables');
   assert(readme.includes('curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash'), 'README must document the one-line public release installer');
+  assert(readme.includes('irm https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1 | iex') && readme.includes('THINKLESS_WINDOWS_INSTALL_DEPS=0'), 'README must document the Windows public release installer');
   assert(readme.includes('git clone git@github.com:wici-ai/thinkless.git'), 'README must document the public thinkless source repo');
   assert(!readme.includes(oldReleaseRepoName), 'README must not reference the old split repo name');
   assert(!readme.includes(oldDevRepoName), 'README must not reference the old dev repo name');
@@ -162,6 +172,16 @@ async function main(): Promise<void> {
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function containsInOrder(text: string, needles: string[]): boolean {
+  let offset = 0;
+  for (const needle of needles) {
+    const index = text.indexOf(needle, offset);
+    if (index === -1) return false;
+    offset = index + needle.length;
+  }
+  return true;
 }
 
 await main();

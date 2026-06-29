@@ -93,9 +93,14 @@ body {
   line-height: 1.55;
 }
 
-.command-panel {
+.command-list {
   width: min(840px, 100%);
   margin: 8px auto 0;
+  display: grid;
+  gap: 12px;
+}
+
+.command-panel {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
@@ -106,6 +111,14 @@ body {
   background: var(--tl-panel);
   box-shadow: var(--tl-shadow);
   backdrop-filter: blur(12px);
+}
+
+.command-label {
+  margin: 0 0 8px;
+  color: var(--tl-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .command-line {
@@ -390,14 +403,31 @@ body {
       <p class="install-kicker"><span class="install-mark">T</span> Thinkless install</p>
       <h1 id="install-title" class="install-title">Less thinking effort for AI software work.</h1>
       <p class="install-copy">Thinkless separates what you mean from how the work gets done. Say the goal in normal language; the system writes the plan, executes it with Codex, and keeps improving the plan as evidence arrives.</p>
-      <div class="command-panel" role="group" aria-label="Install command">
-        <pre class="command-line"><code id="install-command">curl -fsSL https://wici.ai/thinkless/install.sh | bash</code></pre>
-        <button class="copy-command" type="button" onclick="copyInstallCommand(this)" aria-label="Copy install command" title="Copy install command">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
-            <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-          </svg>
-        </button>
+      <div class="command-list" aria-label="Install commands">
+        <div class="command-panel" role="group" aria-label="macOS and Linux install command">
+          <div>
+            <p class="command-label">macOS / Linux</p>
+            <pre class="command-line"><code id="install-command-unix">curl -fsSL https://wici.ai/thinkless/install.sh | bash</code></pre>
+          </div>
+          <button class="copy-command" type="button" onclick="copyInstallCommand(this, 'install-command-unix')" aria-label="Copy macOS and Linux install command" title="Copy install command">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
+              <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="command-panel" role="group" aria-label="Windows install command">
+          <div>
+            <p class="command-label">Windows PowerShell</p>
+            <pre class="command-line"><code id="install-command-windows">irm https://wici.ai/thinkless/install.ps1 | iex</code></pre>
+          </div>
+          <button class="copy-command" type="button" onclick="copyInstallCommand(this, 'install-command-windows')" aria-label="Copy Windows install command" title="Copy install command">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
+              <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+            </svg>
+          </button>
+        </div>
       </div>
       <div id="copy-status" class="copy-status" aria-live="polite"></div>
       <div class="flow-strip" aria-label="Thinkless workflow">
@@ -489,8 +519,8 @@ Thinkless: escalates when the work becomes an implementation and validation loop
 </main>
 
 <script>
-function copyInstallCommand(button) {
-  const command = document.getElementById('install-command').textContent.trim();
+function copyInstallCommand(button, commandId) {
+  const command = document.getElementById(commandId).textContent.trim();
   const status = document.getElementById('copy-status');
   const writeFallback = function () {
     const textarea = document.createElement('textarea');

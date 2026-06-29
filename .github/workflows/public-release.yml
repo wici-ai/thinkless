@@ -33,6 +33,7 @@ jobs:
           npm pack --pack-destination release
           cp release/thinkless-*.tgz release/thinkless.tgz
           cp scripts/install.sh release/install.sh
+          cp scripts/install.ps1 release/install.ps1
 
       - name: Publish release assets
         env:
@@ -43,6 +44,7 @@ jobs:
           gh release create "$VERSION" \
             release/thinkless.tgz \
             release/install.sh \
+            release/install.ps1 \
             --repo "$GITHUB_REPOSITORY" \
             --title "Thinkless $VERSION" \
             --notes "Thinkless install release assets built from the selected source tag."
