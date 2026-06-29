@@ -33,7 +33,7 @@ import {
   runMeasure,
   updateBaselineAfterKeep
 } from './evaluate.js';
-import { commitAll, commitAllWithKey, currentCommit, ensureGitIdentity, ensureGitRepo, hasChanges, tagBest, tagPerf, revertToBest, resetToCommit } from './gitgate.js';
+import { commitAll, commitAllWithKey, currentCommit, ensureGitIdentity, ensureGitRepo, hasChanges, resolveGitWorktreeRoot, tagBest, tagPerf, revertToBest, resetToCommit } from './gitgate.js';
 import { directContinuationVerdict, shouldStop } from './stop.js';
 import {
   assertRealToolsReady,
@@ -93,7 +93,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
   try {
     await ensureGitRepo(paths, config);
     await ensureGitIdentity(paths, config);
-    await ensureTargetGitignore(paths);
+    await ensureTargetGitignore(paths, await resolveGitWorktreeRoot(paths));
 
     let resumePreflight: ResumeCandidate | null = null;
     if (options.resumePreflight && !options.goal) {

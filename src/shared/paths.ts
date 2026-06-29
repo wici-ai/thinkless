@@ -1,4 +1,4 @@
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
@@ -211,12 +211,13 @@ export async function ensureRunDirs(paths: RunPaths): Promise<void> {
   ]);
 }
 
-export async function ensureTargetGitignore(paths: RunPaths): Promise<void> {
-  const gitDir = join(paths.target, '.git');
-  if (!(await exists(gitDir))) return;
+export async function ensureTargetGitignore(paths: RunPaths, resolvedGitRoot?: string | null): Promise<void> {
+  const gitRoot = resolvedGitRoot ?? await findContainingGitRoot(paths.target);
+  if (!gitRoot) return;
 
-  const gitignore = join(paths.target, '.gitignore');
-  const lines = ['.thinkless/', '.thinkless*/', '.wici/', 'GOAL.md', 'PLAN.md', 'ASSUMPTIONS.md', 'ledger.jsonl', 'baseline.json'];
+  const gitignore = join(gitRoot, '.gitignore');
+  const lines = targetGitignoreLines(paths, gitRoot);
+  if (lines.length === 0) return;
   if (await exists(gitignore)) {
     const current = await readFile(gitignore, 'utf8');
     const currentLines = new Set(current.split('\n'));
@@ -227,6 +228,37 @@ export async function ensureTargetGitignore(paths: RunPaths): Promise<void> {
   } else {
     await atomicWriteFile(gitignore, `${lines.join('\n')}\n`);
   }
+}
+
+async function findContainingGitRoot(start: string): Promise<string | null> {
+  let current = resolve(start);
+  while (true) {
+    if (await exists(join(current, '.git'))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+function targetGitignoreLines(paths: RunPaths, gitRoot: string): string[] {
+  const targetPrefix = toGitRelativePath(gitRoot, paths.target);
+  if (targetPrefix.startsWith('..') || isAbsolute(targetPrefix)) return [];
+  const prefix = targetPrefix ? `${targetPrefix}/` : '';
+  return [
+    `${prefix}.thinkless/`,
+    `${prefix}.thinkless*/`,
+    `${prefix}.wici/`,
+    `${prefix}GOAL.md`,
+    `${prefix}PLAN.md`,
+    `${prefix}ASSUMPTIONS.md`,
+    `${prefix}ledger.jsonl`,
+    `${prefix}baseline.json`
+  ];
+}
+
+function toGitRelativePath(root: string, path: string): string {
+  const rel = relative(resolve(root), resolve(path));
+  return rel.split('\\').join('/');
 }
 
 export function schemaPath(name: 'iter-result'): string {

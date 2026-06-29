@@ -1,13 +1,15 @@
 import { mkdir, readdir, realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { execa } from 'execa';
 import type { RunPaths } from '../shared/paths.js';
 import type { WiCiConfig } from '../shared/types.js';
 
-const WICI_SCAFFOLD_ENTRIES = new Set(['.thinkless', '.wici', '.opt']);
+const NESTED_GIT_SEARCH_MAX_DEPTH = 5;
+const NESTED_GIT_SEARCH_SKIP = new Set(['.git', '.thinkless', '.wici', '.opt', 'node_modules', 'vendor', 'dist', 'build', 'coverage']);
 
 async function git(paths: RunPaths, args: string[], reject = true): Promise<string> {
-  const result = await execa('git', ['-C', paths.target, ...args], {
+  const root = await resolveGitWorktreeRoot(paths);
+  const result = await execa('git', ['-C', root ?? paths.target, ...args], {
     reject,
     all: true
   });
@@ -15,19 +17,16 @@ async function git(paths: RunPaths, args: string[], reject = true): Promise<stri
 }
 
 export async function isGitRepo(paths: RunPaths): Promise<boolean> {
-  const result = await execa('git', ['-C', paths.target, 'rev-parse', '--show-toplevel'], {
-    reject: false
-  });
-  if (result.exitCode !== 0) return false;
-  return sameExistingPath(result.stdout.trim(), paths.target);
+  return Boolean(await resolveGitWorktreeRoot(paths));
 }
 
-async function sameExistingPath(left: string, right: string): Promise<boolean> {
-  const [canonicalLeft, canonicalRight] = await Promise.all([
-    canonicalExistingPath(left),
-    canonicalExistingPath(right)
-  ]);
-  return canonicalLeft === canonicalRight;
+export async function resolveGitWorktreeRoot(paths: RunPaths): Promise<string | null> {
+  const result = await execa('git', ['-C', paths.target, 'rev-parse', '--show-toplevel'], { reject: false });
+  if (result.exitCode === 0 && result.stdout.trim()) return result.stdout.trim();
+  const nested = await findNestedGitRoots(paths.target);
+  if (nested[0]) return nested[0];
+  const adjacent = await findAdjacentGitRoots(paths.target);
+  return adjacent[0] ?? null;
 }
 
 async function canonicalExistingPath(path: string): Promise<string> {
@@ -46,45 +45,91 @@ function normalizePathForComparison(path: string): string {
 
 export async function ensureGitRepo(paths: RunPaths, config: WiCiConfig): Promise<void> {
   if (await isGitRepo(paths)) return;
-  const canInit = config.git.init_if_missing || (await hasOnlyWiCiScaffold(paths.target));
-  if (!canInit) {
-    throw new Error(`Target is not a git repository: ${paths.target}`);
-  }
   await mkdir(paths.target, { recursive: true });
   await execa('git', ['-C', paths.target, 'init']);
   await execa('git', ['-C', paths.target, 'config', 'user.name', config.git.user_name]);
   await execa('git', ['-C', paths.target, 'config', 'user.email', config.git.user_email]);
 }
 
-async function hasOnlyWiCiScaffold(target: string): Promise<boolean> {
+async function findNestedGitRoots(target: string): Promise<string[]> {
+  const found: string[] = [];
+  await walkForNestedGitRoots(resolve(target), 0, found);
+  return found.sort((a, b) => pathDepth(a) - pathDepth(b) || a.localeCompare(b));
+}
+
+async function findAdjacentGitRoots(target: string): Promise<string[]> {
+  const requested = normalizePathForComparison(target);
+  const parent = dirname(resolve(target));
+  let entries;
   try {
-    const entries = await readdir(target, { withFileTypes: true });
-    return entries.every((entry) => WICI_SCAFFOLD_ENTRIES.has(entry.name) || /^\.thinkless[1-9]\d*$/.test(entry.name));
+    entries = await readdir(parent, { withFileTypes: true });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
     throw error;
   }
+  const found: string[] = [];
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => !NESTED_GIT_SEARCH_SKIP.has(entry.name) && !/^\.thinkless[1-9]\d*$/.test(entry.name))
+      .map(async (entry) => {
+        const sibling = resolve(parent, entry.name);
+        if (normalizePathForComparison(sibling) === requested) return;
+        await walkForNestedGitRoots(sibling, 0, found);
+      })
+  );
+  return found.sort((a, b) => pathDepth(a) - pathDepth(b) || a.localeCompare(b));
+}
+
+async function walkForNestedGitRoots(dir: string, depth: number, found: string[]): Promise<void> {
+  if (depth > NESTED_GIT_SEARCH_MAX_DEPTH) return;
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return;
+    throw error;
+  }
+  if (entries.some((entry) => entry.name === '.git')) {
+    found.push(dir);
+    return;
+  }
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => !NESTED_GIT_SEARCH_SKIP.has(entry.name) && !/^\.thinkless[1-9]\d*$/.test(entry.name))
+      .map((entry) => walkForNestedGitRoots(resolve(dir, entry.name), depth + 1, found))
+  );
+}
+
+function pathDepth(path: string): number {
+  return resolve(path).split(/[\\/]+/).length;
 }
 
 export async function ensureGitIdentity(paths: RunPaths, config: WiCiConfig): Promise<void> {
-  const name = await execa('git', ['-C', paths.target, 'config', '--get', 'user.name'], { reject: false });
+  const root = await resolveGitWorktreeRoot(paths) ?? paths.target;
+  const name = await execa('git', ['-C', root, 'config', '--get', 'user.name'], { reject: false });
   if (name.exitCode !== 0 || !name.stdout.trim()) {
-    await execa('git', ['-C', paths.target, 'config', 'user.name', config.git.user_name]);
+    await execa('git', ['-C', root, 'config', 'user.name', config.git.user_name]);
   }
-  const email = await execa('git', ['-C', paths.target, 'config', '--get', 'user.email'], { reject: false });
+  const email = await execa('git', ['-C', root, 'config', '--get', 'user.email'], { reject: false });
   if (email.exitCode !== 0 || !email.stdout.trim()) {
-    await execa('git', ['-C', paths.target, 'config', 'user.email', config.git.user_email]);
+    await execa('git', ['-C', root, 'config', 'user.email', config.git.user_email]);
   }
 }
 
 export async function currentCommit(paths: RunPaths): Promise<string> {
-  const result = await execa('git', ['-C', paths.target, 'rev-parse', 'HEAD'], { reject: false });
+  const root = await resolveGitWorktreeRoot(paths) ?? paths.target;
+  const result = await execa('git', ['-C', root, 'rev-parse', 'HEAD'], { reject: false });
   if (result.exitCode !== 0) return 'NO_HEAD';
   return result.stdout.trim();
 }
 
 export async function hasTrackedHead(paths: RunPaths): Promise<boolean> {
-  const result = await execa('git', ['-C', paths.target, 'rev-parse', '--verify', 'HEAD'], { reject: false });
+  const root = await resolveGitWorktreeRoot(paths) ?? paths.target;
+  const result = await execa('git', ['-C', root, 'rev-parse', '--verify', 'HEAD'], { reject: false });
   return result.exitCode === 0;
 }
 
@@ -123,7 +168,8 @@ export async function tagBest(paths: RunPaths): Promise<void> {
 }
 
 export async function revertToBest(paths: RunPaths, bestCommit: string): Promise<void> {
-  const bestTag = await execa('git', ['-C', paths.target, 'rev-parse', '--verify', 'refs/tags/wici/best'], {
+  const root = await resolveGitWorktreeRoot(paths) ?? paths.target;
+  const bestTag = await execa('git', ['-C', root, 'rev-parse', '--verify', 'refs/tags/wici/best'], {
     reject: false
   });
   const rollbackTarget = bestTag.exitCode === 0 ? 'wici/best' : bestCommit;
@@ -132,7 +178,7 @@ export async function revertToBest(paths: RunPaths, bestCommit: string): Promise
   } else {
     await git(paths, ['restore', '--staged', '--worktree', '.'], false);
   }
-  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.thinkless*/', '-e', '.wici/'], false);
+  await git(paths, ['clean', '-fd', ...(await gitCleanExcludes(paths))], false);
 }
 
 export async function resetToCommit(paths: RunPaths, commit: string): Promise<void> {
@@ -140,5 +186,22 @@ export async function resetToCommit(paths: RunPaths, commit: string): Promise<vo
     throw new Error(`Cannot reset to invalid WiCi checkpoint commit: ${commit}`);
   }
   await git(paths, ['reset', '--hard', commit]);
-  await git(paths, ['clean', '-fd', '-e', '.thinkless/', '-e', '.thinkless*/', '-e', '.wici/'], false);
+  await git(paths, ['clean', '-fd', ...(await gitCleanExcludes(paths))], false);
+}
+
+async function gitCleanExcludes(paths: RunPaths): Promise<string[]> {
+  const root = await resolveGitWorktreeRoot(paths) ?? paths.target;
+  const targetPrefix = await toGitRelativePath(root, paths.target);
+  if (targetPrefix.startsWith('..') || isAbsolute(targetPrefix)) return [];
+  const prefix = targetPrefix ? `${targetPrefix}/` : '';
+  return ['-e', `${prefix}.thinkless/`, '-e', `${prefix}.thinkless*/`, '-e', `${prefix}.wici/`];
+}
+
+async function toGitRelativePath(root: string, path: string): Promise<string> {
+  const [canonicalRoot, canonicalPath] = await Promise.all([
+    canonicalExistingPath(root),
+    canonicalExistingPath(path)
+  ]);
+  const rel = relative(canonicalRoot, canonicalPath);
+  return rel.split('\\').join('/');
 }
