@@ -128,6 +128,7 @@ export function ChatInputBox({
   sessionDir,
   interactive = true,
   outbox = [],
+  supervisorState,
   goalDoc = '',
   plan = '',
   events = [],
@@ -148,6 +149,7 @@ export function ChatInputBox({
   sessionDir?: string;
   interactive?: boolean;
   outbox?: OutboxMessage[];
+  supervisorState?: string;
   goalDoc?: string;
   plan?: string;
   events?: RunEvent[];
@@ -217,7 +219,7 @@ export function ChatInputBox({
     }
 
     const paths = runPaths(target, sessionDir);
-    const latestQuestion = hasExistingRun
+    const latestQuestion = hasExistingRun && supervisorState === 'STOP'
       ? [...outbox].reverse().find((message) => message.kind === 'question' && message.reply_key && !message.answered)
       : undefined;
 
@@ -266,10 +268,10 @@ export function ChatInputBox({
       return;
     }
 
-    // Explicit control input: slash commands and answers to an open planner
-    // question bypass the conversational agent and go straight to the inbox.
+    // Explicit control input bypasses the conversational agent. Open questions
+    // only capture plain answers; status/why/how questions still go to Chat.
     const isSlash = text.startsWith('/abort ') || text.startsWith('/drop ') || text.startsWith('/answer ') || text.startsWith('/steer ');
-    if (isSlash || latestQuestion) {
+    if (isSlash || (latestQuestion && shouldRouteTextAsOutboxAnswer(text, latestQuestion))) {
       const injection =
         text.startsWith('/abort ')
           ? await writeInjection(paths, { kind: 'abort', text: text.slice('/abort '.length), priority: 'urgent' })
@@ -417,6 +419,7 @@ export function ChatPane({
         sessionDir={sessionDir}
         interactive={interactive}
         outbox={outbox}
+        supervisorState={supervisorState}
         goalDoc={goalDoc}
         plan={plan}
         events={events}
@@ -544,6 +547,28 @@ export function currentGoalSummary(goal: GoalFile | null): string {
   const first = active[0]?.text.trim() || 'no active requirement';
   const suffix = active.length > 1 ? ` (+${active.length - 1})` : '';
   return `Current goal v${goal.version}: ${truncate(first, 96)}${suffix}`;
+}
+
+export function shouldRouteTextAsOutboxAnswer(text: string, latestQuestion: OutboxMessage | undefined): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || !latestQuestion?.reply_key) return false;
+  if (trimmed.startsWith('/')) return trimmed.startsWith('/answer ');
+  if (isConversationalQuestion(trimmed)) return false;
+  if (latestQuestion.reply_key.startsWith('planner-clarify-')) return true;
+  if (/^(stop|continue|resume|proceed|yes|no|approved|approve|ok|okay|go|halt|pause)\b/i.test(trimmed)) return true;
+  if (/^(停止|继续|恢?复|可以|确认|同意|不同意|批准|别跑|先停|暂停)\b/.test(trimmed)) return true;
+  if (/^(steer|new requirement|requirement)\s*:/i.test(trimmed)) return true;
+  return false;
+}
+
+function isConversationalQuestion(text: string): boolean {
+  const normalized = text.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!normalized) return false;
+  return (
+    /[?锛焆]/.test(normalized) ||
+    /\b(what|why|how|where|when|whether|status|progress|bottleneck|blocked|stuck|question|explain|show|current)\b/i.test(normalized) ||
+    /(什么|为何|为什么|怎么|如何|是否|现在|当前|进度|卡点|瓶颈|阻塞|停在|说明|解释|看看|看下|问chat)/.test(normalized)
+  );
 }
 
 function buildActiveOutboxLines(outbox: OutboxMessage[]): ChatHistoryLine[] {

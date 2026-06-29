@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const target = resolve('fixture/tui-chat-pty-target');
 const firstChat = 'Build a tiny verified CLI from a real PTY Chat-first TUI input';
@@ -68,8 +69,7 @@ async function main(): Promise<void> {
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-chat-pty requires expect on PATH');
+  await requireExpectOrSkip('tui-chat-pty');
 }
 
 function expectScript(): string {

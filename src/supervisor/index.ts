@@ -1005,7 +1005,7 @@ async function runDirectPlanExecution(
         usage: iterResult.invocation.usage,
         mode: 'direct'
       });
-      await setPlanStepStatus(paths, step.id, iterResult.step_done && iterResult.tests_pass ? 'done' : 'pending', nextIter);
+      await setPlanStepStatus(paths, step.id, iterResult.step_done ? 'done' : 'pending', nextIter);
       const directBestCommit = await currentCommitOrNull(paths) ?? checkpoint.best_commit ?? null;
       if (await hasChanges(paths)) {
         await events.emit('DIRECT_UNCOMMITTED_CHANGES', 'Executor left uncommitted worktree changes; direct V1 expects PLAN.md to make Codex commit code changes itself', {
@@ -1314,7 +1314,8 @@ async function continueDirectExhaustedPlan(
   };
   await saveCheckpoint(paths, checkpoint);
 
-  const verdict = await directContinuationVerdict(paths, goal, await readLedger(paths), config);
+  const ledger = await readLedger(paths);
+  const verdict = await directContinuationVerdict(paths, goal, ledger, config);
   await events.emit(
     'DIRECT_CONTINUATION_VERDICT',
     `Direct completion gate chose ${verdict.decision}: ${verdict.reason}`,
@@ -1331,11 +1332,26 @@ async function continueDirectExhaustedPlan(
     const threshold = continuationFallbackThreshold();
     const replyKey = `${CONTINUATION_STALL_REPLY_PREFIX}${checkpoint.iter}`;
     const reason = `Continuation gate fell back ${continuationFallbacks} consecutive time(s); pausing instead of continuing to manufacture work.`;
+    const questionText = buildContinuationStallQuestionText(reason, {
+      goal,
+      plan,
+      ledger,
+      verdict,
+      continuationFallbacks,
+      threshold
+    });
     const question = await writeOutbox(paths, {
       kind: 'question',
-      text: `${reason} Reply with a steer or new requirement to resume, or answer stop to leave the run stopped.`,
+      text: questionText,
       replyKey,
-      data: { mode: 'direct', verdict, consecutive_continuation_fallbacks: continuationFallbacks, threshold }
+      data: {
+        mode: 'direct',
+        verdict,
+        consecutive_continuation_fallbacks: continuationFallbacks,
+        threshold,
+        recent_ledger: summarizeRecentLedgerForQuestion(ledger),
+        pending_steps: summarizePendingPlanSteps(plan)
+      }
     });
     checkpoint = {
       ...checkpoint,
@@ -1428,15 +1444,25 @@ async function continueDirectExhaustedPlan(
       await atomicWriteFile(paths.plan, ensureTrailingNewline(plan));
       const replyKey = `${CONTINUATION_STALL_REPLY_PREFIX}${checkpoint.iter}-dedup`;
       const reason = `Planner continuation proposed near-duplicate step ${duplicateMatch.added.id} (${duplicateMatch.added.text}) similar to ${duplicateMatch.existing.id} (${duplicateMatch.existing.text}); pausing instead of appending busywork.`;
+      const questionText = buildContinuationStallQuestionText(reason, {
+        goal,
+        plan: updatedPlan,
+        ledger: await readLedger(paths),
+        duplicateStep: duplicateMatch,
+        duplicateCount,
+        threshold: stepDedupConsecutiveThreshold()
+      });
       const question = await writeOutbox(paths, {
         kind: 'question',
-        text: `${reason} Reply with a steer or new requirement to resume, or answer stop to leave the run stopped.`,
+        text: questionText,
         replyKey,
         data: {
           mode: 'direct',
           duplicate_step: duplicateMatch,
           consecutive_duplicate_continuation_steps: duplicateCount,
-          threshold: stepDedupConsecutiveThreshold()
+          threshold: stepDedupConsecutiveThreshold(),
+          recent_ledger: summarizeRecentLedgerForQuestion(await readLedger(paths)),
+          pending_steps: summarizePendingPlanSteps(updatedPlan)
         }
       });
       checkpoint = {
@@ -1582,16 +1608,33 @@ async function stopDirectNoProgressForHuman(
   reason: string
 ): Promise<{ goal: GoalFile; checkpoint: Checkpoint; continued: boolean; stop: SupervisorResult }> {
   const replyKey = `stop-${goal.version}-${iter}-direct-stall`;
+  const ledger = await readLedger(paths);
+  const plan = await readPlan(paths);
+  const detailText = buildContinuationStallQuestionText(reason, {
+    goal,
+    plan,
+    ledger,
+    threshold: stall.threshold
+  });
   const question = await writeOutbox(paths, {
     kind: 'question',
-    text: `${reason} Reply with a steer or new requirement to force a more concrete PLAN.md step, or answer stop to leave the run stopped.`,
+    text: [
+      detailText,
+      '',
+      `Repeated step: ${stepId}.`,
+      `Repeated receipt signature: ${stall.reason}`,
+      '',
+      'For this stall, a useful steer should name the concrete evidence to collect, the alternate path to try, or the acceptance criterion that is already satisfied.'
+    ].join('\n'),
     replyKey,
     data: {
       mode: 'direct',
       step_id: stepId,
       consecutive_duplicate_direct_rejects: stall.count,
       threshold: stall.threshold,
-      latest_reason: stall.reason
+      latest_reason: stall.reason,
+      recent_ledger: summarizeRecentLedgerForQuestion(ledger),
+      pending_steps: summarizePendingPlanSteps(plan)
     }
   });
   checkpoint = {
@@ -1714,6 +1757,91 @@ async function buildDirectPlanContinuationSteerText(
 
 async function readOptionalText(path: string): Promise<string> {
   return (await exists(path)) ? readFile(path, 'utf8') : '';
+}
+
+function buildContinuationStallQuestionText(
+  reason: string,
+  input: {
+    goal: GoalFile;
+    plan: string;
+    ledger: LedgerEntry[];
+    verdict?: Awaited<ReturnType<typeof directContinuationVerdict>>;
+    continuationFallbacks?: number;
+    duplicateStep?: unknown;
+    duplicateCount?: number;
+    threshold: number;
+  }
+): string {
+  const recent = summarizeRecentLedgerForQuestion(input.ledger);
+  const pending = summarizePendingPlanSteps(input.plan);
+  const latest = recent.at(-1);
+  const accepted = [...input.ledger].reverse().find((entry) => entry.status === 'keep');
+  return [
+    reason,
+    '',
+    'Progress:',
+    `- Active requirement: ${shortenForQuestion(requirementText(input.goal) || 'see GOAL.md', 700)}`,
+    accepted
+      ? `- Latest accepted progress: iter ${accepted.iter} / ${accepted.step_id} (${accepted.status}); ${shortenForQuestion(accepted.guards.reason?.toString() || accepted.reflection, 500)}`
+      : '- Latest accepted progress: none recorded yet.',
+    latest
+      ? `- Latest ledger entry: iter ${latest.iter} / ${latest.step_id} (${latest.status}); step_done=${String(latest.step_done)}, tests_pass=${String(latest.tests_pass)}.`
+      : '- Latest ledger entry: none.',
+    pending.length > 0
+      ? `- Pending PLAN step(s): ${pending.map((step) => `${step.id} ${step.text}`).join('; ')}`
+      : '- Pending PLAN step(s): none; PLAN.md is exhausted.',
+    '',
+    'Bottleneck:',
+    input.verdict
+      ? `- Completion gate could not produce an explicit complete/stop decision and used fallback: ${input.verdict.reason}`
+      : '- Planner continuation is looping or duplicating work instead of producing a clearly new executable step.',
+    input.continuationFallbacks !== undefined
+      ? `- Fallback count: ${input.continuationFallbacks}/${input.threshold}.`
+      : '',
+    input.duplicateCount !== undefined
+      ? `- Duplicate continuation count: ${input.duplicateCount}/${input.threshold}.`
+      : '',
+    '',
+    'Possible next actions:',
+    '- Reply with `stop` if the current evidence is enough and the run should remain stopped.',
+    '- Reply with a concrete steer/new requirement if more validation is needed; it will resume through planner/executor.',
+    '- Ask a status question in Chat if you need more detail before choosing; status questions will not be consumed as the answer.',
+    '',
+    'Recommended default:',
+    input.verdict?.decision === 'continue'
+      ? '- If you agree the goal is not yet clearly complete, provide a narrow next validation or documentation requirement.'
+      : '- If the latest accepted progress satisfies the goal, answer `stop`; otherwise give the missing acceptance criterion.'
+  ].filter((line) => line !== '').join('\n');
+}
+
+function summarizeRecentLedgerForQuestion(ledger: LedgerEntry[]): Array<{
+  iter: number;
+  step_id: string;
+  status: string;
+  step_done: unknown;
+  tests_pass: unknown;
+  reason: string;
+}> {
+  return ledger.slice(-5).map((entry) => ({
+    iter: entry.iter,
+    step_id: entry.step_id,
+    status: entry.status,
+    step_done: entry.guards.step_done,
+    tests_pass: entry.guards.tests_pass,
+    reason: shortenForQuestion(entry.guards.reason?.toString() || entry.reflection, 500)
+  }));
+}
+
+function summarizePendingPlanSteps(plan: string): Array<{ id: string; text: string }> {
+  return parsePlanSteps(plan)
+    .filter((step) => step.status === 'pending' || step.status === 'active')
+    .slice(0, 5)
+    .map((step) => ({ id: step.id, text: shortenForQuestion(step.text, 240) }));
+}
+
+function shortenForQuestion(text: string, limit: number): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  return normalized.length > limit ? `${normalized.slice(0, Math.max(0, limit - 3))}...` : normalized;
 }
 
 function requirementText(goal: GoalFile): string {

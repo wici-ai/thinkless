@@ -165,9 +165,18 @@ async function runCleanShell(home: string, cwd: string, command: string): Promis
     const result = await execa('/bin/zsh', ['-lc', command], { cwd, env, all: true, reject: false, timeout: 30_000, maxBuffer: 1024 * 1024 * 5 });
     return { exitCode: result.exitCode ?? 1, all: result.all };
   }
-  const prefix = join(home, '..', 'npm-prefix', 'bin');
-  const result = await execa('/bin/bash', ['-lc', `export PATH="${prefix}:$PATH"; ${command}`], { cwd, env, all: true, reject: false, timeout: 30_000, maxBuffer: 1024 * 1024 * 5 });
+  const prefix = bashPath(join(home, '..', 'npm-prefix', 'bin'));
+  const bash = process.platform === 'win32' ? 'bash' : '/bin/bash';
+  const result = await execa(bash, ['-lc', `export PATH="${prefix}:$PATH"; ${command}`], { cwd, env, all: true, reject: false, timeout: 30_000, maxBuffer: 1024 * 1024 * 5 });
   return { exitCode: result.exitCode ?? 1, all: result.all };
+}
+
+function bashPath(path: string): string {
+  if (process.platform !== 'win32') return path;
+  const normalized = path.replace(/\\/g, '/');
+  const drive = /^([A-Za-z]):\/(.*)$/.exec(normalized);
+  if (!drive) return normalized;
+  return `/${drive[1].toLowerCase()}/${drive[2]}`;
 }
 
 function stripAnsi(value: string): string {

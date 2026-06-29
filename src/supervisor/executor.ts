@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { appendFile, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import { execa } from 'execa';
@@ -440,8 +440,7 @@ async function runCodexProcess(
   const killForTimeout = (reason: NonNullable<typeof timeoutReason>) => {
     if (timeoutReason) return;
     timeoutReason = reason;
-    child.kill('SIGTERM');
-    setTimeout(() => child.kill('SIGKILL'), 2_000).unref();
+    terminateProcessTree(child);
   };
 
   const requestPreemptCheck = () => {
@@ -451,10 +450,7 @@ async function runCodexProcess(
       try {
         if (await options.shouldPreempt?.()) {
           preempted = true;
-          child.kill('SIGTERM');
-          setTimeout(() => {
-            if (preempted) child.kill('SIGKILL');
-          }, 2_000).unref();
+          terminateProcessTree(child, () => preempted);
         }
       } catch (error) {
         preemptError = error;
@@ -469,10 +465,7 @@ async function runCodexProcess(
       try {
         await readIterResult(paths, options.completionArtifactId);
         completedFromReceipt = true;
-        child.kill('SIGTERM');
-        setTimeout(() => {
-          if (completedFromReceipt) child.kill('SIGKILL');
-        }, 2_000).unref();
+        terminateProcessTree(child, () => completedFromReceipt);
       } catch {
         // Codex can emit turn.completed just before --output-last-message is flushed.
       }
@@ -591,6 +584,18 @@ async function runCodexProcess(
     exitCode: completedFromReceipt ? 0 : exit.code,
     signal: exit.signal
   };
+}
+
+function terminateProcessTree(child: ChildProcess, shouldForce: () => boolean = () => true): void {
+  if (process.platform === 'win32' && child.pid) {
+    void execa('taskkill', ['/PID', String(child.pid), '/T', '/F'], { reject: false });
+    return;
+  }
+  child.kill('SIGTERM');
+  setTimeout(() => {
+    if (!shouldForce()) return;
+    child.kill('SIGKILL');
+  }, 2_000).unref();
 }
 
 function consumeCodexLine(

@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { atomicWriteJson, appendJsonLine, ensureDir, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, OutboxMessage, RunEvent } from '../shared/types.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const plannerTarget = resolve('fixture/tui-resume-interrupted-blocked-planner-target');
 const executorTarget = resolve('fixture/tui-resume-interrupted-blocked-executor-target');
@@ -245,8 +246,7 @@ function checkpoint(state: Checkpoint['supervisor_state'], sessions: Checkpoint[
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-resume-interrupted-blocked requires expect on PATH');
+  await requireExpectOrSkip('tui-resume-interrupted-blocked');
 }
 
 function stripAnsi(value: string): string {

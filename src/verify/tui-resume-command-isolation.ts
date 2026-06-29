@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { atomicWriteJson, appendJsonLine, ensureDir, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const target = resolve('fixture/tui-resume-command-isolation-target');
 const currentSession = join(target, '.thinkless');
@@ -253,8 +254,7 @@ exit 0
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-resume-command-isolation requires expect on PATH');
+  await requireExpectOrSkip('tui-resume-command-isolation');
 }
 
 function stripAnsi(value: string): string {

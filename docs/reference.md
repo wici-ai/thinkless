@@ -92,6 +92,7 @@ npm run verify:existing-goal
 npm run verify:v1-requirements
 npm run verify:tui-structure
 npm run verify:tui-chat-intake
+npm run verify:launch-target
 npm run verify:resume-selector
 npm run verify:tui-resume-selector-pty
 npm run verify:tui-resume-selector-built

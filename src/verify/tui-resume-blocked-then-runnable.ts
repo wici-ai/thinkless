@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { atomicWriteJson, appendJsonLine, ensureDir, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const target = resolve('fixture/rbt-target');
 const staleSession = join(target, '.thinkless2');
@@ -183,8 +184,7 @@ function checkpoint(state: Checkpoint['supervisor_state'], sessions: Checkpoint[
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-resume-blocked-then-runnable requires expect on PATH');
+  await requireExpectOrSkip('tui-resume-blocked-then-runnable');
 }
 
 function stripAnsi(value: string): string {

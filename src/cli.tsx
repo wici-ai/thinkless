@@ -2,7 +2,7 @@
 import React from 'react';
 import { render } from 'ink';
 import { Command } from 'commander';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -16,6 +16,7 @@ import type { ToolMode } from './shared/types.js';
 import { loadConfig } from './shared/config.js';
 import { allocateNumberedSessionDir, isNumberedSessionDirName, latestNumberedRunSessionDir, latestNumberedSessionDir, runPaths, THINKLESS_SESSION_DIR_ENV, TOOL_ROOT } from './shared/paths.js';
 import { installCrashHandlers } from './shared/crashHandlers.js';
+import { defaultCurrentTarget, gitTopLevelSync, resolveFreshTargetOption } from './shared/launchTarget.js';
 import { previewRollback, rollbackTarget } from './supervisor/rollback.js';
 import { checkToolHealth, runThinklessStartupSelfUpdate, updateToolsBetweenRuns, type ThinklessSelfUpdateResult } from './supervisor/selfupdate.js';
 
@@ -240,13 +241,6 @@ function resolveFreshLaunchOption(target?: string): { target: string; sessionDir
   };
 }
 
-function resolveFreshTargetOption(target?: string): string {
-  if (target?.trim()) return resolve(target);
-  const currentRepo = gitTopLevelSync();
-  if (currentRepo) return resolve(currentRepo);
-  return defaultFreshTarget();
-}
-
 function resolveResumeLaunchOption(target?: string): { target: string; sessionDir?: string } {
   const resolvedTarget = resolveResumeTargetOption(target);
   const normalized = normalizeTargetAndSession(resolvedTarget);
@@ -268,23 +262,11 @@ function resolveResumeTargetOption(target?: string): string {
   return defaultResumeTarget();
 }
 
-function defaultFreshTarget(): string {
-  const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[:]/g, '-');
-  const source = basename(gitTopLevelSync() ?? process.cwd()) || 'workspace';
-  const slug = source.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
-  const suffix = Math.random().toString(36).slice(2, 8);
-  return resolve(WORKSPACE_ROOT, `${stamp}-${slug}-${suffix}`);
-}
-
 function defaultResumeTarget(): string {
   const current = defaultCurrentTarget();
   if (hasThinklessRun(current)) return current;
   if (migrateCompatibleWorkspaceRun(current)) return current;
   return latestThinklessWorkspace() ?? current;
-}
-
-function defaultCurrentTarget(): string {
-  return resolve(gitTopLevelSync() ?? process.cwd());
 }
 
 function latestThinklessWorkspace(): string | null {
@@ -412,18 +394,6 @@ function resetMigratedCheckpoint(checkpointPath: string, current: string, source
     writeFileSync(checkpointPath, `${JSON.stringify(checkpoint, null, 2)}\n`);
   } catch {
     return;
-  }
-}
-
-function gitTopLevelSync(): string | null {
-  try {
-    const output = execFileSync('git', ['-C', process.cwd(), 'rev-parse', '--show-toplevel'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore']
-    });
-    return output.trim() || null;
-  } catch {
-    return null;
   }
 }
 

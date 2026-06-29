@@ -31,6 +31,11 @@ async function main(): Promise<void> {
     const question = messages.find((message) => message.kind === 'question' && message.reply_key?.startsWith('continuation-stall-'));
     assert(question?.reply_key, `missing continuation-stall question: ${JSON.stringify(messages)}`);
     assert(question.text.includes('pausing instead of continuing'), `unexpected escalation question: ${question.text}`);
+    assert(question.text.includes('Progress:') && question.text.includes('Bottleneck:') && question.text.includes('Possible next actions:'), `continuation question lacks decision context:\n${question.text}`);
+    assert(question.text.includes('Ask a status question in Chat'), `continuation question must explain that status questions remain conversational:\n${question.text}`);
+    const questionData = question.data as { recent_ledger?: unknown[]; pending_steps?: unknown[] } | undefined;
+    assert(Array.isArray(questionData?.recent_ledger), `continuation question missing recent ledger data: ${JSON.stringify(question.data)}`);
+    assert(Array.isArray(questionData?.pending_steps), `continuation question missing pending step data: ${JSON.stringify(question.data)}`);
 
     const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
     assert(checkpoint.supervisor_state === 'STOP', `checkpoint should stop after escalation: ${checkpoint.supervisor_state}`);

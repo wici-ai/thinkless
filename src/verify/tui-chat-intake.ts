@@ -10,7 +10,7 @@ import type { GoalFile, Checkpoint, OutboxMessage, RunEvent } from '../shared/ty
 import type { RunState } from '../tui/useRunState.js';
 import { shouldAutoStartExistingRun, shouldUseChatAgentForBlankRun } from '../tui/App.js';
 import { buildFallbackChatTurn, shouldStartPlannerFromBlankChat } from '../supervisor/chatAgent.js';
-import { buildBlankRunPlanningContext } from '../tui/ChatPane.js';
+import { buildBlankRunPlanningContext, shouldRouteTextAsOutboxAnswer } from '../tui/ChatPane.js';
 import { runSupervisor } from '../supervisor/index.js';
 
 const target = resolve('fixture/tui-chat-intake-target');
@@ -145,6 +145,7 @@ async function main(): Promise<void> {
   assert(shouldAutoStartExistingRun({ ...blank, goal: goal(), checkpoint: checkpoint('PLAN') }, true), 'explicit resume should reattach an active plan state');
   verifyDegradedBlankRunChatDecision();
   verifyBlankRunPlanningContext();
+  verifyQuestionAnswerRouting();
   await verifyGoalSourceNotRetroactive();
   await verifyPlannerReceivesChatContext();
 
@@ -273,6 +274,36 @@ function verifyBlankRunPlanningContext(): void {
   assert(context.includes('ASSISTANT: 我看到 TUI'), `planning context should include previous assistant turns:\n${context}`);
   assert(context.includes('USER: 按刚才讨论的去修复'), `planning context should include the triggering user turn:\n${context}`);
   assert(context.includes('ASSISTANT UPDATE (add_requirement): Fix the chat-to-planner context handoff.'), `planning context should include the emitted update:\n${context}`);
+}
+
+function verifyQuestionAnswerRouting(): void {
+  const continuationQuestion = outbox(
+    'question',
+    [
+      'Continuation gate fell back 3 consecutive time(s); pausing instead of continuing to manufacture work.',
+      '',
+      'Progress:',
+      '- Latest accepted progress: iter 14 / S14.',
+      '',
+      'Bottleneck:',
+      '- Completion gate did not produce an explicit complete verdict.',
+      '',
+      'Possible next actions:',
+      '- Reply with stop or steer.'
+    ].join('\n')
+  );
+  continuationQuestion.reply_key = 'continuation-stall-26';
+  assert(!shouldRouteTextAsOutboxAnswer('What is the current progress and bottleneck?', continuationQuestion), 'status questions with an open continuation question must remain Chat turns');
+  assert(!shouldRouteTextAsOutboxAnswer('why did it stop at QUESTION?', continuationQuestion), 'why/how questions with an open continuation question must remain Chat turns');
+  assert(!shouldRouteTextAsOutboxAnswer('progress update', continuationQuestion), 'ordinary short status text must not answer continuation questions');
+  assert(!shouldRouteTextAsOutboxAnswer('杩涘睍鍜嬫牱', continuationQuestion), 'mojibake Chinese status text must not answer continuation questions');
+  assert(shouldRouteTextAsOutboxAnswer('stop', continuationQuestion), 'explicit stop decision should answer the continuation question');
+  assert(shouldRouteTextAsOutboxAnswer('continue with one more validation step', continuationQuestion), 'plain continuation steer should answer the continuation question');
+
+  const plannerQuestion = outbox('question', 'Planner needs clarification before producing PLAN.md. Which host?');
+  plannerQuestion.reply_key = 'planner-clarify-1';
+  assert(shouldRouteTextAsOutboxAnswer('wici@192.168.1.222', plannerQuestion), 'plain planner clarification answers should still route as answers');
+  assert(!shouldRouteTextAsOutboxAnswer('why do you need the host?', plannerQuestion), 'planner clarification status questions should remain Chat turns');
 }
 
 async function verifyGoalSourceNotRetroactive(): Promise<void> {

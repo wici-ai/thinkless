@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { atomicWriteJson, appendJsonLine, ensureDir, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const runnableTarget = resolve('fixture/tui-resume-legacy-candidate-target');
 const blockedTarget = resolve('fixture/tui-resume-legacy-candidate-blocked-target');
@@ -250,8 +251,7 @@ exit 0
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-resume-legacy-candidate requires expect on PATH');
+  await requireExpectOrSkip('tui-resume-legacy-candidate');
 }
 
 function basename(path: string): string {

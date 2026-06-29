@@ -80,6 +80,7 @@ async function main(): Promise<void> {
 
   await verifyLastMessageJsonReceiptFallback(paths);
   await verifyReceiptCompletionStopsStuckProcess(paths);
+  await verifyReceiptCompletionStopsInheritedStdoutProcessTree(paths);
   await verifyIdleWatchdog(paths);
   await verifyFirstMeaningfulEventWatchdog(paths);
 
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
         artifact_contract: true,
         last_message_receipt_fallback: true,
         receipt_completion_stops_stuck_process: true,
+        receipt_completion_stops_inherited_stdout_process_tree: true,
         usage_parsed: true,
         streaming_progress: true,
         idle_watchdog: true
@@ -101,6 +103,23 @@ async function main(): Promise<void> {
       2
     )
   );
+}
+
+async function verifyReceiptCompletionStopsInheritedStdoutProcessTree(paths: ReturnType<typeof runPaths>): Promise<void> {
+  if (process.platform !== 'win32') return;
+  const treeStuckCodex = await writeFakeCodex(paths, 'fake-tree-stuck-after-completion-codex', treeStuckAfterCompletionCodexScript());
+  const started = Date.now();
+  const result = await runExecutorStep(paths, goal(), 'S5', 5, testConfig(treeStuckCodex), undefined, undefined, {
+    artifactId: 'tree-stuck-after-completion-5',
+    idleTimeoutMs: 10_000,
+    hardTimeoutMs: 20_000,
+    heartbeatMs: 25
+  });
+
+  const wallMs = Date.now() - started;
+  assert(result.step_done && result.tests_pass, `tree-stuck receipt did not complete: ${JSON.stringify(result)}`);
+  assert(result.notes === 'fake codex completed with inherited stdout child', `unexpected tree-stuck notes: ${result.notes}`);
+  assert(wallMs < 5_000, `executor waited on inherited stdout child instead of terminating process tree, wallMs=${wallMs}`);
 }
 
 async function verifyReceiptCompletionStopsStuckProcess(paths: ReturnType<typeof runPaths>): Promise<void> {
@@ -340,6 +359,38 @@ const result = {
 writeFileSync(out.replace(/\\.txt$/, '.json'), JSON.stringify(result, null, 2) + '\\n');
 writeFileSync(out, result.notes + '\\n');
 console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 140, output_tokens: 14, cost_usd: 0.004 } }));
+setInterval(() => {}, 1000);
+`;
+}
+
+function treeStuckAfterCompletionCodexScript(): string {
+  return `#!/usr/bin/env node
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+process.on('SIGTERM', () => {});
+
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf('--output-last-message');
+if (outputIndex < 0 || !args[outputIndex + 1]) {
+  console.error('fake codex missing --output-last-message');
+  process.exit(2);
+}
+
+const out = resolve(process.cwd(), args[outputIndex + 1]);
+const result = {
+  step_done: true,
+  tests_pass: true,
+  notes: 'fake codex completed with inherited stdout child',
+  changed_files: [],
+  next: null
+};
+writeFileSync(out.replace(/\\.txt$/, '.json'), JSON.stringify(result, null, 2) + '\\n');
+writeFileSync(out, result.notes + '\\n');
+const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 15000)'], { stdio: ['ignore', 'inherit', 'inherit'] });
+child.unref();
+console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 150, output_tokens: 15, cost_usd: 0.005 } }));
 setInterval(() => {}, 1000);
 `;
 }

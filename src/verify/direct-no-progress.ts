@@ -53,22 +53,22 @@ async function main(): Promise<void> {
   }
 
   const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
-  assert(ledger.length === 3, `threshold=2 should replan then execute one recovery step, got ${ledger.length}`);
-  assert(ledger[0].status === 'reject' && ledger[1].status === 'reject', `expected first two rows to be no-progress rejects: ${JSON.stringify(ledger)}`);
-  assert(ledger[2].status === 'keep' && ledger[2].step_id === 'S2', `expected S2 keep after planner bottleneck review: ${JSON.stringify(ledger)}`);
+  assert(ledger.length === 3, `expected first status receipt to close S1 and continuation to run S2 within maxIters, got ${ledger.length}`);
+  assert(ledger[0].status === 'reject' && ledger[0].step_id === 'S1', `expected first row to record incomplete acceptance without repeating S1: ${JSON.stringify(ledger)}`);
+  assert(ledger[1].status === 'keep' && ledger[1].step_id === 'S2', `expected S2 keep after planner bottleneck review: ${JSON.stringify(ledger)}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
-  assert(events.some((event) => event.type === 'DIRECT_NO_PROGRESS_REPLAN_REQUEST'), 'missing DIRECT_NO_PROGRESS_REPLAN_REQUEST event');
-  assert(events.some((event) => event.type === 'DIRECT_NO_PROGRESS_REPLAN_APPLIED'), 'missing DIRECT_NO_PROGRESS_REPLAN_APPLIED event');
+  assert(events.filter((event) => event.type === 'EXECUTE_START' && event.message.includes('executing S1')).length === 1, 'step_done=true/tests_pass=false must not re-execute S1');
+  assert(events.some((event) => event.type === 'PLAN_CONTINUATION_APPLIED'), 'missing PLAN_CONTINUATION_APPLIED event after closing status-only step');
   assert(!events.some((event) => event.type === 'DIRECT_NO_PROGRESS_ESCALATED'), 'planner recovery should avoid human escalation');
 
   const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
   assert(checkpoint.supervisor_state === 'STOP', `checkpoint should stop: ${JSON.stringify(checkpoint)}`);
-  assert(checkpoint.consecutive_duplicate_direct_rejects === 0, `checkpoint should reset direct reject count after replan: ${JSON.stringify(checkpoint)}`);
+  assert(checkpoint.consecutive_duplicate_direct_rejects === 0, `checkpoint should not carry duplicate reject count after moving past S1: ${JSON.stringify(checkpoint)}`);
 
   const plan = await readFile(paths.plan, 'utf8');
   assert(plan.includes('- [x] S1'), `repeated no-progress step should be closed before bottleneck review:\n${plan}`);
-  assert(plan.includes('## Bottleneck Review') || plan.includes('Bottleneck Review'), `planner should record bottleneck review:\n${plan}`);
+  assert(plan.includes('## Bottleneck Review') || plan.includes('Bottleneck Review'), `planner should record bottleneck review or continuation rationale:\n${plan}`);
   assert(plan.includes('S2 Add targeted instrumentation after no-progress loop'), `planner should add concrete S2:\n${plan}`);
 
   const goalDoc = await readFile(paths.goalDoc, 'utf8');

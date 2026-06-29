@@ -6,6 +6,7 @@ import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import { readOutbox } from '../supervisor/outbox.js';
 import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const target = resolve('fixture/tui-planner-clarification-pty-target');
 const fakeBin = resolve('fixture/tui-planner-clarification-pty-bin');
@@ -86,8 +87,7 @@ async function main(): Promise<void> {
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-planner-clarification-pty requires expect on PATH');
+  await requireExpectOrSkip('tui-planner-clarification-pty');
 }
 
 function expectScript(): string {

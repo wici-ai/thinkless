@@ -5,6 +5,7 @@ import { createSampleTarget } from '../sample.js';
 import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const target = resolve('fixture/tui-real-fake-chat-target');
 const fakeBin = resolve('fixture/tui-real-fake-chat-bin');
@@ -262,8 +263,7 @@ async function fakeCommandPath(name: string): Promise<string> {
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-real-fake-chat requires expect on PATH');
+  await requireExpectOrSkip('tui-real-fake-chat');
 }
 
 function expectScript(): string {

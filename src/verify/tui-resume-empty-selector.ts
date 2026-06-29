@@ -2,6 +2,7 @@ import { access, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const target = resolve('fixture/tui-resume-empty-selector-target');
 const home = resolve('fixture/tui-resume-empty-selector-home');
@@ -64,8 +65,7 @@ exit 0
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-resume-empty-selector requires expect on PATH');
+  await requireExpectOrSkip('tui-resume-empty-selector');
 }
 
 async function exists(path: string): Promise<boolean> {

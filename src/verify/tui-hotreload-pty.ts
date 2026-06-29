@@ -6,6 +6,7 @@ import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
 import { ignoreFixturePlannerOpt } from './fixture-git.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const target = resolve('fixture/tui-hotreload-pty-target');
 const firstChat = 'Improve the fixture implementation from a PTY Chat-first TUI run.';
@@ -88,8 +89,7 @@ async function main(): Promise<void> {
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-hotreload-pty requires expect on PATH');
+  await requireExpectOrSkip('tui-hotreload-pty');
 }
 
 function expectScript(): string {

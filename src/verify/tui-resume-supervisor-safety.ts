@@ -7,6 +7,7 @@ import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
 import { previewRollback } from '../supervisor/rollback.js';
 import { assertNoActiveToolVersionDrift } from '../supervisor/selfupdate.js';
+import { requireExpectOrSkip } from './expect.js';
 
 const fixtureRoot = resolve('fixture/tui-resume-supervisor-safety');
 const home = join(fixtureRoot, 'home');
@@ -309,8 +310,7 @@ function isResumeLaunchEvent(event: RunEvent): boolean {
 }
 
 async function requireExpect(): Promise<void> {
-  const found = await execa('command', ['-v', 'expect'], { shell: true, reject: false });
-  assert(found.exitCode === 0, 'verify:tui-resume-supervisor-safety requires expect on PATH');
+  await requireExpectOrSkip('tui-resume-supervisor-safety');
 }
 
 function stripAnsi(value: string): string {
