@@ -31,7 +31,7 @@ thinkless doctor --deep
 - Codex executes, validates, recovers from failures, and continues.
 - Follow-up chat updates the same run instead of rewriting the original prompt.
 
-Submitted chat is append-only: clarify next turn, keep the history auditable, and let the plan improve from evidence.
+Submitted chat is append-only: clarify next turn and let the plan improve from evidence.
 
 ## Usage
 
