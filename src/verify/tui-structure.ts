@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TOOL_ROOT } from '../shared/paths.js';
 import type { Checkpoint, GoalFile, LedgerEntry, RunEvent } from '../shared/types.js';
-import { buildBlankRunPlanningContext, buildChatHistory, buildRestartSteerText, currentGoalSummary, isStopControlText } from '../tui/ChatPane.js';
+import { buildBlankRunPlanningContext, buildChatHistory, buildRestartPlanningGoal, buildRestartSteerText, currentGoalSummary, isStopControlText } from '../tui/ChatPane.js';
 import { codexDisplayLines, formatEvent, visibleEvents } from '../tui/ExecPane.js';
 import { buildPlanDiffView } from '../tui/GoalPane.js';
 import { costSummary, elapsedSummary, metricSummary, rollbackSummary } from '../tui/Header.js';
@@ -440,6 +440,17 @@ function verifyRestartSteerText(): void {
   assert(steer.includes('USER: why did this fail?'), `restart steer missing post-stop user context:\n${steer}`);
   assert(steer.includes('ASSISTANT UPDATE (steer): Use the real target repo.'), `restart steer missing post-stop update:\n${steer}`);
   assert(!steer.includes('old pre-stop context'), `restart steer must omit pre-stop chat context:\n${steer}`);
+  assert(
+    buildRestartPlanningGoal('/restart continue with the corrected target repo', []) === 'continue with the corrected target repo',
+    'restart planning goal should prefer explicit operator text'
+  );
+  assert(
+    buildRestartPlanningGoal('/restart', [
+      { ts: '2026-06-17T10:03:00.000Z', role: 'assistant', text: 'Ready.' },
+      { ts: '2026-06-17T10:04:00.000Z', role: 'user', text: 'Use E:\\code\\client-win and continue S5.' }
+    ]) === 'Use E:\\code\\client-win and continue S5.',
+    'restart planning goal should fall back to the latest user Chat turn when GOAL.md is missing'
+  );
 }
 
 function verifyChatPromptCompression(): void {

@@ -228,6 +228,9 @@ export function ChatInputBox({
 
     if (text === '/restart' || text.startsWith('/restart ')) {
       if (!hasExistingRun) {
+        if (blankRun && onPlanningRequested) {
+          onPlanningRequested(buildRestartPlanningGoal(text, chat), buildRestartSteerText(text, chat, events));
+        }
         return;
       }
       await writeInjection(paths, { kind: 'steer', text: buildRestartSteerText(text, chat, events), priority: 'normal' });
@@ -678,4 +681,12 @@ export function buildRestartSteerText(text: string, chat: ChatLogEntry[] = [], e
     'Post-stop Chat context:',
     chatContext
   ].join('\n'), RESTART_CONTEXT_MAX_CHARS);
+}
+
+export function buildRestartPlanningGoal(text: string, chat: ChatLogEntry[] = []): string {
+  const raw = text.trim().slice('/restart'.length).trim();
+  if (raw) return raw;
+  const latestUserTurn = [...chat].reverse().find((entry) => entry.role === 'user' && !entry.text.trim().startsWith('/'));
+  if (latestUserTurn?.text.trim()) return latestUserTurn.text.trim();
+  return 'Restart the stopped Thinkless run from the available Chat context.';
 }

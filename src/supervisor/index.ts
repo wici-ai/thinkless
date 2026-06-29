@@ -908,7 +908,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     const reason = error instanceof Error ? error.message : String(error);
     await writeOutbox(paths, { kind: 'error', text: reason }).catch(() => undefined);
     await events.emit('FAILED', reason, undefined, 'error');
-    const failedCheckpoint = await readJsonFileMaybe<Checkpoint>(paths.checkpoint).catch(() => null);
+    const failedCheckpoint = await readJsonFileMaybe<Checkpoint>(paths.checkpoint).catch(() => null)
+      ?? await loadCheckpoint(paths).catch(() => null);
     if (failedCheckpoint) {
       const ledgerSeq = await lineCount(paths.ledger);
       await saveCheckpoint(paths, {

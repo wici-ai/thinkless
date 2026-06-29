@@ -2,10 +2,12 @@ import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
+import { readJsonFileMaybe, readJsonLines } from '../shared/atomic.js';
 import { ensureRunDirs, runPaths } from '../shared/paths.js';
-import type { GoalFile, WiCiConfig } from '../shared/types.js';
+import type { Checkpoint, GoalFile, RunEvent, WiCiConfig } from '../shared/types.js';
 import { runExecutorStep } from '../supervisor/executor.js';
 import { ensureGitRepo } from '../supervisor/gitgate.js';
+import { runSupervisor } from '../supervisor/index.js';
 import { runInitialPlanner, runPlanDiff } from '../supervisor/planner.js';
 
 const target = resolve('fixture/real-mode-target');
@@ -23,6 +25,7 @@ async function main(): Promise<void> {
   await verifyFreshTargetGitInit(config);
   await verifyNonEmptyNonGitTargetRejected(config);
   await verifyLinkedTargetGitRepoAccepted(config);
+  await verifyEarlyGitFailurePersistsRestartableContext();
 
   await expectRejects(() => runInitialPlanner(paths, goal, config), 'Planner command not found');
   await writeFile(paths.plan, '# Plan\n\n- [ ] S1 Existing real-mode step\n');
@@ -37,12 +40,41 @@ async function main(): Promise<void> {
           fresh_target_git_init: true,
           non_empty_non_git_rejected: true,
           linked_target_git_repo_accepted: true,
+          early_git_failure_persists_restartable_context: true,
           real_mode_does_not_fallback_to_stub: true
         },
       null,
       2
     )
   );
+}
+
+async function verifyEarlyGitFailurePersistsRestartableContext(): Promise<void> {
+  await rm(nonGitTarget, { recursive: true, force: true });
+  try {
+    await mkdir(nonGitTarget, { recursive: true });
+    await writeFile(join(nonGitTarget, 'user-file.txt'), 'user owned file\n');
+    const result = await runSupervisor({
+      target: nonGitTarget,
+      goal: 'Verify early git guard failures remain restartable.',
+      maxIters: 0,
+      mode: 'stub'
+    });
+    if (result.state !== 'FAILED' || !result.reason.includes('Target is not a git repository')) {
+      throw new Error(`expected early git guard failure, got ${JSON.stringify(result)}`);
+    }
+    const paths = runPaths(nonGitTarget);
+    const checkpoint = await readJsonFileMaybe<Checkpoint>(paths.checkpoint);
+    if (checkpoint?.supervisor_state !== 'FAILED') {
+      throw new Error(`early git guard failure did not persist FAILED checkpoint: ${JSON.stringify(checkpoint)}`);
+    }
+    const events = await readJsonLines<RunEvent>(paths.events);
+    if (!events.some((event) => event.type === 'FAILED' && event.message.includes('Target is not a git repository'))) {
+      throw new Error(`early git guard failure did not persist FAILED event: ${JSON.stringify(events)}`);
+    }
+  } finally {
+    await rm(nonGitTarget, { recursive: true, force: true });
+  }
 }
 
 async function verifyLinkedTargetGitRepoAccepted(config: WiCiConfig): Promise<void> {
