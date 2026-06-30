@@ -3223,6 +3223,9 @@ function formatExecutorProgress(progress: ExecutorProgress): string {
   if (progress.kind === 'heartbeat') {
     return `Codex running ${counts}${tokenText}${cost}${wall}${idle}`;
   }
+  if (progress.kind === 'timeout') {
+    return `Codex watchdog ${progress.timeoutReason ?? 'timeout'} ${counts}${tokenText}${cost}${wall}${idle}`;
+  }
   const event = progress.eventType ? ` ${progress.eventType}` : '';
   return `Codex event${event} ${counts}${tokenText}${cost}${wall}${idle}`;
 }

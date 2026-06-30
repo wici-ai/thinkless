@@ -82,6 +82,7 @@ async function main(): Promise<void> {
   await verifyReceiptCompletionStopsStuckProcess(paths);
   await verifyReceiptCompletionStopsInheritedStdoutProcessTree(paths);
   await verifyIdleWatchdog(paths);
+  await verifyIdleWatchdogDoesNotWaitForLeakedStdout(paths);
   await verifyFirstMeaningfulEventWatchdog(paths);
 
   console.log(
@@ -97,12 +98,51 @@ async function main(): Promise<void> {
         receipt_completion_stops_inherited_stdout_process_tree: true,
         usage_parsed: true,
         streaming_progress: true,
-        idle_watchdog: true
+        idle_watchdog: true,
+        idle_watchdog_leaked_stdout: true
       },
       null,
       2
     )
   );
+}
+
+async function verifyIdleWatchdogDoesNotWaitForLeakedStdout(paths: ReturnType<typeof runPaths>): Promise<void> {
+  if (process.platform !== 'win32') return;
+  const leakedStdoutCodex = await writeFakeCodex(paths, 'fake-leaked-stdout-codex', leakedStdoutCodexScript());
+
+  const started = Date.now();
+  let error: unknown;
+  try {
+    await runExecutorStep(
+      paths,
+      goal(),
+      'S1',
+      1,
+      {
+        ...testConfig(leakedStdoutCodex),
+        tools: {
+          ...testConfig(leakedStdoutCodex).tools,
+          mode: 'real'
+        }
+      },
+      undefined,
+      undefined,
+      {
+        artifactId: 'leaked-stdout-1',
+        idleTimeoutMs: 100,
+        hardTimeoutMs: 5_000,
+        heartbeatMs: 25
+      }
+    );
+  } catch (caught) {
+    error = caught;
+  }
+
+  const wallMs = Date.now() - started;
+  assert(error instanceof Error, 'leaked-stdout fake codex should fail by idle timeout');
+  assert(error.message.includes('Codex executor timed out'), `leaked-stdout fake codex should report idle timeout: ${error.message}`);
+  assert(wallMs < 4_000, `idle watchdog waited for leaked stdout close instead of force-settling, wallMs=${wallMs}`);
 }
 
 async function verifyReceiptCompletionStopsInheritedStdoutProcessTree(paths: ReturnType<typeof runPaths>): Promise<void> {
@@ -232,6 +272,7 @@ async function verifyIdleWatchdog(paths: ReturnType<typeof runPaths>): Promise<v
   assert(error instanceof Error, 'hanging fake codex should fail by idle timeout');
   assert(error.message.includes('Codex executor timed out'), `unexpected hanging fake codex error: ${error.message}`);
   assert(heartbeatProgress.some((item) => item.kind === 'heartbeat'), 'executor idle watchdog did not emit heartbeat progress');
+  assert(heartbeatProgress.some((item) => item.kind === 'timeout' && item.timeoutReason === 'idle'), 'executor idle watchdog did not emit timeout progress');
 }
 
 async function writeFakeCodex(paths: ReturnType<typeof runPaths>, name: string, script: string): Promise<string> {
@@ -404,6 +445,19 @@ setInterval(() => {}, 1000);
 function threadOnlyCodexScript(): string {
   return `#!/usr/bin/env node
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fake-thread' }));
+setInterval(() => {}, 1000);
+`;
+}
+
+function leakedStdoutCodexScript(): string {
+  return `#!/usr/bin/env node
+import { spawn } from 'node:child_process';
+
+const script = 'setTimeout(() => {}, 10000)';
+const child = spawn('cmd.exe', ['/d', '/s', '/c', 'start "" /b "' + process.execPath + '" -e "' + script + '"'], {
+  stdio: ['ignore', 'inherit', 'inherit']
+});
+child.unref();
 setInterval(() => {}, 1000);
 `;
 }

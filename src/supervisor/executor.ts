@@ -14,6 +14,7 @@ const EXECUTOR_IDLE_TIMEOUT_MS = 60 * 60_000;
 const EXECUTOR_HARD_TIMEOUT_MS = 12 * 60 * 60_000;
 const EXECUTOR_HEARTBEAT_MS = 30_000;
 const EXECUTOR_FIRST_MEANINGFUL_EVENT_TIMEOUT_MS = 5 * 60_000;
+const EXECUTOR_TERMINATION_GRACE_MS = 2_000;
 // Bound in-memory output so a multi-hour exec step cannot grow a string past
 // V8's ~512MB max length or exhaust the heap. Full output is on disk already.
 const OUTPUT_TAIL_CHARS = 256 * 1024;
@@ -24,8 +25,9 @@ function tailChars(text: string, max: number): string {
 }
 
 export interface ExecutorProgress {
-  kind: 'event' | 'heartbeat';
+  kind: 'event' | 'heartbeat' | 'timeout';
   eventType?: string;
+  timeoutReason?: 'idle' | 'hard' | 'no_meaningful_event';
   usage: import('../shared/types.js').ToolUsageSummary;
   wallMs: number;
   idleMs: number;
@@ -389,6 +391,9 @@ async function runCodexProcess(
   const startedAt = Date.now();
   let lastActivityAt = startedAt;
   let firstMeaningfulEventAt: number | null = null;
+  let forceSettleTimer: NodeJS.Timeout | null = null;
+  let forceSettleExit: ((exit: { code: number | null; signal: NodeJS.Signals | null }) => void) | null = null;
+  let forceSettled = false;
 
   const markActivity = () => {
     lastActivityAt = Date.now();
@@ -437,10 +442,25 @@ async function runCodexProcess(
     return nextBuffer;
   };
 
+  const scheduleForceSettle = () => {
+    if (forceSettleTimer || !forceSettleExit) return;
+    forceSettleTimer = setTimeout(() => {
+      forceSettled = true;
+      forceSettleExit?.({ code: null, signal: 'SIGKILL' });
+    }, EXECUTOR_TERMINATION_GRACE_MS);
+    forceSettleTimer.unref();
+  };
+
+  const stopChild = (shouldForce?: () => boolean) => {
+    terminateProcessTree(child, shouldForce);
+    scheduleForceSettle();
+  };
+
   const killForTimeout = (reason: NonNullable<typeof timeoutReason>) => {
     if (timeoutReason) return;
     timeoutReason = reason;
-    terminateProcessTree(child);
+    scheduleProgress({ kind: 'timeout', timeoutReason: reason });
+    stopChild();
   };
 
   const requestPreemptCheck = () => {
@@ -450,7 +470,7 @@ async function runCodexProcess(
       try {
         if (await options.shouldPreempt?.()) {
           preempted = true;
-          terminateProcessTree(child, () => preempted);
+          stopChild(() => preempted);
         }
       } catch (error) {
         preemptError = error;
@@ -465,7 +485,7 @@ async function runCodexProcess(
       try {
         await readIterResult(paths, options.completionArtifactId);
         completedFromReceipt = true;
-        terminateProcessTree(child, () => completedFromReceipt);
+        stopChild(() => completedFromReceipt);
       } catch {
         // Codex can emit turn.completed just before --output-last-message is flushed.
       }
@@ -515,10 +535,15 @@ async function runCodexProcess(
   let exit: { code: number | null; signal: NodeJS.Signals | null };
   try {
     exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      forceSettleExit = resolve;
       child.once('error', reject);
-      child.once('close', (code, signal) => resolve({ code, signal }));
+      child.once('close', (code, signal) => {
+        if (forceSettleTimer) clearTimeout(forceSettleTimer);
+        resolve({ code, signal });
+      });
     });
   } catch (error) {
+    if (forceSettleTimer) clearTimeout(forceSettleTimer);
     clearInterval(watchdog);
     clearInterval(heartbeat);
     await transcriptChain;
@@ -528,6 +553,7 @@ async function runCodexProcess(
     throw new CodexRunError(`codex exec failed to start: ${error instanceof Error ? error.message : String(error)}`, cloneUsageSummary(usage));
   }
 
+  if (forceSettleTimer) clearTimeout(forceSettleTimer);
   clearInterval(watchdog);
   clearInterval(heartbeat);
   if (stdoutLineBuffer) {
@@ -573,7 +599,8 @@ async function runCodexProcess(
     );
   }
   if (timeoutReason === 'idle') {
-    throw new CodexRunError(`Codex executor timed out after ${durationLabel(idleTimeoutMs)} without stdout/stderr output`, cloneUsageSummary(usage));
+    const closeDetail = forceSettled ? `; process close did not arrive within ${durationLabel(EXECUTOR_TERMINATION_GRACE_MS)} after termination` : '';
+    throw new CodexRunError(`Codex executor timed out after ${durationLabel(idleTimeoutMs)} without stdout/stderr output${closeDetail}`, cloneUsageSummary(usage));
   }
 
   return {
