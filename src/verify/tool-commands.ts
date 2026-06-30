@@ -24,7 +24,11 @@ import { resolveMaxIters } from '../supervisor/index.js';
 import { formatDelay, isTransientNetworkFailure, transientFailureReason, transientRetryMessage } from '../supervisor/transientRetry.js';
 
 async function main(): Promise<void> {
-  const iterSchema = JSON.parse(await readFile(schemaPath('iter-result'), 'utf8')) as { additionalProperties?: unknown };
+  const iterSchema = JSON.parse(await readFile(schemaPath('iter-result'), 'utf8')) as {
+    additionalProperties?: unknown;
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
   const plannerArgs = buildInitialPlannerArgs({
     goalText: 'test',
     effort: 'default',
@@ -360,6 +364,10 @@ async function main(): Promise<void> {
   assert(resolveMaxIters(0, loadedConfig.budget.max_iters) === 0, 'explicit --max-iters 0 should remain a setup-only run limit');
   assert(resolveMaxIters(1, loadedConfig.budget.max_iters) === 1, 'explicit --max-iters should override the unbounded default');
   assert(iterSchema.additionalProperties === false, 'codex output schema root must set additionalProperties=false');
+  const schemaKeys = Object.keys(iterSchema.properties ?? {});
+  const requiredKeys = new Set(iterSchema.required ?? []);
+  const missingRequired = schemaKeys.filter((key) => !requiredKeys.has(key));
+  assert(missingRequired.length === 0, `codex output strict schema requires every property, missing: ${missingRequired.join(', ')}`);
   const headingSteps = parsePlanSteps('# Plan\n\n## Steps\n\n### S1 — SSH connectivity\n- Action: connect\n\n### S2 - Measure throughput <!-- status:active iter:1 -->\n');
   assert(headingSteps.length === 2, `planner heading steps should be executable: ${JSON.stringify(headingSteps)}`);
   assert(headingSteps[0].id === 'S1' && headingSteps[0].status === 'pending', 'heading step S1 should default to pending');
