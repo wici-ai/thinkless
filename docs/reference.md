@@ -118,6 +118,7 @@ npm run verify:tui-hotreload-pty
 npm run verify:demo-tui
 npm run verify:tui-live
 npm run verify:planner-clarification
+npm run verify:planner-context-reset
 npm run verify:hotreload
 npm run verify:hotreload-resume
 npm run verify:app-server-hotreload

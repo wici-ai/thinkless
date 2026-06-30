@@ -500,13 +500,24 @@ async function runCodexPlanDiff(
 ): Promise<PlannerInvocationResult | null> {
   if (!(await commandExists(command))) return null;
   const prompt = buildCodexPlanDiffPrompt({ goalText, currentPlan, currentAssumptions, newText, systemPrompt, safetyText, previousError });
-  return runCodexPlannerProcess(paths, command, `diff-codex-${Date.now()}`, prompt, {
+  const label = `diff-codex-${Date.now()}`;
+  const sessionId = plannerSessionId && plannerSessionId !== 'stub-planner' ? plannerSessionId : undefined;
+  const runtime = {
     model: codexPlannerModel(config),
     effort: codexPlannerEffort(config),
-    sessionId: plannerSessionId && plannerSessionId !== 'stub-planner' ? plannerSessionId : undefined,
+    sessionId,
     onRetry,
     shouldAbort
-  });
+  };
+  try {
+    return await runCodexPlannerProcess(paths, command, label, prompt, runtime);
+  } catch (error) {
+    if (!sessionId || !isPlannerContextWindowFailure(error)) throw error;
+    return runCodexPlannerProcess(paths, command, `${label}-fresh-context`, prompt, {
+      ...runtime,
+      sessionId: undefined
+    });
+  }
 }
 
 async function runCodexPlannerProcess(
@@ -670,6 +681,10 @@ function stringValue(value: unknown): string | undefined {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isPlannerContextWindowFailure(error: unknown): boolean {
+  return /ran out of room|context window|model'?s context|context length|maximum context/i.test(errorMessage(error));
 }
 
 async function runPlannerProcess(

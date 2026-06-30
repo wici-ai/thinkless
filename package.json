@@ -1,6 +1,6 @@
 {
   "name": "thinkless",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "private": true,
   "type": "module",
   "files": [
@@ -95,6 +95,7 @@
     "verify:codex-run-usage": "tsx src/verify/codex-run-usage.ts",
     "verify:clarify": "tsx src/verify/clarify.ts",
     "verify:planner-clarification": "tsx src/verify/planner-clarification.ts",
+    "verify:planner-context-reset": "tsx src/verify/planner-context-reset.ts",
     "verify:claude-probe": "tsx src/verify/claude-probe.ts",
     "verify:manual-lock": "tsx src/verify/manual-lock.ts",
     "verify:benchmark-manifest": "tsx src/verify/benchmark-manifest.ts",
