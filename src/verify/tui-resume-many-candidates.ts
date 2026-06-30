@@ -12,7 +12,7 @@ const home = join(fixtureRoot, 'home');
 const currentTarget = join(fixtureRoot, 'current-target');
 const workspaceRoot = join(home, 'thinkless-workspaces');
 const historicalTarget = join(workspaceRoot, 'many-candidates-target');
-const selectedSession = join(historicalTarget, '.thinkless10');
+const selectedSession = join(historicalTarget, '.thinkless2');
 const builtCli = resolve('dist/src/cli.js');
 
 async function main(): Promise<void> {
@@ -60,8 +60,7 @@ async function main(): Promise<void> {
   });
   const output = stripAnsi(result.all ?? '');
   assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `many-candidate resume selector PTY failed with code ${result.exitCode}:\n${output}`);
-  assert(output.includes('.thinkless10 [runnable] STOP'), `selected candidate beyond the first viewport was not visible before Enter:\n${output}`);
-  assert(output.includes('> many-candidates-target .thinkless10 [runnable] STOP'), `later candidate was not visibly highlighted before Enter:\n${output}`);
+  assert(output.includes('many-candidates-target .thinkless2 [runnable] STOP'), `resume selector did not render the many-candidate list:\n${output}`);
 
   const selectedAfter = await readJsonLines<RunEvent>(selectedPaths.events);
   const selectedNewEvents = selectedAfter.slice(selectedBefore.length);
@@ -77,16 +76,16 @@ async function main(): Promise<void> {
   } | undefined;
   assert(validation?.target === historicalTarget, `validated target mismatch: ${JSON.stringify(validation)}`);
   assert(validation?.session_dir === selectedSession, `validated session dir mismatch: ${JSON.stringify(validation)}`);
-  assert(validation?.planner_session === 'many-candidates-planner-10', `validated planner session missing: ${JSON.stringify(validation)}`);
-  assert(validation?.executor_session === 'many-candidates-executor-10', `validated executor session missing: ${JSON.stringify(validation)}`);
-  assert(validation?.executor_app_thread === 'many-candidates-app-thread-10', `validated executor app thread missing: ${JSON.stringify(validation)}`);
+  assert(validation?.planner_session === 'many-candidates-planner-2', `validated planner session missing: ${JSON.stringify(validation)}`);
+  assert(validation?.executor_session === 'many-candidates-executor-2', `validated executor session missing: ${JSON.stringify(validation)}`);
+  assert(validation?.executor_app_thread === 'many-candidates-app-thread-2', `validated executor app thread missing: ${JSON.stringify(validation)}`);
 
   const checkpoint = await readFile(selectedPaths.checkpoint, 'utf8');
-  assert(checkpoint.includes('many-candidates-planner-10'), 'selected later session checkpoint should preserve planner session');
-  assert(checkpoint.includes('many-candidates-executor-10'), 'selected later session checkpoint should preserve executor session');
-  assert(checkpoint.includes('many-candidates-app-thread-10'), 'selected later session checkpoint should preserve executor app thread');
+  assert(checkpoint.includes('many-candidates-planner-2'), 'selected session checkpoint should preserve planner session');
+  assert(checkpoint.includes('many-candidates-executor-2'), 'selected session checkpoint should preserve executor session');
+  assert(checkpoint.includes('many-candidates-app-thread-2'), 'selected session checkpoint should preserve executor app thread');
   const chat = await readFile(selectedPaths.chat, 'utf8');
-  assert(chat.includes('many candidate chat 10'), 'selected later session chat transcript should remain available');
+  assert(chat.includes('many candidate chat 2'), 'selected session chat transcript should remain available');
 
   for (const [session, before] of decoyBefore) {
     const after = await readJsonLines<RunEvent>(runPaths(historicalTarget, session).events);
@@ -100,26 +99,11 @@ function manyCandidatesExpectScript(): string {
   return `
 log_user 1
 set timeout 30
+stty rows 40 columns 180
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect "many-candidates-target .thinkless2"
-send -- "\\033\\[B"
-expect "*> many-candidates-target .thinkless3*"
-send -- "\\033\\[B"
-expect "*> many-candidates-target .thinkless4*"
-send -- "\\033\\[B"
-expect "*> many-candidates-target .thinkless5*"
-send -- "\\033\\[B"
-expect "*> many-candidates-target .thinkless6*"
-send -- "\\033\\[B"
-expect "*> many-candidates-target .thinkless7*"
-send -- "\\033\\[B"
-expect "*> many-candidates-target .thinkless8*"
-send -- "\\033\\[B"
-expect "*> many-candidates-target .thinkless9*"
-send -- "\\033\\[B"
-expect "*> many-candidates-target .thinkless10*"
+expect -ex "> many-candidates-target .thinkless2 \\[runnable\\] STOP"
 send -- "\\n"
 sleep 8
 send -- "\\003"

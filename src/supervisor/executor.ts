@@ -277,6 +277,7 @@ async function buildExecutorPrompt(
       `${goalPath} and ${planPath} have already been updated on disk. Re-read them from the workspace before acting.`,
       steerText ? `New requirement or steering delta to apply now:\n${steerText}` : '',
       'Do not restart the task from scratch. Continue from the existing workspace and remote state; preserve completed useful work.',
+      'Treat any old Codex thread memory as cache only. Claim-check durable state from GOAL.md, PLAN.md, .thinkless/context.md or .wici/context.md, git status, recent ledger rows, and referenced artifacts before changing files.',
       `If the updated ${goalPath}/${planPath} changes validation, update only the necessary local files/scripts and run the new checks.`,
       `Use the target repository as the only workspace.`,
       `Before architecture-sensitive changes or debugging, infer the target system invariants from repo docs, code paths, logs, tests, ledger/receipts, and ASSUMPTIONS.md: source of truth, ownership boundary, resource identity/lifecycle, translation or mapping points, fallback policy, and proof evidence.`,
@@ -289,7 +290,7 @@ async function buildExecutorPrompt(
       '',
       safetyText,
       memoryText ? memoryText : '',
-      `Write result JSON to ${resultPath} with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
+      `Write result JSON to ${resultPath} with shape {step_done,tests_pass,notes,changed_files,next,durable_facts,evidence_paths,ruled_out,next_actions}; use [] for array fields and null for next when empty.`
     ]
       .filter((item) => item !== '')
       .join('\n');
@@ -300,6 +301,7 @@ async function buildExecutorPrompt(
     steerText ? `NOTE new requirement or steering input: ${steerText}` : '',
     `Use the target repository as the only workspace.`,
     `Treat ${goalPath} and ${planPath} below as the execution goal input. Re-read the files from disk if you need exact current contents.`,
+    `If this is a fresh short-thread epoch, use .thinkless/context.md or .wici/context.md as a durable handoff index, then verify the relevant facts from source files/artifacts before acting.`,
     `You may edit ${planPath}, ${goalPath}, and planner-provided scripts under ${optPath} when execution teaches you the plan is wrong, incomplete, or needs a better strategy. Keep the user's requirement intact and record the reasoning in the files you change.`,
     `Before architecture-sensitive changes or debugging, infer the target system invariants from repo docs, code paths, logs, tests, ledger/receipts, and ASSUMPTIONS.md: source of truth, ownership boundary, resource identity/lifecycle, translation or mapping points, fallback policy, and proof evidence. Do not hardcode domain assumptions from examples.`,
     `Use a compact RFC-style decision packet for nontrivial architecture/debug turns: problem, inferred invariants, options considered, chosen approach, risks, and validation. Preserve durable findings in ${planPath} or ASSUMPTIONS.md so later steps do not blind-guess from stale context.`,
@@ -321,7 +323,7 @@ async function buildExecutorPrompt(
     '',
     safetyText,
     memoryText ? memoryText : '',
-    `Write result JSON to ${resultPath} with shape {step_done,tests_pass,notes,changed_files,next}; use [] for changed_files and null for next when empty.`
+    `Write result JSON to ${resultPath} with shape {step_done,tests_pass,notes,changed_files,next,durable_facts,evidence_paths,ruled_out,next_actions}; use [] for array fields and null for next when empty.`
   ]
     .filter((item) => item !== '')
     .join('\n');
@@ -767,8 +769,16 @@ function normalizeIterResult(parsed: IterResult): IterResult {
   return {
     ...parsed,
     changed_files: Array.isArray(parsed.changed_files) ? parsed.changed_files : [],
-    next: parsed.next ?? undefined
+    next: parsed.next ?? undefined,
+    durable_facts: stringArray(parsed.durable_facts),
+    evidence_paths: stringArray(parsed.evidence_paths),
+    ruled_out: stringArray(parsed.ruled_out),
+    next_actions: stringArray(parsed.next_actions)
   };
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
 async function runStubExecutor(paths: RunPaths, _goal: GoalFile, stepId: string, iter: number): Promise<IterResult> {

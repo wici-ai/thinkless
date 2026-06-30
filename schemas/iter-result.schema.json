@@ -8,7 +8,11 @@
     "tests_pass": { "type": "boolean" },
     "notes": { "type": "string" },
     "changed_files": { "type": "array", "items": { "type": "string" } },
-    "next": { "type": ["string", "null"] }
+    "next": { "type": ["string", "null"] },
+    "durable_facts": { "type": "array", "items": { "type": "string" } },
+    "evidence_paths": { "type": "array", "items": { "type": "string" } },
+    "ruled_out": { "type": "array", "items": { "type": "string" } },
+    "next_actions": { "type": "array", "items": { "type": "string" } }
   },
   "additionalProperties": false
 }

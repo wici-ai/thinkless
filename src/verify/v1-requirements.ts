@@ -321,6 +321,7 @@ async function main(): Promise<void> {
   assert(pkg.scripts['verify:v1-core']?.includes('verify:v1-requirements'), 'verify:v1-core must include verify:v1-requirements');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:direct-no-scripts'), 'verify:v1-core must include direct no-scripts PLAN.md execution');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:direct-recovery'), 'verify:v1-core must include direct executor recovery');
+  assert(pkg.scripts['verify:v1-core']?.includes('verify:direct-executor-epoch'), 'verify:v1-core must include adaptive executor epoch coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:direct-plan-continuation'), 'verify:v1-core must include exhausted direct plan continuation');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:self-interrogation'), 'verify:v1-core must include planner self-interrogation coverage');
   assert(pkg.scripts['verify:v1-core']?.includes('verify:continuation-verdict'), 'verify:v1-core must include direct continuation verdict coverage');

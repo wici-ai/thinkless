@@ -309,6 +309,10 @@ export interface Checkpoint {
   events_seq: number;
   sessions: {
     planner?: string;
+    plannerEpoch?: {
+      turns: number;
+      updatedAt: string;
+    };
     executor?: string;
     executorApp?: {
       threadId: string;
@@ -323,6 +327,13 @@ export interface Checkpoint {
       reason: string;
       stepId?: string;
       at: string;
+    };
+    executorUsage?: {
+      sessionId?: string;
+      tokens_input?: number;
+      tokens_output?: number;
+      usd?: number;
+      updatedAt: string;
     };
   };
   tool_versions?: {
@@ -386,6 +397,10 @@ export interface IterResult {
   notes: string;
   changed_files: string[];
   next?: string | null;
+  durable_facts?: string[];
+  evidence_paths?: string[];
+  ruled_out?: string[];
+  next_actions?: string[];
 }
 
 export interface EvaluationConfig {

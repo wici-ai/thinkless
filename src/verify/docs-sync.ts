@@ -122,6 +122,7 @@ async function main(): Promise<void> {
   assert(docsText.includes('npm run verify:legacy-optimizer'), 'docs should document the legacy optimizer aggregate verifier');
   assert(docsText.includes('npm run verify:direct-no-scripts'), 'docs should document the no-script direct PLAN.md verifier');
   assert(docsText.includes('npm run verify:direct-recovery'), 'docs should document the direct executor recovery verifier');
+  assert(docsText.includes('npm run verify:direct-executor-epoch'), 'docs should document the adaptive executor epoch verifier');
   assert(docsText.includes('npm run verify:existing-goal') && docsText.includes('without passing a new `--goal`'), 'docs should document the existing-goal continuation verifier');
   assert(docsText.includes('npm run verify:tui-chat-pty') && docsText.includes('real pseudo-terminal'), 'docs should document the real PTY Chat-first verifier');
   assert(docsText.includes('npm run verify:tui-real-fake-chat') && docsText.includes('fake Claude/Codex CLIs'), 'docs should document the real-mode fake CLI Chat-first verifier');
@@ -347,6 +348,11 @@ async function main(): Promise<void> {
       completionAudit.includes('recoverable_failure') &&
       completionAudit.includes('resumed_executor'),
     'completion audit should include direct executor recovery evidence'
+  );
+  assert(
+    completionAudit.includes('npm run verify:direct-executor-epoch') &&
+      completionAudit.includes('fresh_epoch_iters'),
+    'completion audit should include adaptive executor epoch evidence'
   );
   assert(completionAudit.includes('npm run verify:existing-goal') && completionAudit.includes('continued_without_new_goal'), 'completion audit should include existing-goal continuation verification evidence');
   assert(completionAudit.includes('no `.opt` scripts are required to start Codex'), 'completion audit should make no-script execution explicit');

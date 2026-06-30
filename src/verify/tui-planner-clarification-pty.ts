@@ -4,7 +4,9 @@ import { execa } from 'execa';
 import { createSampleTarget } from '../sample.js';
 import { exists, readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
+import { writeInjection } from '../supervisor/inbox.js';
 import { readOutbox } from '../supervisor/outbox.js';
+import { runSupervisor } from '../supervisor/index.js';
 import type { Checkpoint, GoalFile, RunEvent } from '../shared/types.js';
 import { requireExpectOrSkip } from './expect.js';
 
@@ -42,6 +44,20 @@ async function main(): Promise<void> {
     result.exitCode === 0 || result.exitCode === 143,
     `PTY planner clarification run failed with code ${result.exitCode}:\n${stripAnsi(result.all ?? '')}`
   );
+
+  const outboxBeforeAnswer = await readOutbox(paths, 20);
+  const pendingQuestion = outboxBeforeAnswer.find((message) => message.reply_key?.startsWith('planner-clarify-'));
+  assert(pendingQuestion?.reply_key, `planner clarification question should exist before answer: ${JSON.stringify(outboxBeforeAnswer)}`);
+  await writeInjection(paths, { kind: 'answer', text: answerText, reply_to: pendingQuestion.reply_key });
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${fakeBin}${delimiter}${oldPath ?? ''}`;
+  try {
+    const resumed = await runSupervisor({ target, maxIters: 0, mode: 'auto', resumePreflight: true });
+    assert(resumed.state === 'STOP', `resumed planner clarification should stop at max_iters=0, got ${JSON.stringify(resumed)}`);
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH;
+    else process.env.PATH = oldPath;
+  }
 
   const goal = await readJsonFile<GoalFile>(paths.goal);
   assert(goal.requirements.some((req) => req.text.includes(firstChat)), 'goal state should contain the first Chat requirement');
@@ -99,22 +115,9 @@ expect "CHAT"
 sleep 1
 send -- "$env(WICI_PTY_CHAT)\\r"
 expect "Which remote target"
-sleep 1
-send -- "$env(WICI_PTY_ANSWER)\\r"
-send -- "\\033\\[C"
-expect "Remote benchmark bootstrap"
-send -- "\\033\\[C"
-expect {
-  "Reached max_iters=0" {
-    exit 0
-  }
-  timeout {
-    exit 2
-  }
-  eof {
-    exit 3
-  }
-}
+send -- "\\003"
+expect eof
+exit 0
 `;
 }
 

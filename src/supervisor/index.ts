@@ -1,4 +1,4 @@
-import { chmod, readFile } from 'node:fs/promises';
+import { chmod, readFile, stat } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { atomicWriteFile, atomicWriteJson, acquireLock, exists, lineCount, readJsonFileMaybe, truncateJsonLines } from '../shared/atomic.js';
 import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
@@ -73,6 +73,11 @@ const PLANNER_CLARIFY_WAIT_REASON = 'awaiting planner clarification';
 const STOP_ANSWER_WAIT_REASON = 'awaiting stop answer';
 const CONTINUATION_STALL_REPLY_PREFIX = 'continuation-stall-';
 const URGENT_ABORT_REASON = 'urgent abort injection';
+const EXECUTOR_MAX_EPOCH_ITERATIONS = envPositiveInt('WICI_EXECUTOR_MAX_EPOCH_ITERATIONS', 12);
+const EXECUTOR_CONTEXT_SOFT_INPUT_TOKENS = envPositiveInt('WICI_EXECUTOR_CONTEXT_SOFT_INPUT_TOKENS', 180_000);
+const EXECUTOR_DURABLE_PROMPT_SOFT_CHARS = envPositiveInt('WICI_EXECUTOR_DURABLE_PROMPT_SOFT_CHARS', 120_000);
+const EXECUTOR_NO_PROGRESS_FRESH_THRESHOLD = 2;
+const PLANNER_EPOCH_TURNS = 3;
 
 export interface SupervisorResult {
   state: 'STOP' | 'FAILED' | 'RUNNING';
@@ -960,6 +965,21 @@ async function runDirectPlanExecution(
 
     const nextIter = checkpoint.iter + 1;
     const iterationStarted = Date.now();
+    const proactiveReset = await executorFreshEpochReason(paths, checkpoint, step.id);
+    if (proactiveReset) {
+      await refreshContextSummary(paths, goal, events);
+      checkpoint = {
+        ...checkpoint,
+        sessions: withExecutorContextReset(checkpoint.sessions, step.id, proactiveReset)
+      };
+      await saveCheckpoint(paths, checkpoint);
+      await events.emit('EXECUTOR_EPOCH_RESET', `Starting fresh executor epoch for ${step.id}: ${proactiveReset}`, {
+        iter: nextIter,
+        step_id: step.id,
+        reason: proactiveReset,
+        mode: 'direct'
+      });
+    }
     const contextText = await readContextForPrompt(paths);
     checkpoint = {
       ...checkpoint,
@@ -993,6 +1013,8 @@ async function runDirectPlanExecution(
       if (run.stop) return run.stop;
       if (!run.result) throw new Error('Executor stopped without a result');
       const iterResult = run.result;
+      const usageAccounting = usageDeltaForLedger(checkpoint, iterResult.invocation);
+      checkpoint = usageAccounting.checkpoint;
       checkpoint.sessions.executor = iterResult.invocation.sessionId ?? checkpoint.sessions.executor;
       transientExecutorRetries.delete(`${step.id}:${nextIter}`);
       if (run.executorApp) {
@@ -1003,6 +1025,7 @@ async function runDirectPlanExecution(
         tests_pass: iterResult.tests_pass,
         changed_files: iterResult.changed_files,
         usage: iterResult.invocation.usage,
+        usage_delta: usageAccounting.delta,
         mode: 'direct'
       });
       await setPlanStepStatus(paths, step.id, iterResult.step_done ? 'done' : 'pending', nextIter);
@@ -1053,8 +1076,8 @@ async function runDirectPlanExecution(
         status: directStatus,
         commit: regressed ? checkpoint.best_commit ?? null : directBestCommit,
         wallMs: Date.now() - iterationStarted,
-        usage: iterResult.invocation.usage,
-        notes: iterResult.notes,
+        usage: usageAccounting.delta,
+        notes: notesWithStructuredHandoff(iterResult),
         stepDone: iterResult.step_done,
         testsPass: iterResult.tests_pass,
         changedFiles: iterResult.changed_files,
@@ -1065,12 +1088,25 @@ async function runDirectPlanExecution(
       await appendLedger(paths, ledgerEntry);
       const ledgerAfterIteration = await readLedger(paths);
       const directNoProgress = directNoProgressStall(ledgerAfterIteration, step.id, config);
+      const shouldFreshAfterNoProgress = directNoProgress.count >= EXECUTOR_NO_PROGRESS_FRESH_THRESHOLD;
       checkpoint = {
         ...checkpoint,
         consecutive_duplicate_direct_rejects: directNoProgress.count,
+        sessions: shouldFreshAfterNoProgress
+          ? withExecutorContextReset(checkpoint.sessions, step.id, 'no_progress_epoch')
+          : checkpoint.sessions,
         events_seq: events.seq
       };
       await saveCheckpoint(paths, checkpoint);
+      if (shouldFreshAfterNoProgress) {
+        await events.emit('EXECUTOR_EPOCH_RESET_SCHEDULED', `Scheduled fresh executor epoch after ${directNoProgress.count} repeated no-progress receipt(s) for ${step.id}`, {
+          iter: nextIter,
+          step_id: step.id,
+          reason: 'no_progress_epoch',
+          consecutive_duplicate_direct_rejects: directNoProgress.count,
+          mode: 'direct'
+        }, 'warn');
+      }
       if (directNoProgress.stalled) {
         const replan = await replanDirectNoProgress({
           paths,
@@ -1122,8 +1158,10 @@ async function runDirectPlanExecution(
     } catch (error) {
       if (isExecutorPreempted(error)) {
         const usage = error.usage;
+        const usageAccounting = usageDeltaForLedger(checkpoint, { usage });
+        checkpoint = usageAccounting.checkpoint;
         const reason = errorMessage(error);
-        await events.emit('EXECUTE_PREEMPTED', reason, usage ? { usage, mode: 'direct' } : { mode: 'direct' }, 'warn');
+        await events.emit('EXECUTE_PREEMPTED', reason, usage ? { usage, usage_delta: usageAccounting.delta, mode: 'direct' } : { mode: 'direct' }, 'warn');
         await revertToBest(paths, checkpoint.best_commit ?? 'NO_HEAD');
         await setPlanStepStatus(paths, step.id, 'pending', nextIter);
         const ledgerEntry = directLedgerEntry({
@@ -1132,7 +1170,7 @@ async function runDirectPlanExecution(
           status: 'preempted',
           commit: checkpoint.best_commit ?? null,
           wallMs: Date.now() - iterationStarted,
-          usage,
+          usage: usageAccounting.delta,
           notes: 'Executor preempted at the next Codex output/heartbeat to apply pending Chat input.',
           stepDone: false,
           testsPass: false,
@@ -1170,7 +1208,7 @@ async function runDirectPlanExecution(
           supervisor_state: 'REFLECT',
           iter: nextIter - 1,
           next_step: step.id,
-          sessions: withExecutorContextReset(checkpoint.sessions, step.id),
+          sessions: withExecutorContextReset(checkpoint.sessions, step.id, 'context_window_exhausted'),
           ledger_seq: await lineCount(paths.ledger),
           events_seq: events.seq,
           plan_hash: await hashFile(paths.plan)
@@ -1220,14 +1258,16 @@ async function runDirectPlanExecution(
         await saveCheckpoint(paths, checkpoint);
         continue;
       }
-      await events.emit('EXECUTE_RECOVERABLE_FAILURE', reason, usage ? { usage, mode: 'direct' } : { mode: 'direct' }, 'warn');
+      const usageAccounting = usageDeltaForLedger(checkpoint, { usage });
+      checkpoint = usageAccounting.checkpoint;
+      await events.emit('EXECUTE_RECOVERABLE_FAILURE', reason, usage ? { usage, usage_delta: usageAccounting.delta, mode: 'direct' } : { mode: 'direct' }, 'warn');
       const ledgerEntry = directLedgerEntry({
         iter: nextIter,
         stepId: step.id,
         status: 'crash',
         commit: checkpoint.best_commit ?? null,
         wallMs: Date.now() - iterationStarted,
-        usage,
+        usage: usageAccounting.delta,
         notes: reason,
         stepDone: false,
         testsPass: false,
@@ -1487,12 +1527,10 @@ async function continueDirectExhaustedPlan(
     }
   }
   const nextStep = nextExecutableStep(updatedPlan);
+  const continuationStepId = nextStep?.id ?? checkpoint.next_step ?? 'plan_continuation';
   checkpoint = {
     ...checkpoint,
-    sessions: {
-      ...checkpoint.sessions,
-      planner: diff.sessionId ?? checkpoint.sessions.planner
-    },
+    sessions: withExecutorContextReset(withPlannerSessionAfterDiff(checkpoint.sessions, diff.sessionId, true), continuationStepId, 'plan_continuation'),
     supervisor_state: nextStep ? 'EXECUTE' : 'FAILED',
     next_step: nextStep?.id ?? null,
     consecutive_duplicate_continuation_steps: duplicateCount,
@@ -1570,12 +1608,10 @@ async function replanDirectNoProgress(input: {
 
   const updatedPlan = await readPlan(input.paths);
   const nextStep = nextExecutableStep(updatedPlan);
+  const nextStepId = nextStep?.id ?? input.step.id;
   checkpoint = {
     ...checkpoint,
-    sessions: {
-      ...checkpoint.sessions,
-      planner: diff.sessionId ?? checkpoint.sessions.planner
-    },
+    sessions: withExecutorContextReset(withPlannerSessionAfterDiff(checkpoint.sessions, diff.sessionId, true), nextStepId, 'no_progress_replan'),
     supervisor_state: nextStep ? 'EXECUTE' : 'STOP',
     next_step: nextStep?.id ?? null,
     consecutive_duplicate_direct_rejects: 0,
@@ -1926,10 +1962,7 @@ async function applyDirectPendingInjections(
   if (!diff.ok) throw new Error(diff.error ?? 'Planner did not update PLAN.md');
   checkpoint = {
     ...checkpoint,
-    sessions: {
-      ...checkpoint.sessions,
-      planner: diff.sessionId ?? checkpoint.sessions.planner
-    },
+    sessions: withPlannerSessionAfterDiff(checkpoint.sessions, diff.sessionId, false),
     plan_hash: await hashFile(paths.plan)
   };
   await events.emit('PLAN_DIFF_APPLIED', 'Planner updated PLAN.md for new input', { steerText, mode: 'direct' });
@@ -2113,6 +2146,11 @@ export function resolveMaxIters(explicitMaxIters: number | undefined, configured
 
 function maxItersLabel(maxIters: number): string {
   return Number.isFinite(maxIters) ? String(maxIters) : 'unbounded';
+}
+
+function envPositiveInt(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function directLedgerEntry(args: {
@@ -2304,13 +2342,44 @@ function contextWindowResetSteerText(stepId: string): string {
   ].join('\n');
 }
 
-function withExecutorContextReset(sessions: Checkpoint['sessions'], stepId: string): Checkpoint['sessions'] {
-  const { executor: _executor, executorApp: _executorApp, executorReset: _executorReset, ...rest } = sessions;
+async function executorFreshEpochReason(paths: ReturnType<typeof runPaths>, checkpoint: Checkpoint, stepId: string): Promise<string | null> {
+  if (checkpoint.sessions.executorReset) return null;
+  if (checkpoint.iter <= 0) return null;
+  if ((checkpoint.consecutive_duplicate_direct_rejects ?? 0) >= EXECUTOR_NO_PROGRESS_FRESH_THRESHOLD && checkpoint.next_step === stepId) {
+    return 'no_progress_epoch';
+  }
+  const inputTokens = checkpoint.sessions.executorUsage?.tokens_input;
+  if (inputTokens !== undefined && inputTokens >= EXECUTOR_CONTEXT_SOFT_INPUT_TOKENS) {
+    return `context_input_tokens_${inputTokens}`;
+  }
+  const durablePromptChars = await durablePromptCharsForEpoch(paths);
+  if (durablePromptChars >= EXECUTOR_DURABLE_PROMPT_SOFT_CHARS) {
+    return `durable_prompt_chars_${durablePromptChars}`;
+  }
+  if (checkpoint.iter > 0 && checkpoint.iter % EXECUTOR_MAX_EPOCH_ITERATIONS === 0) return 'epoch_max_iterations';
+  return null;
+}
+
+async function durablePromptCharsForEpoch(paths: ReturnType<typeof runPaths>): Promise<number> {
+  const sizes = await Promise.all([fileSize(paths.goalDoc), fileSize(paths.plan), fileSize(paths.context), fileSize(paths.assumptions)]);
+  return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+async function fileSize(path: string): Promise<number> {
+  try {
+    return (await stat(path)).size;
+  } catch {
+    return 0;
+  }
+}
+
+function withExecutorContextReset(sessions: Checkpoint['sessions'], stepId: string | undefined, reason: string): Checkpoint['sessions'] {
+  const { executor: _executor, executorApp: _executorApp, executorReset: _executorReset, executorUsage: _executorUsage, ...rest } = sessions;
   return {
     ...rest,
     executorReset: {
-      reason: 'context_window_exhausted',
-      stepId,
+      reason,
+      ...(stepId ? { stepId } : {}),
       at: new Date().toISOString()
     }
   };
@@ -2324,6 +2393,107 @@ function clearExecutorReset(checkpoint: Checkpoint, stepId: string): Checkpoint 
     ...checkpoint,
     sessions
   };
+}
+
+function withPlannerSessionAfterDiff(sessions: Checkpoint['sessions'], sessionId: string | undefined, freshNext: boolean): Checkpoint['sessions'] {
+  const nextTurns = (sessions.plannerEpoch?.turns ?? 0) + 1;
+  const shouldFreshNext = freshNext || nextTurns >= PLANNER_EPOCH_TURNS;
+  const { planner: _planner, plannerEpoch: _plannerEpoch, ...rest } = sessions;
+  if (shouldFreshNext) return rest;
+  return {
+    ...rest,
+    planner: sessionId ?? sessions.planner,
+    plannerEpoch: {
+      turns: nextTurns,
+      updatedAt: new Date().toISOString()
+    }
+  };
+}
+
+function usageDeltaForLedger(
+  checkpoint: Checkpoint,
+  invocation: Pick<ToolInvocationResult, 'sessionId' | 'usage'>
+): { checkpoint: Checkpoint; delta?: ToolUsageSummary } {
+  const usage = invocation.usage;
+  if (!usage) return { checkpoint };
+  const sessionId = invocation.sessionId ?? checkpoint.sessions.executor ?? checkpoint.sessions.executorApp?.threadId ?? 'codex-exec-default';
+  const previous = checkpoint.sessions.executorUsage;
+  const sameSession = previous?.sessionId === sessionId;
+  const cumulativeSession = sameSession && usageLooksCumulative(previous, usage);
+  const delta: ToolUsageSummary = {
+    ...usage,
+    ...(usage.tokens_input !== undefined ? { tokens_input: usageTokenDelta(previous?.tokens_input, usage.tokens_input, cumulativeSession) } : {}),
+    ...(usage.tokens_output !== undefined ? { tokens_output: usageTokenDelta(previous?.tokens_output, usage.tokens_output, cumulativeSession) } : {}),
+    ...(usage.usd !== undefined ? { usd: usageCostDelta(previous?.usd, usage.usd, sameSession) } : {})
+  };
+  const compactDelta = compactUsageDelta(delta);
+  return {
+    checkpoint: {
+      ...checkpoint,
+      sessions: {
+        ...checkpoint.sessions,
+        executorUsage: {
+          sessionId,
+          ...(usage.tokens_input !== undefined ? { tokens_input: usage.tokens_input } : {}),
+          ...(usage.tokens_output !== undefined ? { tokens_output: usage.tokens_output } : {}),
+          ...(usage.usd !== undefined ? { usd: usage.usd } : {}),
+          updatedAt: new Date().toISOString()
+        }
+      }
+    },
+    delta: compactDelta
+  };
+}
+
+function usageLooksCumulative(previous: Checkpoint['sessions']['executorUsage'] | undefined, current: ToolUsageSummary): boolean {
+  return Boolean(
+    previous &&
+      current.tokens_input !== undefined &&
+      previous.tokens_input !== undefined &&
+      current.tokens_input >= previous.tokens_input &&
+      (previous.tokens_input >= 20_000 || current.tokens_input >= 20_000)
+  );
+}
+
+function usageTokenDelta(previous: number | undefined, current: number, cumulativeSession: boolean): number {
+  return cumulativeSession && previous !== undefined && current >= previous ? current - previous : current;
+}
+
+function usageCostDelta(previous: number | undefined, current: number, sameSession: boolean): number {
+  if (sameSession && previous !== undefined && current >= previous) return Number((current - previous).toFixed(8));
+  return current;
+}
+
+function compactUsageDelta(usage: ToolUsageSummary): ToolUsageSummary {
+  const compact: ToolUsageSummary = {
+    events: usage.events,
+    completed_turns: usage.completed_turns,
+    completed_items: usage.completed_items,
+    failed: usage.failed,
+    errors: usage.errors
+  };
+  if (usage.tokens_input !== undefined && usage.tokens_input !== 0) compact.tokens_input = usage.tokens_input;
+  if (usage.tokens_output !== undefined && usage.tokens_output !== 0) compact.tokens_output = usage.tokens_output;
+  if (usage.usd !== undefined && usage.usd !== 0) compact.usd = usage.usd;
+  if (usage.parse_errors !== undefined) compact.parse_errors = usage.parse_errors;
+  return compact;
+}
+
+function notesWithStructuredHandoff(result: IterResult): string {
+  const sections = [
+    result.notes,
+    formatResultList('Durable facts', result.durable_facts),
+    formatResultList('Evidence paths', result.evidence_paths),
+    formatResultList('Ruled out', result.ruled_out),
+    formatResultList('Next actions', result.next_actions)
+  ].filter(Boolean);
+  return sections.join('\n\n');
+}
+
+function formatResultList(title: string, items: string[] | undefined): string {
+  const filtered = items?.map((item) => item.trim()).filter(Boolean).slice(0, 8) ?? [];
+  if (filtered.length === 0) return '';
+  return [`${title}:`, ...filtered.map((item) => `- ${item}`)].join('\n');
 }
 
 async function ensurePlanAndLegacyBaselineState(
