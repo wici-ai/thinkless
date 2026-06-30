@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>WiCi V1 Completion Audit | thinkless</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="WiCi V1 Completion Audit" />
+<meta property="og:locale" content="en_US" />
+<link rel="canonical" href="http://wici.ai/thinkless/v1-completion-audit.html" />
+<meta property="og:url" content="http://wici.ai/thinkless/v1-completion-audit.html" />
+<meta property="og:site_name" content="thinkless" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="WiCi V1 Completion Audit" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","headline":"WiCi V1 Completion Audit","url":"http://wici.ai/thinkless/v1-completion-audit.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="stylesheet" href="/thinkless/assets/css/style.css?v=29a57ef42f56512d0cfbd120a864138e5a1d718e">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/thinkless/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <div class="container-lg px-3 my-5 markdown-body">
+      
+      <h1><a href="http://wici.ai/thinkless/">thinkless</a></h1>
+      
+
+      <h1 id="wici-v1-completion-audit">WiCi V1 Completion Audit</h1>
+
+<p>Date: 2026-06-15
+Scope: <code class="language-plaintext highlighter-rouge">Simplified_PLAN.md</code> V1 path.</p>
+
+<p>This audit records what is currently proven and what is covered by automated checks.</p>
+
+<h2 id="product-boundary">Product Boundary</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Requirement</th>
+      <th>Evidence</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Local TUI: bottom Chat input plus a switchable Chat History / Goal/Plan / Execution workspace</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-structure</code>, <code class="language-plaintext highlighter-rouge">npm run verify:demo-tui</code>, <code class="language-plaintext highlighter-rouge">npm run verify:tui-live</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Chat is the first intake for a blank run, but first input is not automatically an initial goal</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-chat-intake</code> reports <code class="language-plaintext highlighter-rouge">blank_chat_routes_through_agent</code>, <code class="language-plaintext highlighter-rouge">degraded_inspection_does_not_start_planner</code>, and <code class="language-plaintext highlighter-rouge">degraded_plan_request_starts_planner</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Real pseudo-terminal Chat input can submit the first blank-run goal and start execution</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-chat-pty</code> report <code class="language-plaintext highlighter-rouge">pty_chat_first</code> and <code class="language-plaintext highlighter-rouge">goal_source: tui_chat</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Chat-first TUI can drive the real-mode planner/executor subprocess path without using stub execution</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-real-fake-chat</code> report <code class="language-plaintext highlighter-rouge">pty_chat_first_real_mode_fake_clis</code>, Codex planner invocation, and <code class="language-plaintext highlighter-rouge">EXECUTE_PROGRESS</code> evidence</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>TUI exposes per-workspace Chat / PLAN / EXECUTION agent and effort selection, with model fixed by agent</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-structure</code>; <code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Real pseudo-terminal Chat input can answer planner clarification questions and resume the planner session</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-planner-clarification-pty</code> report <code class="language-plaintext highlighter-rouge">pty_planner_clarification</code>, <code class="language-plaintext highlighter-rouge">question_answered</code>, and <code class="language-plaintext highlighter-rouge">planner_session</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Chat pane restores current goal, user steering, and planner answers from the blackboard without repeating the initial goal in transcript history</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-structure</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>TUI does not directly write supervisor-owned GOAL/PLAN/checkpoint/ledger/event files; only ChatPane writes inbox injections</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-structure</code> report <code class="language-plaintext highlighter-rouge">chat_writes_only_inbox</code>, <code class="language-plaintext highlighter-rouge">goal_and_exec_read_only</code>, and static file-write API checks</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Blank Chat History / Goal/Plan / Execution workspace does not create run files before Chat</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-chat-intake</code>, <code class="language-plaintext highlighter-rouge">npm run verify:demo-tui</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Initial goal provenance is not written retroactively on an existing run</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-chat-intake</code> report <code class="language-plaintext highlighter-rouge">goal_source_not_retroactive</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>A historical <code class="language-plaintext highlighter-rouge">baseline.json</code> alone does not block fresh Chat-first intake</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-chat-intake</code> report <code class="language-plaintext highlighter-rouge">historical_baseline_does_not_block_chat</code>; <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Supervisor is a blackboard/orchestration layer, not a semantic task engine</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code>, <code class="language-plaintext highlighter-rouge">npm run verify:goal-metric</code>, <code class="language-plaintext highlighter-rouge">npm run verify:curriculum</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>No task categories, hardcoded avenues, or supervisor metric parser</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:goal-metric</code>, <code class="language-plaintext highlighter-rouge">npm run verify:curriculum</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Internal planner-selected metric placeholder is not presented as a user target</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-structure</code>, <code class="language-plaintext highlighter-rouge">npm run verify:goal-interrogation</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Default real runs have no WiCi cost or iteration hard cap</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code> report <code class="language-plaintext highlighter-rouge">default_iteration_budget_unbounded</code>; <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code>; <code class="language-plaintext highlighter-rouge">wici.config.json</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>macOS installs bootstrap host dependencies, including GitHub CLI, and supports a one-line public release installer without committing secrets</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:install-bootstrap</code>; README macOS Bootstrap section; <code class="language-plaintext highlighter-rouge">scripts/install.sh</code></td>
+      <td>Covered</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="planner">Planner</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Requirement</th>
+      <th>Evidence</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Claude Code plan mode is the planner</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner uses native tool availability; no WiCi allowlist/denylist</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner prompt permits native planning-time web research and remote discovery while leaving execution outcomes to Codex</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner output is markdown artifacts, not JSON-as-plan</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner self-interrogates 2-3 approaches, records <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code>, and asks <code class="language-plaintext highlighter-rouge">## QUESTION</code> only for essential unresolvable unknowns</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:self-interrogation</code> report <code class="language-plaintext highlighter-rouge">assumptions_materialized</code> and <code class="language-plaintext highlighter-rouge">question_gate_narrowed</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner diff treats user steering as an assumption override and maintains <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code> when assumptions change</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:self-interrogation</code> report <code class="language-plaintext highlighter-rouge">planner_diff_maintains_assumptions</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner <code class="language-plaintext highlighter-rouge">PLAN.md</code> prose is not parsed into a supervisor benchmark schema</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code> report <code class="language-plaintext highlighter-rouge">no_markdown_benchmark_inference</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Fresh V1 planner prompt does not force <code class="language-plaintext highlighter-rouge">.opt/measure.sh</code> to emit a WiCi metric schema</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">PLAN.md</code> exists before Codex starts</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:v1-slice</code>, <code class="language-plaintext highlighter-rouge">npm run verify:planner-clarification</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner clarification routes through Chat and resumes the same Claude session</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:planner-clarification</code>, <code class="language-plaintext highlighter-rouge">npm run verify:tui-structure</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner clarification during hot-reload PLAN diff routes through Chat and resumes the same Claude session</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:planner-clarification</code> report <code class="language-plaintext highlighter-rouge">plan_diff_question</code> and <code class="language-plaintext highlighter-rouge">plan_diff_resumed_session</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Initial planner token usage is visible as <code class="language-plaintext highlighter-rouge">PLAN_USAGE</code></td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code> report <code class="language-plaintext highlighter-rouge">initial_plan_usage_streamed</code>; <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Hot-reload planner diff token usage is visible as <code class="language-plaintext highlighter-rouge">PLAN_USAGE</code></td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner/executor token usage is visible in the Execution pane</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-structure</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner transcript is saved for real runs</td>
+      <td>Planner stdout/event artifacts under <code class="language-plaintext highlighter-rouge">.thinkless/artifacts/planner-*.stdout.jsonl</code> or legacy <code class="language-plaintext highlighter-rouge">.wici/artifacts/planner-initial.stdout.jsonl</code></td>
+      <td>Covered</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="executor">Executor</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Requirement</th>
+      <th>Evidence</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Codex receives current <code class="language-plaintext highlighter-rouge">GOAL.md</code> and <code class="language-plaintext highlighter-rouge">PLAN.md</code></td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:executor-contract</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Codex receives <code class="language-plaintext highlighter-rouge">GOAL.md + PLAN.md</code> as one goal; step IDs are only thin receipt/progress focus</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:v1-slice</code>, <code class="language-plaintext highlighter-rouge">npm run verify:executor-contract</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Codex execution reaches the live TUI stream</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-live</code> reports <code class="language-plaintext highlighter-rouge">goal_source: tui_goal_option</code> for the automation shortcut; <code class="language-plaintext highlighter-rouge">npm run verify:executor-contract</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">PLAN.md</code> can execute without planner-generated <code class="language-plaintext highlighter-rouge">.opt</code> scripts</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:direct-no-scripts</code>; README states no-script plans still execute directly</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Planner-generated scripts are persisted executable and runnable when present</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:v1-slice</code> asserts <code class="language-plaintext highlighter-rouge">.opt/checks.sh</code> and <code class="language-plaintext highlighter-rouge">.opt/measure.sh</code> are executable, then runs both</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Optional planner scripts and historical <code class="language-plaintext highlighter-rouge">baseline.json</code> files are not a supervisor baseline gate in fresh V1</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code>, <code class="language-plaintext highlighter-rouge">npm run verify:docs-sync</code>, <code class="language-plaintext highlighter-rouge">Simplified_PLAN.md</code>; no <code class="language-plaintext highlighter-rouge">.opt</code> scripts are required to start Codex</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Legacy optimizer behavior remains isolated from fresh V1 and is checked through an explicit aggregate</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:legacy-optimizer</code>; README legacy optimizer section</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Codex transcript is saved for real runs</td>
+      <td><code class="language-plaintext highlighter-rouge">.thinkless/codex-run.jsonl</code> / legacy <code class="language-plaintext highlighter-rouge">.wici/codex-run.jsonl</code> run artifacts</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Codex token usage is captured</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:codex-run-usage</code>, <code class="language-plaintext highlighter-rouge">npm run verify:executor-contract</code>, <code class="language-plaintext highlighter-rouge">npm run verify:app-server-hotreload</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Executor context is managed by adaptive short epochs instead of unbounded hidden resume history</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:direct-executor-epoch</code> reports <code class="language-plaintext highlighter-rouge">fresh_epoch_iters</code> from context token pressure and verifies per-turn ledger token deltas</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Chat, planner, and executor agent/effort can be selected while models stay fixed to claude-opus-4-8 or gpt-5.5</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">codex exec resume</code> avoids unsupported <code class="language-plaintext highlighter-rouge">-C</code></td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:executor-contract</code>, <code class="language-plaintext highlighter-rouge">npm run verify:tool-commands</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Existing <code class="language-plaintext highlighter-rouge">GOAL.md</code> / <code class="language-plaintext highlighter-rouge">PLAN.md</code> can continue without passing a new <code class="language-plaintext highlighter-rouge">--goal</code></td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:existing-goal</code> report <code class="language-plaintext highlighter-rouge">continued_without_new_goal</code> and <code class="language-plaintext highlighter-rouge">reused_goal_run_id</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Exhausted direct plans pass through a continue-biased completion gate before planner continuation</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:direct-plan-continuation</code>; <code class="language-plaintext highlighter-rouge">npm run verify:continuation-verdict</code> reports <code class="language-plaintext highlighter-rouge">explicit_complete_stops</code>, <code class="language-plaintext highlighter-rouge">explicit_continue_continues</code>, and <code class="language-plaintext highlighter-rouge">ambiguous_falls_back_to_continue</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Executor failures and timeouts are recoverable long-goal events, not immediate whole-goal blockers</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:direct-recovery</code> report <code class="language-plaintext highlighter-rouge">recoverable_failure</code>, <code class="language-plaintext highlighter-rouge">ledger_rows: 2</code>, and <code class="language-plaintext highlighter-rouge">resumed_executor</code>; code emits <code class="language-plaintext highlighter-rouge">EXECUTE_RECOVERABLE_FAILURE</code> and continues with <code class="language-plaintext highlighter-rouge">codex exec resume --last</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Codex may diagnose failures, update <code class="language-plaintext highlighter-rouge">PLAN.md</code> / <code class="language-plaintext highlighter-rouge">.opt</code>, and continue the same goal</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:direct-recovery</code> asserts the recovery prompt includes previous failure context and authorizes PLAN updates; <code class="language-plaintext highlighter-rouge">npm run verify:executor-contract</code> covers resume command shape</td>
+      <td>Covered</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="hot-reload-and-durability">Hot Reload And Durability</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Requirement</th>
+      <th>Evidence</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Later Chat input updates the goal without restarting the TUI</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:hotreload</code>, <code class="language-plaintext highlighter-rouge">npm run verify:tui-chat-intake</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Preferred hot reload steers an active Codex app-server turn without restarting execution</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:app-server-hotreload</code> reports <code class="language-plaintext highlighter-rouge">app_server_steer</code>, records <code class="language-plaintext highlighter-rouge">EXECUTE_STEERED</code>, and verifies app-server received <code class="language-plaintext highlighter-rouge">turn/steer</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Codex app-server reconnect loops fall back to the exec executor</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:app-server-fallback</code> simulates app-server reconnect/status notifications without actionable turn events, records <code class="language-plaintext highlighter-rouge">EXECUTE_APP_SERVER_FALLBACK</code>, and completes through <code class="language-plaintext highlighter-rouge">codex exec</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Legacy <code class="language-plaintext highlighter-rouge">codex exec</code> fallback can preempt an active direct Codex run at the next executor output/heartbeat</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:direct-preempt</code> report <code class="language-plaintext highlighter-rouge">preempted_active_executor</code>, <code class="language-plaintext highlighter-rouge">EXECUTE_PREEMPTED</code>, and resumed executor evidence</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Real pseudo-terminal follow-up Chat input hot-reloads GOAL/PLAN before the next Codex iteration</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-hotreload-pty</code> report <code class="language-plaintext highlighter-rouge">pty_hot_reload</code>, <code class="language-plaintext highlighter-rouge">goal_version: 2</code>, and <code class="language-plaintext highlighter-rouge">ledger_rows: 2</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Hot reload preserves Codex execution continuity instead of starting a fresh executor context</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:app-server-hotreload</code> covers active-turn steering; <code class="language-plaintext highlighter-rouge">npm run verify:hotreload-resume</code> and <code class="language-plaintext highlighter-rouge">npm run verify:executor-contract</code> cover legacy resume fallback</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Hot-reload steering is persisted into <code class="language-plaintext highlighter-rouge">GOAL.md</code>, not only passed as a transient prompt note</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:hotreload</code> report <code class="language-plaintext highlighter-rouge">goal_doc_contains_steering</code>; <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Safe-point inbox draining is idempotent through <code class="language-plaintext highlighter-rouge">drained_inbox[]</code></td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:hotreload</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">checkpoint.json</code>, <code class="language-plaintext highlighter-rouge">events.jsonl</code>, and <code class="language-plaintext highlighter-rouge">ledger.jsonl</code> support direct V1 crash recovery and resume</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:v1-slice</code>, <code class="language-plaintext highlighter-rouge">npm run verify:direct-recovery</code>, <code class="language-plaintext highlighter-rouge">npm run verify:durability</code> report <code class="language-plaintext highlighter-rouge">direct_recovered</code>, <code class="language-plaintext highlighter-rouge">npm run verify:setup-state</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">/resume</code> in the TUI opens a selectable recovery page instead of blindly continuing the displayed run</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-selector-pty</code> types <code class="language-plaintext highlighter-rouge">/resume</code> in a real PTY, shows runnable/blocked candidates, selects <code class="language-plaintext highlighter-rouge">.thinkless2</code>, and verifies new supervisor events in that selected session. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-selector-built</code> repeats the selector flow through the built CLI entrypoint, verifies full-context preflight metadata, proves up/down movement, Enter launch, Escape cancellation, and refuses blocked candidates without <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code>, <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code>, or <code class="language-plaintext highlighter-rouge">EXECUTOR_RESUME_FALLBACK</code> side effects. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-current-candidate</code> opens <code class="language-plaintext highlighter-rouge">/resume</code> against a runnable current <code class="language-plaintext highlighter-rouge">.thinkless</code> session plus decoy and proves selector display alone does not append preflight or launch events. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-interrupted-blocked</code> proves packaged selector Enter refuses checkpointed-but-unrecoverable interrupted planner/executor candidates without launching or mutating runnable decoys. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-interrupted-runnable</code> proves packaged selector Enter launches interrupted-but-runnable planner rerun and executor replay candidates with <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code>, <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code>, executor <code class="language-plaintext highlighter-rouge">EXECUTOR_RESUME_FALLBACK</code> where expected, preserved full context, and no decoy mutation. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-command-isolation</code> proves <code class="language-plaintext highlighter-rouge">/resume</code> typed in the bottom Chat input opens the selector and Escape cancels without Chat transcript, inbox, GOAL.md, PLAN.md, checkpoint, ledger, current-session event, or Chat-agent steering mutation before explicit selection; later runnable selection mutates only the selected candidate and preserves full context. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-planner-context</code> proves selected-run planner self-interrogation context is preserved: selected <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code> and planner <code class="language-plaintext highlighter-rouge">context.md</code> remain available, current-target and decoy assumptions/context/events are not mutated, and selected-session <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> plus <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> preserve planner/executor/app-thread metadata. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-empty-selector</code> proves an empty catalog still opens an explicit empty recovery page and cancels without launch. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-many-candidates</code> proves a catalog with more than eight candidates launches only the selected runnable session while decoys remain unchanged. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-stale-candidate</code> proves launch-time revalidation blocks a candidate that loses durable state after the selector opens, emits only <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_BLOCKED</code>, and leaves runnable decoys unchanged. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-stale-agent-state</code> proves launch-time revalidation blocks candidates that lose persisted planner stdout or executor <code class="language-plaintext highlighter-rouge">codex-run.jsonl</code> transcript state after the selector opens, emits only <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_BLOCKED</code> with concrete planner/executor reasons, and leaves runnable decoys unchanged. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-blocked-then-runnable</code> proves the selector stays usable after a blocked/stale selection and can launch a runnable decoy from the same <code class="language-plaintext highlighter-rouge">/resume</code> page with full context.</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Resume candidates preserve full run context and distinguish runnable from read-only blocked states</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:resume-selector</code> covers current, numbered <code class="language-plaintext highlighter-rouge">.thinklessN</code>, legacy <code class="language-plaintext highlighter-rouge">.wici</code>, chat/runtime presence, GOAL/PLAN/checkpoint/ledger/events, and planner/executor session metadata. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-current-candidate</code> explicitly selects the current <code class="language-plaintext highlighter-rouge">.thinkless</code> candidate and verifies <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> plus <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> append only to that selected current session while Chat transcript/runtime selection, GOAL.md, PLAN.md, ledger, checkpoint, planner session, executor session, and executor app thread metadata are preserved. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-legacy-candidate</code> drives the built CLI selector through runnable and blocked legacy <code class="language-plaintext highlighter-rouge">.wici</code> candidates, proving accepted legacy candidates emit <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> and <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> only in the selected legacy event log while blocked legacy candidates do not launch or mutate runnable decoys. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-cross-target</code> selects a historical workspace run and verifies <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> plus <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> are appended only to the selected target/session while Chat transcript/runtime selection, GOAL.md, PLAN.md, ledger, checkpoint, planner session, executor session, and executor app thread metadata are preserved.</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Interrupted planner/executor resume is preflighted before launch</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:resume-rerunnable</code> covers <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_BLOCKED</code>, <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code>, and <code class="language-plaintext highlighter-rouge">EXECUTOR_RESUME_FALLBACK</code> so blocked planner states and executor rerun fallback are visible. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-interrupted-blocked</code> covers the built TUI selector negative path for a pending planner clarification without a persisted planner session and an executor interruption without replayable state. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-interrupted-runnable</code> covers the built TUI selector positive path for planner rerun and executor replay candidates that have durable rerun state. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-stale-agent-state</code> covers stale planner/executor durable-state loss after selector render and before Enter.</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Packaged <code class="language-plaintext highlighter-rouge">/resume</code> acceptance is included in the V1 aggregate gate</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:v1-core</code> includes <code class="language-plaintext highlighter-rouge">verify:tui-resume-selector-built</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-legacy-candidate</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-current-candidate</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-interrupted-blocked</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-interrupted-runnable</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-command-isolation</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-planner-context</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-empty-selector</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-many-candidates</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-stale-candidate</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-stale-agent-state</code>, <code class="language-plaintext highlighter-rouge">verify:tui-resume-blocked-then-runnable</code>, and <code class="language-plaintext highlighter-rouge">verify:tui-resume-cross-target</code> alongside the source selector and runnable-preflight resume checks</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Existing goals can be continued or rewound from documented commands</td>
+      <td>README Resume Or Re-Run section; <code class="language-plaintext highlighter-rouge">npm run verify:durability</code>, <code class="language-plaintext highlighter-rouge">npm run verify:resume-iteration</code>, <code class="language-plaintext highlighter-rouge">npm run verify:docs-sync</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Git checkpoint and rollback path exists</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:rollback</code>, README rollback section</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>TUI exposes the current rollback/version point instead of hiding it in logs</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:tui-structure</code> checks Header <code class="language-plaintext highlighter-rouge">rollbackSummary</code> renders <code class="language-plaintext highlighter-rouge">rollback pending</code> before a checkpoint and a short rollback commit when available</td>
+      <td>Covered</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="release-gate">Release Gate</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Requirement</th>
+      <th>Evidence</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>README documents clean checkout, build, core verification, and release preflight</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:docs-sync</code>, README Release Gate section</td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Release preflight runs the automated V1 core gate</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run release:preflight</code> script is <code class="language-plaintext highlighter-rouge">npm run verify:v1-core</code>; <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code>, <code class="language-plaintext highlighter-rouge">npm run verify:docs-sync</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Release tags are created only through a guarded command that runs preflight first and never pushes</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run release:tag -- &lt;version&gt;</code> script; <code class="language-plaintext highlighter-rouge">src/release/tag.ts</code>; <code class="language-plaintext highlighter-rouge">npm run verify:release-tag</code>, <code class="language-plaintext highlighter-rouge">npm run verify:v1-requirements</code>, <code class="language-plaintext highlighter-rouge">npm run verify:docs-sync</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Shared SSH transcript evidence requires the Codex SSH attempt to match the expected target</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:ssh-evidence</code></td>
+      <td>Covered</td>
+    </tr>
+    <tr>
+      <td>Release artifacts and repo files do not contain committed provider tokens or private keys</td>
+      <td><code class="language-plaintext highlighter-rouge">npm run verify:no-secrets</code></td>
+      <td>Covered</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Release tags are no longer blocked by a recorded remote run bundle. The release gate is the automated V1 core preflight plus the guarded local tag command.</p>
+
+<h2 id="last-verified-commands">Last Verified Commands</h2>
+
+<p>These checks were run successfully on 2026-06-15:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm run typecheck
+npm run verify:tool-commands
+npm run verify:hotreload
+npm run verify:hotreload-resume
+npm run verify:tui-chat-intake
+npm run verify:tui-resume-selector-built
+npm run verify:tui-resume-cross-target
+npm run verify:tui-real-fake-chat
+npm run verify:demo-tui
+npm run verify:tui-live
+npm run verify:durability
+npm run verify:resume-iteration
+npm run verify:goal-doc
+npm run verify:direct-no-scripts
+npm run verify:direct-recovery
+npm run verify:direct-executor-epoch
+npm run verify:direct-plan-continuation
+npm run verify:self-interrogation
+npm run verify:continuation-verdict
+npm run verify:existing-goal
+npm run verify:v1-requirements
+npm run verify:docs-sync
+npm run verify:release-tag
+npm run verify:no-secrets
+npm run verify:v1-core
+npm run verify:legacy-optimizer
+</code></pre></div></div>
+
+
+      
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/anchor-js/4.1.0/anchor.min.js" integrity="sha256-lZaRhKri35AyJSypXXs4o6OPFTbTmUoltBbDCbdzegg=" crossorigin="anonymous"></script>
+    <script>anchors.add();</script>
+  </body>
+</html>

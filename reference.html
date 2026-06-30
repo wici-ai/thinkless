@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Thinkless Reference | thinkless</title>
+<meta name="generator" content="Jekyll v3.10.0" />
+<meta property="og:title" content="Thinkless Reference" />
+<meta property="og:locale" content="en_US" />
+<link rel="canonical" href="http://wici.ai/thinkless/reference.html" />
+<meta property="og:url" content="http://wici.ai/thinkless/reference.html" />
+<meta property="og:site_name" content="thinkless" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Thinkless Reference" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","headline":"Thinkless Reference","url":"http://wici.ai/thinkless/reference.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+    <link rel="stylesheet" href="/thinkless/assets/css/style.css?v=29a57ef42f56512d0cfbd120a864138e5a1d718e">
+    <!-- start custom head snippets, customize with your own _includes/head-custom.html file -->
+
+<!-- Setup Google Analytics -->
+
+
+
+<!-- You can set your favicon here -->
+<!-- link rel="shortcut icon" type="image/x-icon" href="/thinkless/favicon.ico" -->
+
+<!-- end custom head snippets -->
+
+  </head>
+  <body>
+    <div class="container-lg px-3 my-5 markdown-body">
+      
+      <h1><a href="http://wici.ai/thinkless/">thinkless</a></h1>
+      
+
+      <h1 id="thinkless-reference">Thinkless Reference</h1>
+
+<p>This file keeps the detailed operational notes, verifier matrix, bootstrap behavior, release policy, and legacy compatibility notes out of the root README. The root README is intentionally short for first-time users and contributors.</p>
+
+<p>Thinkless is a local TypeScript + Ink TUI that wraps Claude Code plan mode and Codex execution into a simpler chat-first workflow.</p>
+
+<p>The name is literal. Thinkless is not anti-thinking; it is against making the human do all of the thinking at the wrong time. Modern AI coding tools often reward prompt polishing, constant supervision, and rewriting intent until it sounds like an execution plan. Thinkless takes the opposite position: the user should express intent naturally, the planner should turn that intent into durable reasoning, and the executor should carry out the work while the user steers only when judgment is needed.</p>
+
+<h2 id="philosophy">Philosophy</h2>
+
+<p>Software work has different modes that should not be collapsed into one prompt box:</p>
+
+<ul>
+  <li>Intent capture should feel like conversation. Say what you want, including rough edges, constraints, and corrections.</li>
+  <li>Planning should be explicit, reviewable, and written down in <code class="language-plaintext highlighter-rouge">GOAL.md</code>, <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code>, and <code class="language-plaintext highlighter-rouge">PLAN.md</code>.</li>
+  <li>Execution should be handled by an agent that can inspect the repository, run commands, read logs, recover from failures, and continue.</li>
+  <li>Steering should be additive. A later message changes the live goal and plan instead of asking the user to rewrite the original prompt.</li>
+</ul>
+
+<p>Thinkless asks people to think less while coding because most of the extra thinking is not product judgment; it is control labor. Users should not need to decide which command to run after every error, remember every branch the agent tried, or write meta-instructions like “search the docs”, “debug if it fails”, or “update the plan and keep going”. Those are system responsibilities.</p>
+
+<p>The human still does the important thinking: naming the desired outcome, setting boundaries, choosing tradeoffs, reviewing evidence, and stopping or redirecting the run. Thinkless moves machine-shaped thinking into machine-readable artifacts and keeps human-shaped thinking in normal language.</p>
+
+<p>Submitted chat is treated like speech. Submitted turns should be append-only: in a meeting, you do not edit the sentence you already said; you clarify it with the next sentence, and the history remains useful because everyone can see how the intent evolved. Thinkless follows that discipline for coding work: preserve the transcript, preserve the raw requirement, and steer forward. This makes the run auditable and lets the planner iteratively enhance the plan from real evidence instead of pretending the first prompt was a perfect spec.</p>
+
+<p>The plan is not a ceremony or a one-time contract. It is a living working document. The first <code class="language-plaintext highlighter-rouge">PLAN.md</code> should be good enough to start, and then the planner and executor should improve it as the repository, logs, remote machines, benchmarks, and user follow-ups reveal more. A failed command is not the end of the goal; it is new evidence that should tighten the next step.</p>
+
+<h2 id="examples">Examples</h2>
+
+<p>Application build:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>You: Build a local dashboard for reviewing support tickets and make sure it runs.
+Thinkless: captures the goal, asks only essential questions, writes GOAL.md / ASSUMPTIONS.md / PLAN.md, then lets Codex build, test, and report evidence.
+You: Also make the mobile layout dense enough for triage.
+Thinkless: updates the existing goal and plan, then steers the active execution instead of starting over.
+</code></pre></div></div>
+
+<p>Remote performance work:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>You: Try the model on this SSH host and see if it can reach 700 token/s.
+Thinkless: does not require you to add "look up docs", "benchmark first", or "try another path if it fails". The planner records assumptions and fallback strategy; Codex performs the remote discovery, setup, measurement, and repair loop.
+</code></pre></div></div>
+
+<p>Ordinary repository work:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>You: What is causing this test to fail?
+Thinkless: Chat can inspect the code and answer directly when the work is bounded. If the fix becomes a long-running implementation or validation loop, Chat hands it to planner/executor.
+</code></pre></div></div>
+
+<p>The V1 path is intentionally thin:</p>
+
+<ul>
+  <li>Chat is the initial intake and output surface.</li>
+  <li><code class="language-plaintext highlighter-rouge">GOAL.md</code> is a human-readable markdown goal built from the conversation.</li>
+  <li>Claude Code plan mode produces <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code>, <code class="language-plaintext highlighter-rouge">PLAN.md</code>, and, when useful, <code class="language-plaintext highlighter-rouge">.opt/checks.sh</code> / <code class="language-plaintext highlighter-rouge">.opt/measure.sh</code>.</li>
+  <li>Once <code class="language-plaintext highlighter-rouge">PLAN.md</code> exists, Thinkless feeds <code class="language-plaintext highlighter-rouge">GOAL.md + PLAN.md</code> directly to Codex.</li>
+  <li>The supervisor handles TUI state, events, token usage, checkpoints, git rollback points, and hot reload.</li>
+</ul>
+
+<p>Thinkless does not parse natural-language requirements into task-specific schemas. If the user says “700 token/s” or asks to build an app, that raw requirement goes into <code class="language-plaintext highlighter-rouge">GOAL.md</code> once Chat decides it needs planner/executor. Bounded SSH/code-reading, ordinary code changes, validation, commits, pushes, and guarded release commands can stay in Chat when the user asks for them; a longer remote deployment, benchmark, optimization, or iterative debug loop becomes planner/executor work.</p>
+
+<p>Chat agents run with normal native CLI permission to complete bounded direct work themselves: Claude Chat is not forced into plan-only mode, and Codex Chat bypasses approvals and sandboxing like the executor path. Chat should use repository guardrails for risky operations instead of inventing Chat-only bans.</p>
+
+<h2 id="safety">Safety</h2>
+
+<p>Real mode uses Claude Code plan mode with <code class="language-plaintext highlighter-rouge">--dangerously-skip-permissions</code> for planning and <code class="language-plaintext highlighter-rouge">codex exec --dangerously-bypass-approvals-and-sandbox</code> for execution. A disposable VM or container is safest. Direct use on a primary machine is supported when the target repo is under git and the Thinkless checkout is versioned.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">--target</code> path must be the git top-level for the target workspace. If the target does not exist, is empty, or only contains Thinkless-owned <code class="language-plaintext highlighter-rouge">.thinkless/</code> or legacy <code class="language-plaintext highlighter-rouge">.wici/</code> plus <code class="language-plaintext highlighter-rouge">.opt/</code> scaffolding, Thinkless initializes a local git repo before planning; existing non-git directories with user files are rejected.</p>
+
+<p>WiCi does not pass CLI budget caps to Claude or Codex. The default <code class="language-plaintext highlighter-rouge">max_cost_usd</code> is <code class="language-plaintext highlighter-rouge">0</code> and default <code class="language-plaintext highlighter-rouge">max_iters</code> is <code class="language-plaintext highlighter-rouge">0</code>; together they disable WiCi’s own cost and iteration hard stops for real runs. Use explicit <code class="language-plaintext highlighter-rouge">--max-iters</code>, <code class="language-plaintext highlighter-rouge">deadline</code>, or manual stop control only when you want a bounded run.</p>
+
+<h2 id="commands">Commands</h2>
+
+<p>Core V1 checks:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm <span class="nb">install
+</span>npm run verify:v1-core
+npm run verify:v1-slice
+npm run verify:direct-no-scripts
+npm run verify:direct-no-progress
+npm run verify:direct-recovery
+npm run verify:direct-context-reset
+npm run verify:direct-executor-epoch
+npm run verify:direct-transient-retry
+npm run verify:direct-preempt
+npm run verify:direct-plan-continuation
+npm run verify:direct-rollback
+npm run verify:self-interrogation
+npm run verify:continuation-verdict
+npm run verify:continuation-escalation
+npm run verify:step-dedup
+npm run verify:existing-goal
+npm run verify:v1-requirements
+npm run verify:tui-structure
+npm run verify:tui-chat-intake
+npm run verify:launch-target
+npm run verify:resume-selector
+npm run verify:tui-resume-selector-pty
+npm run verify:tui-resume-selector-built
+npm run verify:tui-resume-legacy-candidate
+npm run verify:tui-resume-current-candidate
+npm run verify:tui-resume-interrupted-blocked
+npm run verify:tui-resume-interrupted-runnable
+npm run verify:tui-resume-command-isolation
+npm run verify:tui-resume-planner-context
+npm run verify:tui-resume-supervisor-safety
+npm run verify:tui-resume-empty-selector
+npm run verify:tui-resume-many-candidates
+npm run verify:tui-resume-stale-candidate
+npm run verify:tui-resume-stale-agent-state
+npm run verify:tui-resume-blocked-then-runnable
+npm run verify:tui-resume-cross-target
+npm run verify:resume-rerunnable
+npm run verify:tui-chat-pty
+npm run verify:tui-real-fake-chat
+npm run verify:tui-planner-clarification-pty
+npm run verify:tui-hotreload-pty
+npm run verify:demo-tui
+npm run verify:tui-live
+npm run verify:planner-clarification
+npm run verify:planner-context-reset
+npm run verify:hotreload
+npm run verify:hotreload-resume
+npm run verify:app-server-hotreload
+npm run verify:app-server-fallback
+npm run verify:durability
+npm run verify:goal-doc
+npm run verify:tool-commands
+npm run verify:real-mode
+npm run verify:executor-contract
+npm run verify:codex-run-usage
+npm run verify:goal-metric
+npm run verify:goal-interrogation
+npm run verify:curriculum
+npm run verify:rollback
+npm run verify:setup-state
+npm run verify:install-bootstrap
+npm run verify:install-clean-env
+npm run verify:ssh-evidence
+npm run verify:release-tag
+npm run verify:no-secrets
+npm run verify:docs-sync
+</code></pre></div></div>
+
+<p>Individual and extended verifier scripts remain available:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm run typecheck
+npm run build
+npm run smoke
+npm run verify:audio-dictation
+npm run verify:bin
+npm run verify:direct-plan-continuation
+npm run verify:durability
+npm run verify:existing-goal
+npm run verify:hotreload
+npm run verify:inbox-backpressure
+npm run verify:safety-prompts
+npm run verify:state-paths
+npm run verify:runtime-fallback
+npm run verify:startup-self-update
+npm run verify:rollback
+npm run verify:outbox
+npm run verify:tool-version
+npm run verify:audio-dictation
+npm run verify:codex-run-usage
+npm run verify:clarify
+npm run verify:claude-probe
+npm run verify:goal-doc
+npm run verify:ssh-evidence
+npm run verify:release-tag
+npm run verify:no-secrets
+npm run verify:install-bootstrap
+npm run verify:install-clean-env
+npm run verify:limit-artifact
+npm run verify:runtime-fallback
+npm run verify:startup-self-update
+npm run verify:state-paths
+</code></pre></div></div>
+
+<p>Legacy optimizer compatibility checks are intentionally outside the fresh V1 gate. They keep the old benchmark/baseline path buildable for existing fixtures, but they are not requirements for starting Codex from a new Chat goal:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm run verify:legacy-optimizer
+npm run verify:manual-lock
+npm run verify:benchmark-manifest
+npm run verify:acceptance-spec
+npm run verify:mann-whitney
+npm run verify:heldout
+npm run verify:scorer-selftest
+npm run verify:prescreen
+npm run verify:metric-labels
+npm run verify:commit-idempotency
+npm run verify:tamper
+npm run verify:stuck
+npm run verify:ask-stop
+npm run verify:stop-policy
+npm run verify:resume-iteration
+npm run verify:branch-archive
+npm run verify:branch-outcome
+npm run verify:lessons
+npm run verify:skills
+npm run verify:context-condensation
+</code></pre></div></div>
+
+<p>Open or resume the local demo target in the Chat-first TUI:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm run dev
+</code></pre></div></div>
+
+<p>After installing the <code class="language-plaintext highlighter-rouge">thinkless</code> binary, start a fresh Chat-first TUI workspace with:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>thinkless
+</code></pre></div></div>
+
+<p>Bare <code class="language-plaintext highlighter-rouge">thinkless</code> attaches to the current git repository by default. Typing the first concrete goal creates <code class="language-plaintext highlighter-rouge">GOAL.md</code>, <code class="language-plaintext highlighter-rouge">PLAN.md</code>, <code class="language-plaintext highlighter-rouge">.opt/</code>, and <code class="language-plaintext highlighter-rouge">.thinkless/</code> in that repository; outside git, Thinkless falls back to a new isolated workspace under <code class="language-plaintext highlighter-rouge">~/thinkless-workspaces</code>. Existing <code class="language-plaintext highlighter-rouge">.wici/</code> runs are still discovered for compatibility, and <code class="language-plaintext highlighter-rouge">thinkless resume</code> can migrate an isolated legacy run back into the matching real repository as <code class="language-plaintext highlighter-rouge">.thinkless/</code> state.</p>
+
+<p>To continue an existing run, use <code class="language-plaintext highlighter-rouge">thinkless resume</code> or type <code class="language-plaintext highlighter-rouge">/resume</code> in the TUI Chat input to open the selectable resume page.</p>
+
+<p>Use <code class="language-plaintext highlighter-rouge">npx tsx src/cli.tsx demo --fresh</code> when you intentionally want to reset the demo target.</p>
+
+<p>Run headlessly over a target:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npx tsx src/cli.tsx run <span class="nt">--target</span> /path/to/target <span class="nt">--goal</span> <span class="s2">"Build the requested app and verify it runs locally"</span>
+</code></pre></div></div>
+
+<p>Check tool availability:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npx tsx src/cli.tsx doctor
+npx tsx src/cli.tsx doctor <span class="nt">--update</span>
+npx tsx src/cli.tsx doctor <span class="nt">--deep</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">doctor --update</code> runs the Codex and Claude updaters, then reports health. <code class="language-plaintext highlighter-rouge">doctor --deep</code> performs a Claude print-mode auth probe. On supervisor start, Thinkless automatically checks for Codex/Claude updates at run boundaries when <code class="language-plaintext highlighter-rouge">tools.auto_update</code> is true, then records the versions in the checkpoint, and pending updates are not a WiCi supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run.</p>
+
+<p>Use <code class="language-plaintext highlighter-rouge">--mode stub</code>, <code class="language-plaintext highlighter-rouge">--mode auto</code>, or <code class="language-plaintext highlighter-rouge">--mode real</code> on <code class="language-plaintext highlighter-rouge">run</code> / <code class="language-plaintext highlighter-rouge">tui</code>.</p>
+
+<h2 id="chat-first-flow">Chat-First Flow</h2>
+
+<p>In an interactive TUI with no existing run and no <code class="language-plaintext highlighter-rouge">--goal</code>, the top Chat History / Goal/Plan / Execution workspace starts empty and can be switched with the left/right arrows, while the Chat input stays fixed at the bottom. The first natural-language Chat message is ordinary conversation first: the Chat agent may answer questions, inspect local or remote code, run bounded discovery commands, make ordinary code changes, validate, commit, push, or run guarded release commands without starting a run when that is the direct responsible path. When the user asks for a plan, or the Chat agent decides the work is large, long-running, risky, unattended, or concrete enough for planner/executor, it emits an update; Thinkless creates <code class="language-plaintext highlighter-rouge">GOAL.md</code>, records <code class="language-plaintext highlighter-rouge">goal_source: "tui_chat"</code>, and starts Claude Code plan mode. If Claude needs a clarification before materializing <code class="language-plaintext highlighter-rouge">PLAN.md</code>, or later while updating <code class="language-plaintext highlighter-rouge">PLAN.md</code> after a hot-reload Chat message, Thinkless surfaces that as a Chat question and routes the next ordinary Chat message back as the answer. That answer wakes the stopped supervisor and resumes the same Claude planner session.</p>
+
+<p>Chat also acts as the run control surface. Typing a direct stop request such as <code class="language-plaintext highlighter-rouge">stop</code>, <code class="language-plaintext highlighter-rouge">/abort</code>, or <code class="language-plaintext highlighter-rouge">停一下</code> writes an urgent abort injection, interrupts an active Codex executor turn, and aborts an active planner subprocess instead of waiting for the next plan or execution safe point.</p>
+
+<p>The active workspace shows its current runtime selection. Press <code class="language-plaintext highlighter-rouge">Ctrl+R</code> to open the selector, use left/right to choose <code class="language-plaintext highlighter-rouge">agent</code> or <code class="language-plaintext highlighter-rouge">effort</code>, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. <code class="language-plaintext highlighter-rouge">agent</code> is always one of <code class="language-plaintext highlighter-rouge">claude</code> or <code class="language-plaintext highlighter-rouge">codex</code>; model is fixed by that agent: <code class="language-plaintext highlighter-rouge">claude</code> uses <code class="language-plaintext highlighter-rouge">claude-opus-4-8</code>, and <code class="language-plaintext highlighter-rouge">codex</code> uses <code class="language-plaintext highlighter-rouge">gpt-5.5</code>. Chat remains Claude-first and falls back to Codex medium when Claude is unavailable. PLAN defaults to Codex xhigh.</p>
+
+<p>Terminal text selection/copy is the default pointer mode in the Chat, PLAN, and EXECUTION panes. Terminal mouse protocols cannot reliably provide native drag selection and app-level touchpad scrolling at the same time, so Thinkless exposes two explicit modes: <code class="language-plaintext highlighter-rouge">mouse=select</code> for normal terminal selection, and <code class="language-plaintext highlighter-rouge">mouse=scroll</code> for TUI mouse-wheel/touchpad scrolling. Press <code class="language-plaintext highlighter-rouge">Ctrl+O</code> in the TUI to toggle modes, or start in scroll mode with <code class="language-plaintext highlighter-rouge">--mouse-reporting</code>.</p>
+
+<p>Typed commands remain available for custom values that are not in the selector presets:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>/agent chat claude
+/effort execution high
+/dictate
+/dictate submit
+</code></pre></div></div>
+
+<p>Valid panes are <code class="language-plaintext highlighter-rouge">chat</code>, <code class="language-plaintext highlighter-rouge">plan</code>/<code class="language-plaintext highlighter-rouge">planner</code>, and <code class="language-plaintext highlighter-rouge">execution</code>/<code class="language-plaintext highlighter-rouge">exec</code>/<code class="language-plaintext highlighter-rouge">executor</code>. Claude effort options are <code class="language-plaintext highlighter-rouge">high</code>, <code class="language-plaintext highlighter-rouge">xhigh</code>, <code class="language-plaintext highlighter-rouge">max</code>, and <code class="language-plaintext highlighter-rouge">ultracode</code>. Codex effort options are <code class="language-plaintext highlighter-rouge">fast</code>, <code class="language-plaintext highlighter-rouge">medium</code>, <code class="language-plaintext highlighter-rouge">high</code>, and <code class="language-plaintext highlighter-rouge">xhigh</code>. Claude-backed panes receive <code class="language-plaintext highlighter-rouge">--model claude-opus-4-8</code> and the selected <code class="language-plaintext highlighter-rouge">--effort</code>; Codex-backed panes receive <code class="language-plaintext highlighter-rouge">--model gpt-5.5</code>, and Codex effort is passed through config as <code class="language-plaintext highlighter-rouge">model_reasoning_effort</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">/dictate</code> runs the local command configured in <code class="language-plaintext highlighter-rouge">WICI_DICTATION_COMMAND</code>, normalizes its stdout as transcript text, and inserts it into the bottom Chat input. <code class="language-plaintext highlighter-rouge">/dictate submit</code> sends that transcript immediately. The command can be any local speech-to-text bridge, such as a macOS Shortcut wrapper, Whisper CLI, or organization-approved transcription tool; Thinkless does not store speech credentials in config.</p>
+
+<p>Planner output is markdown artifacts, not a second goal schema:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">## GOAL.md</code> is optional and can carry planner-updated human-readable goal context.</li>
+  <li><code class="language-plaintext highlighter-rouge">## ASSUMPTIONS.md</code> records the planner’s self-interrogation: approaches considered, assumptions adopted with evidence or planned discovery, and open risks.</li>
+  <li><code class="language-plaintext highlighter-rouge">## PLAN.md</code> is required.</li>
+  <li><code class="language-plaintext highlighter-rouge">## .opt/checks.sh</code> is optional.</li>
+  <li><code class="language-plaintext highlighter-rouge">## .opt/measure.sh</code> is optional.</li>
+  <li><code class="language-plaintext highlighter-rouge">## QUESTION</code> is used only when essential information is missing and cannot be resolved from evidence or a Codex discovery step.</li>
+</ul>
+
+<p>The absence of <code class="language-plaintext highlighter-rouge">.opt</code> scripts is a valid fresh V1 path. Thinkless must still hand <code class="language-plaintext highlighter-rouge">GOAL.md + PLAN.md</code> directly to Codex; scripts are planner artifacts for tasks that need reusable commands, not a supervisor-controlled execution prerequisite.</p>
+
+<p>Planner mode can run through Codex or Claude. Codex is the default planner backend with xhigh effort; if a Claude-backed planner is selected and Claude is unavailable, Thinkless falls back to Codex xhigh. Thinkless does not pass a custom tool allowlist or denylist; planning-time web research or remote discovery can be used when the planner needs context for <code class="language-plaintext highlighter-rouge">PLAN.md</code>. The planner should brainstorm 2-3 approaches, self-grill its assumptions, persist the result in <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code>, and ask the user only for information that is essential and unresolvable by evidence or discovery. The deployment, benchmark target, application build, or optimization result still belongs in Codex execution after <code class="language-plaintext highlighter-rouge">PLAN.md</code> is materialized.</p>
+
+<p>Users should not need to add meta-instructions such as “search tutorials”, “debug if one path fails”, or “update PLAN.md/.opt and keep going” to the Chat goal. Those are planner/executor responsibilities. Planner should encode research and fallback strategy in <code class="language-plaintext highlighter-rouge">PLAN.md</code> when the task needs it, and Codex should use native tools, logs, documentation, and environment inspection during execution.</p>
+
+<p>When <code class="language-plaintext highlighter-rouge">PLAN.md</code> exists, the fresh V1 path starts Codex directly. It does not require <code class="language-plaintext highlighter-rouge">baseline.json</code>, <code class="language-plaintext highlighter-rouge">.opt/benchmark.json</code>, <code class="language-plaintext highlighter-rouge">acceptance.spec.json</code>, or pre-run measurements before execution. A stray or historical <code class="language-plaintext highlighter-rouge">baseline.json</code> does not switch V1 into an eval-gated loop; the legacy optimizer must be explicitly enabled with <code class="language-plaintext highlighter-rouge">WICI_LEGACY_OPTIMIZER=1</code>.</p>
+
+<p>During real planning, the Execution pane tails <code class="language-plaintext highlighter-rouge">PLAN_USAGE</code> events from Claude’s stream-json output and the planner stream is saved under <code class="language-plaintext highlighter-rouge">.thinkless/artifacts/planner-*.stdout.jsonl</code> for new runs. Real Codex execution defaults to <code class="language-plaintext highlighter-rouge">codex app-server</code> in <code class="language-plaintext highlighter-rouge">auto</code> mode when the CLI supports it, streams raw app-server JSON-RPC notifications into <code class="language-plaintext highlighter-rouge">.thinkless/codex-run.jsonl</code>, checkpoints the active workspace, turn phase, last event, and last activity time, and shows progress in the Chat status line. Existing <code class="language-plaintext highlighter-rouge">.wici/</code> runs keep using their legacy directory, including <code class="language-plaintext highlighter-rouge">.wici/codex-run.jsonl</code>. If app-server is unavailable, stalls without progress, or a fake legacy CLI is on <code class="language-plaintext highlighter-rouge">PATH</code>, Thinkless falls back to a recoverable retry path; the legacy executor watchdog remains intentionally long for remote deploys, model downloads, builds, and benchmarks after Codex has started actionable work.</p>
+
+<p>Thinkless does not treat a single executor failure as the whole goal failing. Direct V1 execution is intentionally long-horizon: command failures, failed validation, and executor timeouts are recorded as recoverable crash ledger rows, the active <code class="language-plaintext highlighter-rouge">PLAN.md</code> step is reset to pending, and the next Codex prompt receives the failure reason. Codex is allowed to inspect logs and remote state, update <code class="language-plaintext highlighter-rouge">PLAN.md</code>, repair planner-provided <code class="language-plaintext highlighter-rouge">.opt</code> scripts, choose a different deployment or validation strategy, and continue the same <code class="language-plaintext highlighter-rouge">GOAL.md</code> until the goal is actually satisfied or there is concrete repeated evidence that it cannot proceed.</p>
+
+<p>When direct execution exhausts <code class="language-plaintext highlighter-rouge">PLAN.md</code>, Thinkless runs a continue-biased completion gate before asking the planner for another step. The gate reads <code class="language-plaintext highlighter-rouge">GOAL.md</code>, acceptance criteria, recent ledger rows, and <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code>; only an explicit <code class="language-plaintext highlighter-rouge">complete</code> verdict stops cleanly. Stub mode, tool errors, and ambiguous verdicts continue so the planner can deepen quality within the fixed user scope without inventing new scope.</p>
+
+<p>Later Chat messages are drained through <code class="language-plaintext highlighter-rouge">.thinkless/inbox/</code> for new runs, or <code class="language-plaintext highlighter-rouge">.wici/inbox/</code> for legacy sessions. With the app-server backend, Thinkless updates <code class="language-plaintext highlighter-rouge">GOAL.md</code>, asks Claude plan mode for the smallest <code class="language-plaintext highlighter-rouge">PLAN.md</code> update, then sends <code class="language-plaintext highlighter-rouge">turn/steer</code> to the active Codex turn so execution continues without restarting. With the legacy <code class="language-plaintext highlighter-rouge">codex exec</code> fallback, Thinkless preempts at the next executor output or heartbeat, applies the same planner diff, and resumes through <code class="language-plaintext highlighter-rouge">codex exec resume --last</code>.</p>
+
+<p>If the supervisor crashes during direct V1 execution, restart the same command. Thinkless uses <code class="language-plaintext highlighter-rouge">checkpoint.json</code> and <code class="language-plaintext highlighter-rouge">wici/best</code> to revert unconfirmed direct-path work, resets the active <code class="language-plaintext highlighter-rouge">PLAN.md</code> step for replay, and preserves <code class="language-plaintext highlighter-rouge">.thinkless/</code> or legacy <code class="language-plaintext highlighter-rouge">.wici/</code> event and ledger history.</p>
+
+<h2 id="v1-acceptance">V1 Acceptance</h2>
+
+<p>V1 is the first usable vertical slice: a human can install WiCi, start the TUI from an empty run, chat a goal, watch planner usage, watch Codex progress, and inspect the generated markdown artifacts.</p>
+
+<p>The current requirement-by-requirement audit is kept in <code class="language-plaintext highlighter-rouge">docs/v1-completion-audit.md</code>.</p>
+
+<p>Run the automated V1 gate:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm run verify:v1-slice
+</code></pre></div></div>
+
+<p>That command creates <code class="language-plaintext highlighter-rouge">fixture/v1-slice-target</code>, runs one stubbed direct supervisor iteration, and checks:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">GOAL.md</code> and <code class="language-plaintext highlighter-rouge">PLAN.md</code> are materialized;</li>
+  <li>optional planner scripts are persisted executable and runnable when present, while no-script plans still execute directly;</li>
+  <li>fresh execution does not wait for baseline or evaluation gates;</li>
+  <li>the executor prompt gives Codex <code class="language-plaintext highlighter-rouge">GOAL.md + PLAN.md</code> as one goal while keeping step IDs only as a thin receipt/progress focus;</li>
+  <li>direct execution writes a thin <code class="language-plaintext highlighter-rouge">ledger.jsonl</code> receipt with token usage for observability;</li>
+  <li>a git checkpoint and <code class="language-plaintext highlighter-rouge">wici/best</code> rollback tag are created;</li>
+  <li>the TUI header displays the current rollback checkpoint, or <code class="language-plaintext highlighter-rouge">rollback pending</code> before one exists;</li>
+  <li>direct executor failure is recoverable: the first failed attempt is recorded as <code class="language-plaintext highlighter-rouge">crash</code>, the next Codex invocation resumes with the failure context, and the same goal can continue;</li>
+  <li>the non-fullscreen TUI can render the bottom Chat input plus the switchable Chat History / Goal/Plan / Execution workspace over the run state.</li>
+</ul>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:direct-no-scripts</code> covers the complementary path: an existing markdown <code class="language-plaintext highlighter-rouge">PLAN.md</code> can execute directly without <code class="language-plaintext highlighter-rouge">.opt/checks.sh</code>, <code class="language-plaintext highlighter-rouge">.opt/measure.sh</code>, or <code class="language-plaintext highlighter-rouge">.opt/benchmark.json</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:direct-recovery</code> covers long-goal recovery: a fake real-mode Codex fails the first invocation, WiCi records <code class="language-plaintext highlighter-rouge">EXECUTE_RECOVERABLE_FAILURE</code> without entering <code class="language-plaintext highlighter-rouge">FAILED</code>, then the second invocation uses <code class="language-plaintext highlighter-rouge">codex exec resume --last</code> and completes.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:direct-executor-epoch</code> covers adaptive short executor epochs: fake Codex cumulative token usage crosses the context pressure threshold, WiCi starts fresh executor threads from durable handoff state, and ledger cost records per-turn token deltas instead of cumulative totals.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:direct-preempt</code> covers the legacy fallback path: a fake real-mode <code class="language-plaintext highlighter-rouge">codex exec</code> run is interrupted after pending Chat input appears, WiCi records <code class="language-plaintext highlighter-rouge">EXECUTE_PREEMPTED</code>, drains the inbox, applies a planner diff, then resumes Codex.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:direct-plan-continuation</code> covers exhausted-plan continuation: if <code class="language-plaintext highlighter-rouge">PLAN.md</code> has no pending steps, Thinkless asks the planner for another in-scope step instead of stopping merely because the markdown checklist is empty.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:direct-rollback</code> covers measured direct-run regression protection: a later direct step with a worse metric is reverted to the previous best checkpoint and recorded as <code class="language-plaintext highlighter-rouge">revert</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:self-interrogation</code> covers AI-led planning assumptions: the planner prompt requires 2-3 approaches, self-grilling, narrow <code class="language-plaintext highlighter-rouge">## QUESTION</code> use, and materializes <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:continuation-verdict</code> covers the direct completion gate: explicit <code class="language-plaintext highlighter-rouge">complete</code> stops, explicit <code class="language-plaintext highlighter-rouge">continue</code> continues, and ambiguous or stub verdicts fall back to continue.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:continuation-escalation</code> covers the direct completion gate stall path: repeated fallback verdicts pause with a <code class="language-plaintext highlighter-rouge">continuation-stall-*</code> outbox question, wait without advancing, and resume through the existing steer path.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:step-dedup</code> covers continuation-step duplicate detection: near-identical planner-diff steps are rejected, PLAN.md is restored, and the run escalates through the continuation outbox channel while distinct steps pass the similarity gate.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:existing-goal</code> covers continuing a target that already has <code class="language-plaintext highlighter-rouge">GOAL.md</code> and <code class="language-plaintext highlighter-rouge">PLAN.md</code> without passing a new <code class="language-plaintext highlighter-rouge">--goal</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:tui-live</code> starts the <code class="language-plaintext highlighter-rouge">tui</code> command itself with the supervisor enabled and verifies that the live execution stream reaches the TUI while the target run commits and stops cleanly.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:tui-chat-pty</code> starts the TUI in a real pseudo-terminal, types the first Chat message, submits it through the input line, and verifies that the run records <code class="language-plaintext highlighter-rouge">goal_source: "tui_chat"</code> before executing <code class="language-plaintext highlighter-rouge">GOAL.md + PLAN.md</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:tui-real-fake-chat</code> runs the same Chat-first PTY path in <code class="language-plaintext highlighter-rouge">--mode real</code> with fake Claude/Codex CLIs on <code class="language-plaintext highlighter-rouge">PATH</code>, proving the TUI starts the real-mode planner/executor subprocess path and streams <code class="language-plaintext highlighter-rouge">EXECUTE_PROGRESS</code> without spending real tokens.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:tui-planner-clarification-pty</code> covers the next interactive path: Claude plan mode asks a clarification question, the user answers through the same Chat input, and WiCi resumes the planner session to materialize <code class="language-plaintext highlighter-rouge">PLAN.md</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:tui-hotreload-pty</code> keeps the same TUI open through an execution safe point, types a follow-up Chat requirement, and verifies that WiCi drains the inbox, updates <code class="language-plaintext highlighter-rouge">GOAL.md</code> / <code class="language-plaintext highlighter-rouge">PLAN.md</code>, and starts the next Codex iteration after <code class="language-plaintext highlighter-rouge">PLAN_DIFF_APPLIED</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:hotreload-resume</code> covers the legacy real-mode command shape after hot reload with fake CLIs: the first Codex call starts normally, and the next execution after <code class="language-plaintext highlighter-rouge">PLAN_DIFF_APPLIED</code> uses <code class="language-plaintext highlighter-rouge">codex exec resume --last</code> without the unsupported <code class="language-plaintext highlighter-rouge">-C</code> flag.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:app-server-hotreload</code> covers the preferred medium-term path: a fake <code class="language-plaintext highlighter-rouge">codex app-server</code> keeps an active turn open, WiCi drains Chat input, updates <code class="language-plaintext highlighter-rouge">GOAL.md</code> / <code class="language-plaintext highlighter-rouge">PLAN.md</code>, sends <code class="language-plaintext highlighter-rouge">turn/steer</code>, and completes without <code class="language-plaintext highlighter-rouge">EXECUTE_PREEMPTED</code>.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:app-server-fallback</code> covers app-server reconnect failure: a fake <code class="language-plaintext highlighter-rouge">codex app-server</code> accepts a turn but only emits reconnect/status notifications, so Thinkless records <code class="language-plaintext highlighter-rouge">EXECUTE_APP_SERVER_FALLBACK</code> and completes the same step through <code class="language-plaintext highlighter-rouge">codex exec</code>.</p>
+
+<h2 id="deployment">Deployment</h2>
+
+<p>Install Thinkless from the public release artifact:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl <span class="nt">-fsSL</span> https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
+</code></pre></div></div>
+
+<p>On Windows PowerShell:</p>
+
+<div class="language-powershell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">irm</span><span class="w"> </span><span class="nx">https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">iex</span><span class="w">
+</span></code></pre></div></div>
+
+<p>These one-line installers download <code class="language-plaintext highlighter-rouge">thinkless.tgz</code> from the latest public release and install it globally with npm. The release contains the built package and installer assets. If you need a different release host, set <code class="language-plaintext highlighter-rouge">THINKLESS_RELEASE_BASE</code> or <code class="language-plaintext highlighter-rouge">THINKLESS_TARBALL_URL</code> before running the installer.</p>
+
+<p>On startup, the <code class="language-plaintext highlighter-rouge">thinkless</code> CLI checks the latest GitHub release and self-updates when the release is newer than the local package version. Global installs update from the release <code class="language-plaintext highlighter-rouge">thinkless.tgz</code>; clean source checkouts fetch and detach to the release tag, then run <code class="language-plaintext highlighter-rouge">npm install</code> and <code class="language-plaintext highlighter-rouge">npm run build</code>. Dirty source checkouts are left alone, and network, GitHub, or update failures fail open so launch continues. Set <code class="language-plaintext highlighter-rouge">THINKLESS_SELF_UPDATE=0</code> to disable the startup check, <code class="language-plaintext highlighter-rouge">THINKLESS_SELF_UPDATE_VERBOSE=1</code> to print the decision, <code class="language-plaintext highlighter-rouge">THINKLESS_RELEASE_REPO=owner/repo</code> for a different release repository, or <code class="language-plaintext highlighter-rouge">THINKLESS_TARBALL_URL</code> for a custom tarball.</p>
+
+<p>The included <code class="language-plaintext highlighter-rouge">Publish public install release</code> workflow is manually triggered. It builds <code class="language-plaintext highlighter-rouge">thinkless.tgz</code> from the selected source tag with <code class="language-plaintext highlighter-rouge">fetch-depth: 1</code>, then uploads <code class="language-plaintext highlighter-rouge">thinkless.tgz</code>, <code class="language-plaintext highlighter-rouge">install.sh</code>, and <code class="language-plaintext highlighter-rouge">install.ps1</code> to this public repository’s GitHub release using the workflow token.</p>
+
+<p>Install from a source checkout:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git clone git@github.com:wici-ai/thinkless.git
+<span class="nb">cd </span>thinkless
+git checkout &lt;verified-release-tag-or-commit&gt;
+npm <span class="nb">install
+</span>npm run build
+npm run verify:v1-core
+</code></pre></div></div>
+
+<h2 id="macos-bootstrap">macOS Bootstrap</h2>
+
+<p>On macOS, <code class="language-plaintext highlighter-rouge">npm install</code> runs <code class="language-plaintext highlighter-rouge">scripts/postinstall.mjs</code> automatically. The hook checks the host commands Thinkless needs: <code class="language-plaintext highlighter-rouge">brew</code>, <code class="language-plaintext highlighter-rouge">git</code>, <code class="language-plaintext highlighter-rouge">node</code>, <code class="language-plaintext highlighter-rouge">npm</code>, <code class="language-plaintext highlighter-rouge">gh</code>, <code class="language-plaintext highlighter-rouge">codex</code>, and <code class="language-plaintext highlighter-rouge">claude</code>. Missing <code class="language-plaintext highlighter-rouge">brew</code>, <code class="language-plaintext highlighter-rouge">codex</code>, and <code class="language-plaintext highlighter-rouge">claude</code> are installed with the official macOS installers; missing <code class="language-plaintext highlighter-rouge">git</code>, GitHub CLI, or Node.js/npm are installed through Homebrew. A fresh Mac needs an admin account with usable <code class="language-plaintext highlighter-rouge">sudo</code> access before Homebrew installation can proceed. Thinkless does not run npm install scripts with <code class="language-plaintext highlighter-rouge">sudo</code>; use Homebrew Node.js or another user-writable npm global prefix. CI and non-macOS installs skip this bootstrap by default. To bypass host mutation on a Mac, run <code class="language-plaintext highlighter-rouge">THINKLESS_BOOTSTRAP=0 npm install</code>.</p>
+
+<p>For a brand new Mac with no <code class="language-plaintext highlighter-rouge">npm</code> yet, run the bootstrap shell script first. From a checkout:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>bash scripts/bootstrap-macos.sh
+</code></pre></div></div>
+
+<p>From a clean machine, use the public release installer instead:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl <span class="nt">-fsSL</span> https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
+</code></pre></div></div>
+
+<p>That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies <code class="language-plaintext highlighter-rouge">sudo</code> access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, GitHub CLI, Codex CLI, and Claude Code CLI, then installs Thinkless with npm lifecycle scripts enabled. It adds the discovered command directories for <code class="language-plaintext highlighter-rouge">node</code>, <code class="language-plaintext highlighter-rouge">npm</code>, <code class="language-plaintext highlighter-rouge">thinkless</code>, <code class="language-plaintext highlighter-rouge">codex</code>, <code class="language-plaintext highlighter-rouge">claude</code>, and <code class="language-plaintext highlighter-rouge">gh</code> to <code class="language-plaintext highlighter-rouge">~/.zprofile</code> and <code class="language-plaintext highlighter-rouge">~/.zshrc</code> when needed, verifies those commands from clean zsh login and interactive shells, then prints the exact <code class="language-plaintext highlighter-rouge">export PATH=...</code> and <code class="language-plaintext highlighter-rouge">export PATH=... &amp;&amp; thinkless</code> commands to update the current terminal or launch Thinkless immediately.</p>
+
+<p>After command verification, the public installer and <code class="language-plaintext highlighter-rouge">scripts/bootstrap-macos.sh</code> always print an auth onboarding status for Codex, GitHub CLI, and Claude. When a terminal is available, the installer prompts through <code class="language-plaintext highlighter-rouge">/dev/tty</code> so <code class="language-plaintext highlighter-rouge">curl | bash</code> can still run <code class="language-plaintext highlighter-rouge">codex login</code> or <code class="language-plaintext highlighter-rouge">codex</code>, <code class="language-plaintext highlighter-rouge">gh auth login</code>, and <code class="language-plaintext highlighter-rouge">claude</code> interactively. Set <code class="language-plaintext highlighter-rouge">THINKLESS_AUTH_ONBOARDING=0</code> to skip the prompts and finish auth later. If auth is skipped, declined, or unavailable in a non-interactive shell, the installer reports that auth is pending instead of claiming full setup is complete.</p>
+
+<h2 id="windows-bootstrap">Windows Bootstrap</h2>
+
+<p>On Windows, the public PowerShell installer uses <code class="language-plaintext highlighter-rouge">winget</code> for missing Node.js LTS, Git, and GitHub CLI, installs Codex CLI and Claude Code CLI through npm, downloads <code class="language-plaintext highlighter-rouge">thinkless.tgz</code>, and runs <code class="language-plaintext highlighter-rouge">npm install -g --foreground-scripts --ignore-scripts=false</code>. It adds the npm global command directory, normally <code class="language-plaintext highlighter-rouge">%APPDATA%\npm</code>, to the user PATH for new PowerShell sessions and verifies <code class="language-plaintext highlighter-rouge">node</code>, <code class="language-plaintext highlighter-rouge">npm</code>, <code class="language-plaintext highlighter-rouge">git</code>, <code class="language-plaintext highlighter-rouge">thinkless</code>, <code class="language-plaintext highlighter-rouge">codex</code>, <code class="language-plaintext highlighter-rouge">claude</code>, and <code class="language-plaintext highlighter-rouge">gh</code>.</p>
+
+<div class="language-powershell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">irm</span><span class="w"> </span><span class="nx">https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">iex</span><span class="w">
+</span></code></pre></div></div>
+
+<p>Use <code class="language-plaintext highlighter-rouge">THINKLESS_WINDOWS_INSTALL_DEPS=0</code> to skip dependency installation and only install Thinkless from the tarball. Use <code class="language-plaintext highlighter-rouge">THINKLESS_AUTH_ONBOARDING=0</code> to skip interactive Codex, Claude, and GitHub CLI auth prompts. If auth is skipped or unavailable, the installer prints the pending setup commands: <code class="language-plaintext highlighter-rouge">codex login</code>, <code class="language-plaintext highlighter-rouge">gh auth login</code>, and <code class="language-plaintext highlighter-rouge">claude</code>.</p>
+
+<p>If you already have trusted local config files, pass them during install with a private bundle:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">THINKLESS_CONFIG_BUNDLE</span><span class="o">=</span>/path/to/private-thinkless-config npm <span class="nb">install</span>
+</code></pre></div></div>
+
+<p>Bundle files are copied to user-scoped locations only:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>.codex/config.toml       -&gt; ~/.codex/config.toml
+.codex/auth.json         -&gt; ~/.codex/auth.json
+.claude/settings.json    -&gt; ~/.claude/settings.json
+.claude/.credentials.json -&gt; ~/.claude/.credentials.json
+</code></pre></div></div>
+
+<p>Existing user config is not overwritten unless <code class="language-plaintext highlighter-rouge">THINKLESS_BOOTSTRAP_FORCE=1</code> is set. <code class="language-plaintext highlighter-rouge">~/.codex/auth.json</code> and <code class="language-plaintext highlighter-rouge">~/.claude/.credentials.json</code> are credential files; keep them out of the repository, tickets, logs, and chat. <code class="language-plaintext highlighter-rouge">wici.config.json</code> remains Thinkless repo configuration only, not a place for provider secrets.</p>
+
+<p>If you do not provide copied credentials, authenticate Codex, Claude, and GitHub CLI interactively:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>codex
+gh auth login
+claude
+codex <span class="nt">--version</span>
+codex doctor
+gh <span class="nt">--version</span>
+gh auth status
+claude <span class="nt">--version</span>
+thinkless doctor <span class="nt">--deep</span>
+</code></pre></div></div>
+
+<p>Codex <code class="language-plaintext highlighter-rouge">doctor</code> reachability failures are recorded as diagnostics, not a hard real-mode start gate. Real mode still requires the Codex, Claude, and GitHub CLI commands to be present and version checks to succeed.</p>
+
+<p>Set provider-specific environment variables in the shell or container runtime. Keep credentials out of the repository and out of committed config files.</p>
+
+<p>Before a real run, pin the Thinkless version you are using:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>git <span class="nt">-C</span> /path/to/thinkless status <span class="nt">--short</span>
+git <span class="nt">-C</span> /path/to/thinkless rev-parse HEAD
+</code></pre></div></div>
+
+<p>The supervisor records the Thinkless package version, git commit, and dirty flag in <code class="language-plaintext highlighter-rouge">&lt;target&gt;/.wici/checkpoint.json</code> under <code class="language-plaintext highlighter-rouge">tool_versions.wici</code>. Codex/Claude/GitHub CLI changes are treated as recoverable external tool drift: Thinkless auto-updates Codex and Claude at run boundaries when <code class="language-plaintext highlighter-rouge">tools.auto_update</code> is true, and accepts/logs external CLI version changes if a resumed active checkpoint observes a new CLI version. Active runs still reject Thinkless package/git/mode drift; change Thinkless commits only between runs or roll back to the checkpointed commit.</p>
+
+<p>Require real CLIs:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npx tsx src/cli.tsx run <span class="se">\</span>
+  <span class="nt">--target</span> /workspace/target-repo <span class="se">\</span>
+  <span class="nt">--goal</span> <span class="s2">"Build the requested app and verify it runs locally"</span> <span class="se">\</span>
+  <span class="nt">--mode</span> real
+</code></pre></div></div>
+
+<p>Use the TUI in real mode:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">mkdir</span> <span class="nt">-p</span> /workspace/target-repo
+npx tsx src/cli.tsx tui <span class="se">\</span>
+  <span class="nt">--target</span> /workspace/target-repo <span class="se">\</span>
+  <span class="nt">--mode</span> real
+</code></pre></div></div>
+
+<p>The three runtime panes can also be configured through environment variables:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">WICI_PLANNER_EFFORT</span><span class="o">=</span>high <span class="se">\</span>
+<span class="nv">WICI_EXECUTOR_AGENT</span><span class="o">=</span>codex <span class="se">\</span>
+<span class="nv">WICI_EXECUTOR_EFFORT</span><span class="o">=</span>fast <span class="se">\</span>
+npx tsx src/cli.tsx tui <span class="se">\</span>
+  <span class="nt">--target</span> /workspace/target-repo <span class="se">\</span>
+  <span class="nt">--mode</span> real
+</code></pre></div></div>
+
+<h2 id="resume-or-re-run">Resume Or Re-Run</h2>
+
+<p>To continue an existing goal, use the explicit resume command without a new <code class="language-plaintext highlighter-rouge">--goal</code>. Thinkless reads the existing <code class="language-plaintext highlighter-rouge">GOAL.md</code>, <code class="language-plaintext highlighter-rouge">PLAN.md</code>, <code class="language-plaintext highlighter-rouge">.thinkless/checkpoint.json</code> or legacy <code class="language-plaintext highlighter-rouge">.wici/checkpoint.json</code>, Chat transcript/session/runtime files, planner and executor session metadata, <code class="language-plaintext highlighter-rouge">events.jsonl</code>, and <code class="language-plaintext highlighter-rouge">ledger.jsonl</code>, then resumes from the recorded state:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>thinkless resume <span class="nt">--target</span> /workspace/target-repo <span class="nt">--mode</span> real
+</code></pre></div></div>
+
+<p>Without <code class="language-plaintext highlighter-rouge">--target</code>, <code class="language-plaintext highlighter-rouge">thinkless resume</code> first checks the current git repository for an existing Thinkless run. If the current repo has no state but a matching legacy isolated workspace exists under <code class="language-plaintext highlighter-rouge">~/thinkless-workspaces</code>, Thinkless migrates that run into the current repo as <code class="language-plaintext highlighter-rouge">.thinkless/</code> state, resets fixture-completed plans to a real-repo replan step, and resumes there. Otherwise it falls back to the latest run under <code class="language-plaintext highlighter-rouge">~/thinkless-workspaces</code>.</p>
+
+<p>If you are already in the TUI, type <code class="language-plaintext highlighter-rouge">/resume</code> in the bottom Chat input to open an in-TUI selector. The selector lists the current target, numbered <code class="language-plaintext highlighter-rouge">.thinklessN</code> sessions, compatible legacy <code class="language-plaintext highlighter-rouge">.wici</code> runs, and recent Thinkless workspaces. Use up/down to choose a run, Enter to launch a runnable candidate, or Escape to cancel. Each row shows whether the candidate is runnable or blocked, the supervisor state, the selected session directory when relevant, and a short reason. Full supervisor candidates are runnable when Thinkless can restore the selected context or intentionally rerun an interrupted planner/executor path from durable <code class="language-plaintext highlighter-rouge">GOAL.md</code>, <code class="language-plaintext highlighter-rouge">PLAN.md</code>, checkpoint, ledger, and session state. Chat-only candidates are also runnable: selecting one restores the Chat transcript/session/runtime context without launching the supervisor. Blocked states, such as a pending planner clarification without a stored planner session, are visible but cannot be launched as resume.</p>
+
+<p><code class="language-plaintext highlighter-rouge">npm run verify:resume-selector</code> covers catalog discovery and preflight labels. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-selector-pty</code> covers the source PTY <code class="language-plaintext highlighter-rouge">/resume</code> selector flow. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-selector-built</code> drives the packaged CLI entrypoint, proves up/down selection, Enter launch, Escape cancellation, and chat-only selection without <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code>, <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code>, or <code class="language-plaintext highlighter-rouge">EXECUTOR_RESUME_FALLBACK</code> side effects. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-legacy-candidate</code> covers built-CLI legacy <code class="language-plaintext highlighter-rouge">.wici</code> selection and proves runnable legacy candidates preserve full context while legacy chat-only candidates restore Chat without mutating decoys. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-current-candidate</code> covers the current <code class="language-plaintext highlighter-rouge">.thinkless</code> candidate, proving <code class="language-plaintext highlighter-rouge">/resume</code> opens the selector without implicit launch and only emits <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> plus <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> after the current row is explicitly selected. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-interrupted-blocked</code> covers packaged selector refusal for checkpointed but unrecoverable planner/executor interruptions, including a pending planner clarification without a persisted planner session and an executor interruption without replayable state. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-interrupted-runnable</code> covers packaged selector launch for interrupted-but-runnable planner and executor paths: planner rerun candidates emit <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> with <code class="language-plaintext highlighter-rouge">planner_rerun</code> plus <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> and no <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_BLOCKED</code>, while executor replay candidates emit <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code>, <code class="language-plaintext highlighter-rouge">EXECUTOR_RESUME_FALLBACK</code>, and <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code>; both preserve full context and leave decoys unchanged. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-command-isolation</code> covers <code class="language-plaintext highlighter-rouge">/resume</code> as a bottom Chat command, proving the selector opens, Escape cancels cleanly, no Chat transcript/inbox/GOAL.md/PLAN.md/checkpoint/ledger/current-session event or Chat-agent steering mutation occurs before explicit selection, and later runnable selection mutates only the selected candidate while preserving full context. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-planner-context</code> covers selected-run planner self-interrogation context, proving <code class="language-plaintext highlighter-rouge">ASSUMPTIONS.md</code> and planner <code class="language-plaintext highlighter-rouge">context.md</code> come from the selected candidate, current-target and decoy assumptions/context/events remain unmutated, and selected-session <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> plus <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> preserve planner/executor/app-thread metadata. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-empty-selector</code> covers the packaged selector empty-catalog path, proving <code class="language-plaintext highlighter-rouge">/resume</code> opens an explicit empty recovery page, Enter/up/down do not launch, and Escape cancels cleanly. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-many-candidates</code> covers a catalog with more than eight discovered candidates and proves Enter launches only the selected runnable session while decoys remain unchanged. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-stale-candidate</code> covers launch-time revalidation when a previously runnable candidate loses durable state after the selector opens, proving it blocks with <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_BLOCKED</code> instead of launching read-only history. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-stale-agent-state</code> covers launch-time revalidation when a previously runnable planner/executor candidate loses persisted planner stdout or executor <code class="language-plaintext highlighter-rouge">codex-run.jsonl</code> transcript state before Enter, proving the TUI blocks with a concrete planner/executor reason, emits no <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code>, <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code>, or <code class="language-plaintext highlighter-rouge">EXECUTOR_RESUME_FALLBACK</code>, and leaves runnable decoys unchanged. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-blocked-then-runnable</code> covers same-page selector recovery after a blocked or stale selection: the blocked candidate emits only <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_BLOCKED</code>, remains non-launched, then a runnable decoy selected from the same <code class="language-plaintext highlighter-rouge">/resume</code> page emits <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> and <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> with full Chat/runtime/planner/executor/app-thread context. <code class="language-plaintext highlighter-rouge">npm run verify:tui-resume-cross-target</code> covers selecting a historical workspace run while appending <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code> and <code class="language-plaintext highlighter-rouge">SUPERVISOR_START</code> only to the selected target/session and preserving Chat, planner, executor, checkpoint, GOAL, PLAN, ledger, and app-thread metadata. <code class="language-plaintext highlighter-rouge">npm run verify:resume-rerunnable</code> covers blocked planner and executor rerun/fallback events (<code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_VALIDATED</code>, <code class="language-plaintext highlighter-rouge">RESUME_CONTEXT_BLOCKED</code>, and <code class="language-plaintext highlighter-rouge">EXECUTOR_RESUME_FALLBACK</code>). The core V1 aggregate, <code class="language-plaintext highlighter-rouge">npm run verify:v1-core</code>, includes the built selector, legacy <code class="language-plaintext highlighter-rouge">.wici</code>, current <code class="language-plaintext highlighter-rouge">.thinkless</code>, interrupted blocked planner/executor, interrupted runnable planner/executor, command-isolated Chat <code class="language-plaintext highlighter-rouge">/resume</code>, selected planner self-interrogation context, empty-catalog selector, many-candidate catalog launch, stale-candidate launch revalidation, stale planner/executor durable-state revalidation, blocked-then-runnable same-page recovery, and cross-target resume checks so packaged <code class="language-plaintext highlighter-rouge">/resume</code> acceptance stays in the release-facing gate.</p>
+
+<p>Headless continuation remains available, but it is intentionally explicit about the target:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npx tsx src/cli.tsx run <span class="se">\</span>
+  <span class="nt">--target</span> /workspace/target-repo <span class="se">\</span>
+  <span class="nt">--mode</span> real
+</code></pre></div></div>
+
+<p>To rewind to a saved iteration snapshot before continuing, use <code class="language-plaintext highlighter-rouge">--resume-iteration</code>:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npx tsx src/cli.tsx run <span class="se">\</span>
+  <span class="nt">--target</span> /workspace/target-repo <span class="se">\</span>
+  <span class="nt">--resume-iteration</span> 1 <span class="se">\</span>
+  <span class="nt">--mode</span> real
+</code></pre></div></div>
+
+<p>Hot-reload Chat input is idempotent through <code class="language-plaintext highlighter-rouge">checkpoint.json</code> <code class="language-plaintext highlighter-rouge">drained_inbox[]</code>; restarting WiCi does not apply the same inbox message twice.</p>
+
+<h2 id="release-gate">Release Gate</h2>
+
+<p>Before creating any release tag, run the release preflight:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm run release:preflight
+</code></pre></div></div>
+
+<p>That command runs the automated V1 core gate, including Chat-first intake, planner/executor contract checks, hot reload, resume recovery, rollback visibility, release tag behavior, documentation sync, and secret scanning.</p>
+
+<p>Create a release tag only through the guarded command:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npm run release:tag <span class="nt">--</span> 0.1.0
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">release:tag</code> runs <code class="language-plaintext highlighter-rouge">release:preflight</code> first and only then creates an annotated local git tag. It never pushes. If preflight fails, the command exits before <code class="language-plaintext highlighter-rouge">git tag</code>. Local release tags are not proof that commits or tags have been pushed to a remote.</p>
+
+<h2 id="rollback">Rollback</h2>
+
+<p>If a direct-host real run goes wrong, stop the supervisor first. The target repo can be restored to the best recorded commit:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>npx tsx src/cli.tsx rollback <span class="nt">--target</span> /workspace/target-repo
+npx tsx src/cli.tsx rollback <span class="nt">--target</span> /workspace/target-repo <span class="nt">--confirm</span>
+</code></pre></div></div>
+
+<p>The first command is a non-destructive preview. The second command runs <code class="language-plaintext highlighter-rouge">git reset --hard</code> to <code class="language-plaintext highlighter-rouge">wici/best</code> when available, otherwise to the recorded best commit, then runs <code class="language-plaintext highlighter-rouge">git clean -fd</code> while preserving <code class="language-plaintext highlighter-rouge">.wici/</code>.</p>
+
+<p>To restore the Thinkless orchestrator version that started the run:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nv">WICI_COMMIT</span><span class="o">=</span><span class="s2">"</span><span class="si">$(</span>jq <span class="nt">-r</span> .tool_versions.wici.git_commit .wici/checkpoint.json<span class="si">)</span><span class="s2">"</span>
+git <span class="nt">-C</span> /path/to/thinkless checkout <span class="s2">"</span><span class="nv">$WICI_COMMIT</span><span class="s2">"</span>
+</code></pre></div></div>
+
+<h2 id="legacy-optimizer-path">Legacy Optimizer Path</h2>
+
+<p>Some verifier scripts and supervisor modules still exercise the older benchmark/baseline optimizer path for compatibility. That path can use <code class="language-plaintext highlighter-rouge">baseline.json</code>, <code class="language-plaintext highlighter-rouge">.opt/benchmark.json</code>, <code class="language-plaintext highlighter-rouge">acceptance.spec.json</code>, locked scripts, and ledger comparisons only when the legacy optimizer is explicitly enabled with <code class="language-plaintext highlighter-rouge">WICI_LEGACY_OPTIMIZER=1</code> or <code class="language-plaintext highlighter-rouge">evaluation.legacy_optimizer: true</code>. It is not the fresh V1 default.</p>
+
+
+      
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/anchor-js/4.1.0/anchor.min.js" integrity="sha256-lZaRhKri35AyJSypXXs4o6OPFTbTmUoltBbDCbdzegg=" crossorigin="anonymous"></script>
+    <script>anchors.add();</script>
+  </body>
+</html>
