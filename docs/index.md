@@ -403,25 +403,13 @@ body {
       <p class="install-kicker"><span class="install-mark">T</span> Thinkless install</p>
       <h1 id="install-title" class="install-title">Less thinking effort for AI software work.</h1>
       <p class="install-copy">Thinkless separates what you mean from how the work gets done. Say the goal in normal language; the system writes the plan, executes it with Codex, and keeps improving the plan as evidence arrives.</p>
-      <div class="command-list" aria-label="Install commands">
-        <div class="command-panel" role="group" aria-label="macOS and Linux install command">
+      <div class="command-list" aria-label="Install command">
+        <div class="command-panel" id="install-command-panel" role="group" aria-label="macOS and Linux install command">
           <div>
-            <p class="command-label">macOS / Linux</p>
-            <pre class="command-line"><code id="install-command-unix">curl -fsSL https://wici.ai/thinkless/install.sh | bash</code></pre>
+            <p class="command-label" id="install-command-label">macOS / Linux</p>
+            <pre class="command-line"><code id="install-command">curl -fsSL https://wici.ai/thinkless/install.sh | bash</code></pre>
           </div>
-          <button class="copy-command" type="button" onclick="copyInstallCommand(this, 'install-command-unix')" aria-label="Copy macOS and Linux install command" title="Copy install command">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
-              <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-            </svg>
-          </button>
-        </div>
-        <div class="command-panel" role="group" aria-label="Windows install command">
-          <div>
-            <p class="command-label">Windows PowerShell</p>
-            <pre class="command-line"><code id="install-command-windows">irm https://wici.ai/thinkless/install.ps1 | iex</code></pre>
-          </div>
-          <button class="copy-command" type="button" onclick="copyInstallCommand(this, 'install-command-windows')" aria-label="Copy Windows install command" title="Copy install command">
+          <button class="copy-command" id="copy-install-command" type="button" onclick="copyInstallCommand(this, 'install-command')" aria-label="Copy macOS and Linux install command" title="Copy install command">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
               <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
@@ -555,4 +543,28 @@ function copyInstallCommand(button, commandId) {
   writeFallback();
   markCopied();
 }
+
+function configureInstallCommand() {
+  const windowsInstall = {
+    label: 'Windows PowerShell',
+    command: 'irm https://wici.ai/thinkless/install.ps1 | iex',
+    ariaLabel: 'Copy Windows install command'
+  };
+  const platform =
+    (navigator.userAgentData && navigator.userAgentData.platform) ||
+    navigator.platform ||
+    navigator.userAgent ||
+    '';
+
+  if (!/win/i.test(platform)) {
+    return;
+  }
+
+  document.getElementById('install-command-panel').setAttribute('aria-label', 'Windows install command');
+  document.getElementById('install-command-label').textContent = windowsInstall.label;
+  document.getElementById('install-command').textContent = windowsInstall.command;
+  document.getElementById('copy-install-command').setAttribute('aria-label', windowsInstall.ariaLabel);
+}
+
+configureInstallCommand();
 </script>
