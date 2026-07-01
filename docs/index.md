@@ -102,8 +102,8 @@ body {
 
 .command-panel {
   display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
+  grid-template-columns: 1fr;
+  align-items: stretch;
   gap: 10px;
   padding: 10px;
   border: 1px solid var(--tl-border);
@@ -113,12 +113,45 @@ body {
   backdrop-filter: blur(12px);
 }
 
-.command-label {
-  margin: 0 0 8px;
+.command-tabs {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(11, 16, 32, 0.06);
+}
+
+.command-tab {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: transparent;
   color: var(--tl-muted);
   font-size: 0.82rem;
   font-weight: 700;
   letter-spacing: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.command-tab[aria-selected="true"] {
+  background: var(--tl-code);
+  color: #fff;
+}
+
+.command-tab:focus-visible,
+.copy-command:focus-visible {
+  outline: 2px solid var(--tl-blue);
+  outline-offset: 2px;
+}
+
+.command-field {
+  position: relative;
+  min-width: 0;
 }
 
 .command-line {
@@ -129,7 +162,7 @@ body {
   background: var(--tl-command);
   color: var(--tl-ink);
   border: 1px solid rgba(17, 24, 39, 0.1);
-  padding: 19px 20px;
+  padding: 19px 64px 19px 20px;
   font-size: clamp(0.88rem, 2vw, 1.08rem);
   line-height: 1.4;
 }
@@ -141,36 +174,40 @@ body {
 }
 
 .copy-command {
-  width: 52px;
-  height: 52px;
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 38px;
+  height: 38px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   display: grid;
   place-items: center;
   background: var(--tl-blue);
   color: #fff;
   cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
-  box-shadow: 0 12px 24px rgba(31, 111, 235, 0.26);
+  transform: translateY(-50%);
+  transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  box-shadow: 0 8px 18px rgba(31, 111, 235, 0.22);
 }
 
 .copy-command:hover {
-  transform: translateY(-1px);
+  transform: translateY(-50%) scale(1.03);
   background: #1559c8;
 }
 
 .copy-command:active {
-  transform: translateY(0) scale(0.98);
+  transform: translateY(-50%) scale(0.98);
 }
 
 .copy-command.copied {
   background: var(--tl-teal);
-  box-shadow: 0 12px 24px rgba(15, 143, 134, 0.24);
+  box-shadow: 0 8px 18px rgba(15, 143, 134, 0.24);
 }
 
 .copy-command svg {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
 }
 
 .copy-status {
@@ -360,13 +397,13 @@ body {
     line-height: 1;
   }
 
-  .command-panel {
-    grid-template-columns: 1fr;
+  .command-tabs {
+    width: 100%;
   }
 
   .command-line {
     overflow-x: visible;
-    padding: 16px;
+    padding: 16px 58px 16px 16px;
     font-size: 0.84rem;
     text-align: left;
   }
@@ -377,7 +414,8 @@ body {
   }
 
   .copy-command {
-    width: 100%;
+    width: 36px;
+    height: 36px;
   }
 
   .flow-strip,
@@ -405,16 +443,19 @@ body {
       <p class="install-copy">Thinkless separates what you mean from how the work gets done. Say the goal in normal language; the system writes the plan, executes it with Codex, and keeps improving the plan as evidence arrives.</p>
       <div class="command-list" aria-label="Install command">
         <div class="command-panel" id="install-command-panel" role="group" aria-label="macOS and Linux install command">
-          <div>
-            <p class="command-label" id="install-command-label">macOS / Linux</p>
-            <pre class="command-line"><code id="install-command">curl -fsSL https://wici.ai/thinkless/install.sh | bash</code></pre>
+          <div class="command-tabs" role="tablist" aria-label="Operating system">
+            <button class="command-tab" id="install-tab-unix" type="button" role="tab" aria-selected="true" aria-controls="install-command-box" data-install-target="unix">macOS / Linux</button>
+            <button class="command-tab" id="install-tab-windows" type="button" role="tab" aria-selected="false" aria-controls="install-command-box" data-install-target="windows" tabindex="-1">Windows</button>
           </div>
-          <button class="copy-command" id="copy-install-command" type="button" onclick="copyInstallCommand(this, 'install-command')" aria-label="Copy macOS and Linux install command" title="Copy install command">
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
-              <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
-            </svg>
-          </button>
+          <div class="command-field" id="install-command-box" role="tabpanel" aria-labelledby="install-tab-unix">
+            <pre class="command-line"><code id="install-command">curl -fsSL https://wici.ai/thinkless/install.sh | bash</code></pre>
+            <button class="copy-command" id="copy-install-command" type="button" onclick="copyInstallCommand(this, 'install-command')" aria-label="Copy macOS and Linux install command" title="Copy install command">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="9" y="9" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2"></rect>
+                <path d="M5 15V7a2 2 0 0 1 2-2h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
       <div id="copy-status" class="copy-status" aria-live="polite"></div>
@@ -544,26 +585,78 @@ function copyInstallCommand(button, commandId) {
   markCopied();
 }
 
-function configureInstallCommand() {
-  const windowsInstall = {
-    label: 'Windows PowerShell',
+const installCommands = {
+  unix: {
+    command: 'curl -fsSL https://wici.ai/thinkless/install.sh | bash',
+    panelLabel: 'macOS and Linux install command',
+    copyLabel: 'Copy macOS and Linux install command',
+    tabId: 'install-tab-unix'
+  },
+  windows: {
     command: 'irm https://wici.ai/thinkless/install.ps1 | iex',
-    ariaLabel: 'Copy Windows install command'
-  };
+    panelLabel: 'Windows install command',
+    copyLabel: 'Copy Windows install command',
+    tabId: 'install-tab-windows'
+  }
+};
+
+function selectInstallCommand(target) {
+  const selected = installCommands[target] || installCommands.unix;
+  document.getElementById('install-command-panel').setAttribute('aria-label', selected.panelLabel);
+  document.getElementById('install-command-box').setAttribute('aria-labelledby', selected.tabId);
+  document.getElementById('install-command').textContent = selected.command;
+  document.getElementById('copy-install-command').setAttribute('aria-label', selected.copyLabel);
+
+  document.querySelectorAll('[data-install-target]').forEach(function (tab) {
+    const isSelected = tab.dataset.installTarget === target;
+    tab.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    tab.tabIndex = isSelected ? 0 : -1;
+  });
+}
+
+function detectInstallTarget() {
   const platform =
     (navigator.userAgentData && navigator.userAgentData.platform) ||
     navigator.platform ||
     navigator.userAgent ||
     '';
 
-  if (!/win/i.test(platform)) {
+  return /win/i.test(platform) ? 'windows' : 'unix';
+}
+
+function handleInstallTabKeydown(event) {
+  const tabs = Array.from(document.querySelectorAll('[data-install-target]'));
+  const index = tabs.indexOf(event.currentTarget);
+  let nextIndex = null;
+
+  if (event.key === 'ArrowRight') {
+    nextIndex = (index + 1) % tabs.length;
+  } else if (event.key === 'ArrowLeft') {
+    nextIndex = (index - 1 + tabs.length) % tabs.length;
+  } else if (event.key === 'Home') {
+    nextIndex = 0;
+  } else if (event.key === 'End') {
+    nextIndex = tabs.length - 1;
+  }
+
+  if (nextIndex === null) {
     return;
   }
 
-  document.getElementById('install-command-panel').setAttribute('aria-label', 'Windows install command');
-  document.getElementById('install-command-label').textContent = windowsInstall.label;
-  document.getElementById('install-command').textContent = windowsInstall.command;
-  document.getElementById('copy-install-command').setAttribute('aria-label', windowsInstall.ariaLabel);
+  event.preventDefault();
+  tabs[nextIndex].focus();
+  selectInstallCommand(tabs[nextIndex].dataset.installTarget);
+}
+
+function configureInstallCommand() {
+  document.querySelectorAll('[data-install-target]').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      selectInstallCommand(tab.dataset.installTarget);
+    });
+    tab.addEventListener('keydown', handleInstallTabKeydown);
+  });
+
+  selectInstallCommand(detectInstallTarget());
 }
 
 configureInstallCommand();

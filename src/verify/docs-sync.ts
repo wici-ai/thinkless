@@ -227,8 +227,9 @@ async function main(): Promise<void> {
   assert(
     installPage.includes('irm https://wici.ai/thinkless/install.ps1 | iex') &&
       installPage.includes('macOS / Linux') &&
-      installPage.includes('Windows PowerShell'),
-    'install page should expose both macOS/Linux and Windows install commands'
+      installPage.includes('data-install-target="windows"') &&
+      installPage.includes('detectInstallTarget'),
+    'install page should expose tabbed macOS/Linux and Windows install commands'
   );
   assert(
     docsText.includes('`brew`, `git`, `node`, `npm`, `gh`, `codex`, and `claude`') &&
