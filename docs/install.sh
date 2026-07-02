@@ -3,27 +3,6 @@ set -euo pipefail
 
 release_repo="${THINKLESS_RELEASE_REPO:-wici-ai/thinkless}"
 
-resolve_release_base() {
-  if [[ -n "${THINKLESS_RELEASE_BASE:-}" ]]; then
-    printf '%s\n' "$THINKLESS_RELEASE_BASE"
-    return
-  fi
-  local tag
-  tag="$(
-    curl -fsSL "https://api.github.com/repos/$release_repo/releases/latest" 2>/dev/null \
-      | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
-      | head -n 1
-  )"
-  if [[ -n "$tag" ]]; then
-    printf 'https://github.com/%s/releases/download/%s\n' "$release_repo" "$tag"
-    return
-  fi
-  printf 'https://github.com/%s/releases/latest/download\n' "$release_repo"
-}
-
-release_base="$(resolve_release_base)"
-tarball_url="${THINKLESS_TARBALL_URL:-$release_base/thinkless.tgz}"
-
 command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
@@ -71,6 +50,27 @@ require_sudo_access() {
   fi
   echo "thinkless install: sudo access is required on macOS to ${reason}." >&2
   echo "Run from an admin account, or install dependencies manually and rerun this installer." >&2
+  exit 1
+}
+
+dependency_install_enabled() {
+  case "${THINKLESS_INSTALL_DEPS:-1}" in
+    0|false|FALSE|False|no|NO|No|off|OFF|Off) return 1 ;;
+  esac
+  return 0
+}
+
+run_privileged() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+    return
+  fi
+  if command_exists sudo && sudo -v; then
+    sudo "$@"
+    return
+  fi
+  echo "thinkless install: sudo/root access is required to install missing system dependencies." >&2
+  echo "Install curl, git, Node.js/npm, and GitHub CLI manually, or rerun with sudo available." >&2
   exit 1
 }
 
@@ -190,7 +190,13 @@ persist_zsh_path() {
 }
 
 install_brew_packages() {
+  if ! dependency_install_enabled; then
+    return
+  fi
   local packages=()
+  if ! command_exists curl; then
+    packages+=(curl)
+  fi
   if ! command_exists git; then
     packages+=(git)
   fi
@@ -209,7 +215,84 @@ install_brew_packages() {
   prepend_common_paths
 }
 
+linux_packages_for_manager() {
+  local manager="$1"
+  shift
+  local command package
+  for command in "$@"; do
+    case "$command:$manager" in
+      node:*) package=nodejs ;;
+      npm:*) package=npm ;;
+      gh:pacman|gh:apk) package=github-cli ;;
+      gh:*) package=gh ;;
+      *) package="$command" ;;
+    esac
+    printf '%s\n' "$package"
+  done | awk 'NF && !seen[$0]++'
+}
+
+install_linux_packages() {
+  if ! dependency_install_enabled; then
+    return
+  fi
+  local missing=()
+  if ! command_exists curl; then
+    missing+=(curl)
+  fi
+  if ! command_exists git; then
+    missing+=(git)
+  fi
+  if ! command_exists node; then
+    missing+=(node)
+  fi
+  if ! command_exists npm; then
+    missing+=(npm)
+  fi
+  if ! command_exists gh; then
+    missing+=(gh)
+  fi
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    return
+  fi
+
+  local manager packages=()
+  if command_exists apt-get; then
+    manager=apt
+    mapfile -t packages < <(linux_packages_for_manager "$manager" "${missing[@]}")
+    run_privileged apt-get update
+    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
+  elif command_exists dnf; then
+    manager=dnf
+    mapfile -t packages < <(linux_packages_for_manager "$manager" "${missing[@]}")
+    run_privileged dnf install -y "${packages[@]}"
+  elif command_exists yum; then
+    manager=yum
+    mapfile -t packages < <(linux_packages_for_manager "$manager" "${missing[@]}")
+    run_privileged yum install -y "${packages[@]}"
+  elif command_exists pacman; then
+    manager=pacman
+    mapfile -t packages < <(linux_packages_for_manager "$manager" "${missing[@]}")
+    run_privileged pacman -Sy --needed --noconfirm "${packages[@]}"
+  elif command_exists zypper; then
+    manager=zypper
+    mapfile -t packages < <(linux_packages_for_manager "$manager" "${missing[@]}")
+    run_privileged zypper --non-interactive install "${packages[@]}"
+  elif command_exists apk; then
+    manager=apk
+    mapfile -t packages < <(linux_packages_for_manager "$manager" "${missing[@]}")
+    run_privileged apk add --no-cache "${packages[@]}"
+  else
+    echo "thinkless install: missing dependencies: ${missing[*]}." >&2
+    echo "Install curl, git, Node.js/npm, and GitHub CLI manually, then rerun this installer." >&2
+    exit 1
+  fi
+  prepend_common_paths
+}
+
 install_agent_clis() {
+  if ! dependency_install_enabled; then
+    return
+  fi
   if ! command_exists codex; then
     echo "thinkless install: installing Codex CLI"
     curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
@@ -241,19 +324,19 @@ verify_required_commands() {
   persist_zsh_path "${path_dirs[@]}"
   local path_export
   path_export="$(escape_double_quoted "$(join_path_dirs "${path_dirs[@]}")")"
-  local clean_check="export THINKLESS_SELF_UPDATE=0; export PATH=\"$path_export:\$PATH\"; for cmd in node npm thinkless codex claude gh; do command -v \"\$cmd\" >/dev/null 2>&1 || exit 127; done; thinkless --version >/dev/null && codex --version >/dev/null && claude --version >/dev/null && gh --version >/dev/null"
+  local clean_check="export THINKLESS_SELF_UPDATE=0; export PATH=\"$path_export:\$PATH\"; for cmd in node npm git thinkless codex claude gh; do command -v \"\$cmd\" >/dev/null 2>&1 || exit 127; done; thinkless --version >/dev/null && git --version >/dev/null && codex --version >/dev/null && claude --version >/dev/null && gh --version >/dev/null"
   if [[ "$(uname -s)" == "Darwin" && -x /bin/zsh ]]; then
     if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -lc "$clean_check"; then
-      echo "thinkless install: installed, but a clean zsh login shell cannot find node, npm, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
+      echo "thinkless install: installed, but a clean zsh login shell cannot find node, npm, git, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
       exit 1
     fi
     if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -ic "$clean_check"; then
-      echo "thinkless install: installed, but a clean interactive zsh shell cannot find node, npm, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
+      echo "thinkless install: installed, but a clean interactive zsh shell cannot find node, npm, git, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
       exit 1
     fi
   else
     local cmd
-    for cmd in node npm thinkless codex claude gh; do
+    for cmd in node npm git thinkless codex claude gh; do
       if ! command_exists "$cmd"; then
         echo "thinkless install: installed, but $cmd is not on PATH. Add $(join_path_dirs "${path_dirs[@]}") to PATH and retry." >&2
         exit 1
@@ -264,7 +347,7 @@ verify_required_commands() {
     claude --version >/dev/null
     gh --version >/dev/null
   fi
-  echo "thinkless install: verified node, npm, thinkless, codex, claude, and gh on PATH"
+  echo "thinkless install: verified node, npm, git, thinkless, codex, claude, and gh on PATH"
 }
 
 install_thinkless_launcher() {
@@ -454,8 +537,27 @@ run_auth_onboarding() {
   fi
 }
 
+resolve_release_base() {
+  if [[ -n "${THINKLESS_RELEASE_BASE:-}" ]]; then
+    printf '%s\n' "$THINKLESS_RELEASE_BASE"
+    return
+  fi
+  local tag
+  tag="$(
+    curl -fsSL "https://api.github.com/repos/$release_repo/releases/latest" 2>/dev/null \
+      | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' \
+      | head -n 1
+  )"
+  if [[ -n "$tag" ]]; then
+    printf 'https://github.com/%s/releases/download/%s\n' "$release_repo" "$tag"
+    return
+  fi
+  printf 'https://github.com/%s/releases/latest/download\n' "$release_repo"
+}
+
 prepend_common_paths
-if [[ "$(uname -s)" == "Darwin" ]]; then
+platform="$(uname -s)"
+if [[ "$platform" == "Darwin" ]]; then
   load_brew
   if ! command_exists brew; then
     echo "thinkless install: installing Homebrew"
@@ -470,11 +572,21 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   fi
   install_brew_packages
   install_agent_clis
+elif [[ "$platform" == "Linux" ]]; then
+  install_linux_packages
+  install_agent_clis
 fi
 
 if ! command_exists npm; then
-  echo "thinkless install: npm is required. Install Node.js/npm first, then rerun this installer." >&2
+  echo "thinkless install: npm is required. Install Node.js/npm first, or rerun with dependency installation enabled." >&2
   exit 1
+fi
+
+if [[ -n "${THINKLESS_TARBALL_URL:-}" ]]; then
+  tarball_url="$THINKLESS_TARBALL_URL"
+else
+  release_base="$(resolve_release_base)"
+  tarball_url="$release_base/thinkless.tgz"
 fi
 
 temp_dir="$(mktemp -d)"

@@ -90,13 +90,15 @@ curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install
 irm https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1 | iex
 ```
 
-On macOS, `npm install` runs `scripts/postinstall.mjs` as a postinstall bootstrap; use `THINKLESS_BOOTSTRAP=0 npm install` to opt out. For a fresh Mac with no `npm` yet, run `scripts/bootstrap-macos.sh` from a source checkout.
+On macOS, `npm install` runs `scripts/postinstall.mjs`; use `THINKLESS_BOOTSTRAP=0 npm install` to opt out. For a fresh Mac with no `npm` yet, run `scripts/bootstrap-macos.sh` from a source checkout.
 
-On Windows, `install.ps1` uses `winget` for Node.js LTS, Git, and GitHub CLI, installs Codex and Claude through npm, adds npm global commands to user PATH, and prints auth setup commands. Set `THINKLESS_WINDOWS_INSTALL_DEPS=0` to skip dependency installation.
+On Linux, `install.sh` uses the available system package manager for missing `curl`, Git, Node.js/npm, and GitHub CLI, then installs Codex/Claude. Set `THINKLESS_INSTALL_DEPS=0` to skip deps.
 
-The bootstrap waits for Apple Command Line Tools, installs missing host commands, may update `~/.zprofile` and `~/.zshrc`, and exposes `node`, `npm`, `thinkless`, `codex`, `claude`, and `gh` from clean zsh login and interactive shells. It prints `export PATH=... && thinkless` for the current terminal.
+On Windows, `install.ps1` uses `winget` for Node.js LTS/npm, Git, and GitHub CLI, installs Codex/Claude, and adds npm globals to PATH. Set `THINKLESS_WINDOWS_INSTALL_DEPS=0` to skip deps.
 
-Auth onboarding uses `/dev/tty`, prints an auth onboarding status, can start `codex login` and `gh auth login`, and can report that auth is pending. Use it to authenticate Codex, Claude, and GitHub CLI; set `THINKLESS_AUTH_ONBOARDING=0` to skip prompts. For isolated installs, `THINKLESS_CONFIG_BUNDLE` can copy `~/.codex/config.toml`, `~/.codex/auth.json`, `~/.claude/settings.json`, and `~/.claude/.credentials.json`; keep them out of the repository. Real-mode health expects Codex, Claude, and GitHub CLI commands.
+The bootstrap waits for Apple Command Line Tools, may update `~/.zprofile` and `~/.zshrc`, and exposes `node`, `npm`, `git`, `thinkless`, `codex`, `claude`, and `gh` from clean zsh login and interactive shells. It prints `export PATH=... && thinkless`.
+
+Auth onboarding uses `/dev/tty`, prints an auth onboarding status, can start `codex login` and `gh auth login`, and reports when auth is pending. Use it to authenticate Codex, Claude, and GitHub CLI; set `THINKLESS_AUTH_ONBOARDING=0` to skip prompts. `THINKLESS_CONFIG_BUNDLE` can copy `~/.codex/config.toml`, `~/.codex/auth.json`, `~/.claude/settings.json`, and `~/.claude/.credentials.json`; keep them out of the repo. Real-mode health expects Codex, Claude, and GitHub CLI commands.
 
 For a faster local loop:
 

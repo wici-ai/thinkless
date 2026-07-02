@@ -24,7 +24,7 @@ This audit records what is currently proven and what is covered by automated che
 | No task categories, hardcoded avenues, or supervisor metric parser | `npm run verify:goal-metric`, `npm run verify:curriculum`, `npm run verify:v1-requirements` | Covered |
 | Internal planner-selected metric placeholder is not presented as a user target | `npm run verify:tui-structure`, `npm run verify:goal-interrogation`, `npm run verify:v1-requirements` | Covered |
 | Default real runs have no WiCi cost or iteration hard cap | `npm run verify:tool-commands` report `default_iteration_budget_unbounded`; `npm run verify:v1-requirements`; `wici.config.json` | Covered |
-| macOS installs bootstrap host dependencies, including GitHub CLI, and supports a one-line public release installer without committing secrets | `npm run verify:install-bootstrap`; README macOS Bootstrap section; `scripts/install.sh` | Covered |
+| Public installers bootstrap host dependencies, including Node.js/npm, Git, GitHub CLI, Codex, and Claude on macOS/Linux/Windows, and support one-line public release installs without committing secrets | `npm run verify:install-bootstrap`; README Bootstrap sections; `scripts/install.sh`, `scripts/install.ps1` | Covered |
 
 ## Planner
 

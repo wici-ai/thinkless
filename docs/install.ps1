@@ -273,6 +273,7 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
 
 Refresh-CommandPath
 Ensure-CommandViaWinget 'node' 'OpenJS.NodeJS.LTS' 'Node.js LTS'
+Ensure-CommandViaWinget 'npm' 'OpenJS.NodeJS.LTS' 'npm (Node.js LTS)'
 Ensure-CommandViaWinget 'git' 'Git.Git' 'Git'
 Ensure-CommandViaWinget 'gh' 'GitHub.cli' 'GitHub CLI'
 Refresh-CommandPath

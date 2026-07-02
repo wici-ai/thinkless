@@ -207,7 +207,9 @@ async function main(): Promise<void> {
       docsText.includes('Apple Command Line Tools') &&
       docsText.includes('~/.zprofile') &&
       docsText.includes('~/.zshrc') &&
-      docsText.includes('`node`, `npm`, `thinkless`, `codex`, `claude`, and `gh`') &&
+      docsText.includes('`node`, `npm`, `git`, `thinkless`, `codex`, `claude`, and `gh`') &&
+      docsText.includes('On Linux, `install.sh` uses the available system package manager') &&
+      docsText.includes('THINKLESS_INSTALL_DEPS=0') &&
       docsText.includes('clean zsh login and interactive shells') &&
       docsText.includes('export PATH=... && thinkless') &&
       docsText.includes('auth onboarding status') &&
@@ -221,6 +223,7 @@ async function main(): Promise<void> {
     docsText.includes('## Windows Bootstrap') &&
       docsText.includes('THINKLESS_WINDOWS_INSTALL_DEPS=0') &&
       docsText.includes('winget') &&
+      docsText.includes('Node.js LTS/npm') &&
       docsText.includes('`node`, `npm`, `git`, `thinkless`, `codex`, `claude`, and `gh`'),
     'docs should document the Windows PowerShell installer and dependency controls'
   );

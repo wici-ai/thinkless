@@ -214,19 +214,19 @@ verify_required_commands() {
   persist_zsh_path "${path_dirs[@]}"
   local path_export
   path_export="$(escape_double_quoted "$(join_path_dirs "${path_dirs[@]}")")"
-  local clean_check="export THINKLESS_SELF_UPDATE=0; export PATH=\"$path_export:\$PATH\"; for cmd in node npm thinkless codex claude gh; do command -v \"\$cmd\" >/dev/null 2>&1 || exit 127; done; thinkless --version >/dev/null && codex --version >/dev/null && claude --version >/dev/null && gh --version >/dev/null"
+  local clean_check="export THINKLESS_SELF_UPDATE=0; export PATH=\"$path_export:\$PATH\"; for cmd in node npm git thinkless codex claude gh; do command -v \"\$cmd\" >/dev/null 2>&1 || exit 127; done; thinkless --version >/dev/null && git --version >/dev/null && codex --version >/dev/null && claude --version >/dev/null && gh --version >/dev/null"
   if [[ -x /bin/zsh ]]; then
     if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -lc "$clean_check"; then
-      echo "thinkless bootstrap: installed, but a clean zsh login shell cannot find node, npm, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
+      echo "thinkless bootstrap: installed, but a clean zsh login shell cannot find node, npm, git, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
       exit 1
     fi
     if ! env -i HOME="$HOME" USER="${USER:-}" SHELL="/bin/zsh" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/zsh -ic "$clean_check"; then
-      echo "thinkless bootstrap: installed, but a clean interactive zsh shell cannot find node, npm, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
+      echo "thinkless bootstrap: installed, but a clean interactive zsh shell cannot find node, npm, git, thinkless, codex, claude, and gh. Open a new terminal or run: export PATH=\"$(join_path_dirs "${path_dirs[@]}"):\$PATH\"" >&2
       exit 1
     fi
   else
     local cmd
-    for cmd in node npm thinkless codex claude gh; do
+    for cmd in node npm git thinkless codex claude gh; do
       if ! command_exists "$cmd"; then
         echo "thinkless bootstrap: installed, but $cmd is not on PATH. Add $(join_path_dirs "${path_dirs[@]}") to PATH and retry." >&2
         exit 1
@@ -237,7 +237,7 @@ verify_required_commands() {
     claude --version >/dev/null
     gh --version >/dev/null
   fi
-  echo "thinkless bootstrap: verified node, npm, thinkless, codex, claude, and gh on PATH"
+  echo "thinkless bootstrap: verified node, npm, git, thinkless, codex, claude, and gh on PATH"
 }
 
 print_path_activation_note() {

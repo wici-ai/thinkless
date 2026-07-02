@@ -398,13 +398,15 @@ From a clean machine, use the public release installer instead:
 curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash
 ```
 
-That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, GitHub CLI, Codex CLI, and Claude Code CLI, then installs Thinkless with npm lifecycle scripts enabled. It adds the discovered command directories for `node`, `npm`, `thinkless`, `codex`, `claude`, and `gh` to `~/.zprofile` and `~/.zshrc` when needed, verifies those commands from clean zsh login and interactive shells, then prints the exact `export PATH=...` and `export PATH=... && thinkless` commands to update the current terminal or launch Thinkless immediately.
+That script waits for the Apple Command Line Tools installer when macOS prompts for it, verifies `sudo` access when system dependency installation is needed, installs Homebrew, Node.js/npm, git, GitHub CLI, Codex CLI, and Claude Code CLI, then installs Thinkless with npm lifecycle scripts enabled. It adds the discovered command directories for `node`, `npm`, `git`, `thinkless`, `codex`, `claude`, and `gh` to `~/.zprofile` and `~/.zshrc` when needed, verifies those commands from clean zsh login and interactive shells, then prints the exact `export PATH=...` and `export PATH=... && thinkless` commands to update the current terminal or launch Thinkless immediately.
+
+On Linux, the public `install.sh` attempts to install missing `curl`, Git, Node.js/npm, and GitHub CLI through the available system package manager: `apt-get`, `dnf`, `yum`, `pacman`, `zypper`, or `apk`. It then installs Codex CLI and Claude Code CLI before downloading the release tarball. Set `THINKLESS_INSTALL_DEPS=0` to skip this dependency installation path and provide the commands yourself.
 
 After command verification, the public installer and `scripts/bootstrap-macos.sh` always print an auth onboarding status for Codex, GitHub CLI, and Claude. When a terminal is available, the installer prompts through `/dev/tty` so `curl | bash` can still run `codex login` or `codex`, `gh auth login`, and `claude` interactively. Set `THINKLESS_AUTH_ONBOARDING=0` to skip the prompts and finish auth later. If auth is skipped, declined, or unavailable in a non-interactive shell, the installer reports that auth is pending instead of claiming full setup is complete.
 
 ## Windows Bootstrap
 
-On Windows, the public PowerShell installer uses `winget` for missing Node.js LTS, Git, and GitHub CLI, installs Codex CLI and Claude Code CLI through npm, downloads `thinkless.tgz`, and runs `npm install -g --foreground-scripts --ignore-scripts=false`. It adds the npm global command directory, normally `%APPDATA%\npm`, to the user PATH for new PowerShell sessions and verifies `node`, `npm`, `git`, `thinkless`, `codex`, `claude`, and `gh`.
+On Windows, the public PowerShell installer uses `winget` for missing Node.js LTS/npm, Git, and GitHub CLI, installs Codex CLI and Claude Code CLI through npm, downloads `thinkless.tgz`, and runs `npm install -g --foreground-scripts --ignore-scripts=false`. It adds the npm global command directory, normally `%APPDATA%\npm`, to the user PATH for new PowerShell sessions and verifies `node`, `npm`, `git`, `thinkless`, `codex`, `claude`, and `gh`.
 
 ```powershell
 irm https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1 | iex

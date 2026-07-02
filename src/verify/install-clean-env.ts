@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       maxBuffer: 1024 * 1024 * 10
     });
     assert(install.exitCode === 0, `first clean install failed with ${install.exitCode}:\n${install.all}`);
-    assert((install.all ?? '').includes('verified node, npm, thinkless, codex, claude, and gh on PATH'), `installer did not verify all commands:\n${install.all}`);
+    assert((install.all ?? '').includes('verified node, npm, git, thinkless, codex, claude, and gh on PATH'), `installer did not verify all commands:\n${install.all}`);
 
     const zprofile = await readFile(join(home, '.zprofile'), 'utf8').catch(() => '');
     const zshrc = await readFile(join(home, '.zshrc'), 'utf8').catch(() => '');
