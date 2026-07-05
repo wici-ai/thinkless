@@ -10,6 +10,7 @@ import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
 import { writeInjection } from '../supervisor/inbox.js';
 
 const target = resolve('fixture/app-server-hotreload-target');
+const failTarget = resolve('fixture/app-server-hotreload-fail-target');
 const fakeBin = resolve('fixture/app-server-hotreload-bin');
 const initialGoal = 'Verify app-server hot reload steers the active Codex turn.';
 const followupText = 'Apply this requirement through turn steer, not exec resume.';
@@ -72,13 +73,54 @@ async function main(): Promise<void> {
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree should be clean after app-server hot reload:\n${status}`);
 
+  await createSampleTarget(failTarget, true);
+  const failPaths = runPaths(failTarget);
+  const failChild = spawn(
+    process.execPath,
+    ['--import', 'tsx', 'src/cli.tsx', 'run', '--target', failTarget, '--goal', initialGoal, '--max-iters', '1', '--mode', 'real'],
+    {
+      cwd: resolve('.'),
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ''}`,
+        WICI_FAKE_TARGET: failTarget,
+        WICI_FAKE_STATE_DIR: failPaths.wici,
+        WICI_FAKE_STEER_FAIL: '1',
+        WICI_PLANNER_AGENT: 'claude',
+        WICI_CODEX_EXECUTOR_BACKEND: 'app-server'
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  );
+  await waitForEvent(failPaths.events, 'EXECUTE_APP_SERVER_START', 20_000);
+  await writeInjection(failPaths, {
+    kind: 'add_requirement',
+    text: followupText,
+    priority: 'normal'
+  });
+  const failExit = await waitForExit(failChild, 30_000);
+  assert(failExit.code === 0, `app-server failed-steer run exited code=${failExit.code} signal=${failExit.signal}`);
+  const failEvents = await readJsonLines<RunEvent>(failPaths.events);
+  assert(failEvents.some((event) => event.type === 'EXECUTE_STEER_PREEMPTED'), 'failed app-server steer must interrupt the stale active turn');
+  assert(failEvents.some((event) => event.type === 'EXECUTE_PREEMPTED'), 'failed app-server steer must be recorded as executor preemption');
+  assert(!failEvents.some((event) => event.type === 'EXECUTE_STEER_DEFERRED'), 'failed app-server steer must not defer while stale Codex continues running');
+  const failLedger = await readJsonLines<LedgerEntry>(failPaths.ledger);
+  assert(failLedger[0]?.status === 'preempted', `failed steer should write preempted ledger row: ${JSON.stringify(failLedger)}`);
+  const failRpc = (await readFile(join(failPaths.wici, 'fake-app-server-rpc.jsonl'), 'utf8'))
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { method?: string; params?: unknown });
+  assert(failRpc.some((message) => message.method === 'turn/steer'), `failed steer scenario did not attempt turn/steer: ${JSON.stringify(failRpc)}`);
+  assert(failRpc.some((message) => message.method === 'turn/interrupt'), `failed steer scenario did not interrupt stale turn: ${JSON.stringify(failRpc)}`);
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         target,
         injection_drained: injection.id,
-        app_server_steer: true
+        app_server_steer: true,
+        failed_steer_preempted: true
       },
       null,
       2
@@ -174,6 +216,7 @@ mkdirSync(join(wici, 'artifacts'), { recursive: true });
 const log = join(wici, 'fake-app-server-rpc.jsonl');
 const rl = createInterface({ input: process.stdin });
 let turnStarted = false;
+const failSteer = process.env.WICI_FAKE_STEER_FAIL === '1';
 
 function send(message) {
   process.stdout.write(JSON.stringify(message) + '\\n');
@@ -204,11 +247,18 @@ rl.on('line', (line) => {
       send({ id: message.id, error: { code: -32000, message: 'bad turn precondition' } });
       return;
     }
+    if (failSteer) {
+      send({ id: message.id, error: { code: -32000, message: 'turn already too old to steer' } });
+      return;
+    }
     send({ id: message.id, result: { turnId: 'turn-app-1' } });
     const result = { step_done: true, tests_pass: true, notes: 'fake app-server completed after steer', changed_files: [], next: null };
     writeFileSync(join(wici, 'artifacts', 'iter-1.json'), JSON.stringify(result, null, 2) + '\\n');
     send({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-app-1', turnId: 'turn-app-1', tokenUsage: { total: { totalTokens: 140, inputTokens: 100, cachedInputTokens: 0, outputTokens: 40, reasoningOutputTokens: 0 }, last: { totalTokens: 140, inputTokens: 100, cachedInputTokens: 0, outputTokens: 40, reasoningOutputTokens: 0 }, modelContextWindow: 100000 } } });
     send({ method: 'turn/completed', params: { threadId: 'thread-app-1', turn: { ...turnShape('completed'), completedAt: Date.now() / 1000, durationMs: 25 } } });
+    setTimeout(() => process.exit(0), 25);
+  } else if (message.method === 'turn/interrupt') {
+    send({ id: message.id, result: { turnId: 'turn-app-1', interrupted: true } });
     setTimeout(() => process.exit(0), 25);
   } else if (message.method === 'initialized') {
   } else {

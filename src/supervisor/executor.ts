@@ -274,6 +274,7 @@ async function buildExecutorPrompt(
     return [
       'Continue the existing Codex session for this WiCi run.',
       `Supervisor receipt focus: ${stepId}. Use this as orientation only; satisfy the current ${goalPath} and ${planPath} as a whole.`,
+      stepBoundaryText(planPath, stepId),
       `${goalPath} and ${planPath} have already been updated on disk. Re-read them from the workspace before acting.`,
       steerText ? `New requirement or steering delta to apply now:\n${steerText}` : '',
       'Do not restart the task from scratch. Continue from the existing workspace and remote state; preserve completed useful work.',
@@ -297,7 +298,8 @@ async function buildExecutorPrompt(
   }
   return [
     iter === 1 ? `Execute the current ${goalPath} and ${planPath} as one Codex goal.` : `Continue executing the current ${goalPath} and ${planPath} as one Codex goal.`,
-    `Supervisor receipt focus: ${stepId}. Use this as orientation for progress reporting; do not ignore other ${planPath} work needed to satisfy the goal.`,
+    `Supervisor receipt focus: ${stepId}. Use this as the only PLAN.md step this turn may complete; use the rest of ${planPath} as context.`,
+    stepBoundaryText(planPath, stepId),
     steerText ? `NOTE new requirement or steering input: ${steerText}` : '',
     `Use the target repository as the only workspace.`,
     `Treat ${goalPath} and ${planPath} below as the execution goal input. Re-read the files from disk if you need exact current contents.`,
@@ -327,6 +329,10 @@ async function buildExecutorPrompt(
   ]
     .filter((item) => item !== '')
     .join('\n');
+}
+
+function stepBoundaryText(planPath: string, stepId: string): string {
+  return `Step boundary: this Codex turn may only produce a receipt for ${stepId}. Do not mark later numbered ${planPath} steps done or active, do not create the next active step, and do not start the next numbered step. If ${planPath} says an earlier or different step must run before ${stepId}, stop and report the plan mismatch in the result JSON instead of executing ahead.`;
 }
 
 function workspaceRelativePath(paths: RunPaths, path: string): string {

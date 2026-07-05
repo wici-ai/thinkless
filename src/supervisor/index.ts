@@ -9,7 +9,7 @@ import type { BaselineFile, Checkpoint, CheckpointSnapshot, GoalFile, IterResult
 import { hashFile, iterationSnapshotPath, loadCheckpoint, loadIterationSnapshot, restoreSnapshotRunFiles, saveCheckpoint, saveIterationSnapshot } from './checkpoint.js';
 import { EventWriter } from './events.js';
 import { applyInjections, drainInbox, drainPendingInjectionsById, injectionIds, readPendingInjections } from './inbox.js';
-import { isExecutorPreempted, runExecutorStep, startExecutorStep, type ExecutorProgress } from './executor.js';
+import { ExecutorPreemptedError, isExecutorPreempted, runExecutorStep, startExecutorStep, type ExecutorProgress } from './executor.js';
 import {
   lockEvalScripts,
   runInitialPlanner,
@@ -1999,6 +1999,7 @@ async function runDirectExecutorWithHotReload(input: {
   let checkpoint = input.checkpoint;
   let steerText = input.steerText;
   let lastExecutorSessionWriteAt = 0;
+  let latestUsage: ToolUsageSummary | undefined;
   const executorReset = checkpoint.sessions.executorReset;
   const forceFreshExecutor = Boolean(executorReset && (!executorReset.stepId || executorReset.stepId === input.stepId));
   const controller = await startExecutorStep(input.paths, goal, input.stepId, input.iter, input.config, checkpoint, steerText, input.contextText, {
@@ -2006,6 +2007,7 @@ async function runDirectExecutorWithHotReload(input: {
     freshFallback: forceFreshExecutor,
     onProgress: async (progress) => {
       const now = Date.now();
+      latestUsage = progress.usage;
       await input.events.emit('EXECUTE_PROGRESS', formatExecutorProgress(progress), {
         iter: input.iter,
         step_id: input.stepId,
@@ -2126,12 +2128,15 @@ async function runDirectExecutorWithHotReload(input: {
       });
     } else {
       steerText = update.steerText;
-      await input.events.emit('EXECUTE_STEER_DEFERRED', 'Active Codex turn could not be steered; carrying update into the next turn', {
+      void controller.done.catch(() => undefined);
+      await input.events.emit('EXECUTE_STEER_PREEMPTED', 'Active Codex turn could not be steered; interrupting stale turn before it can advance against old PLAN.md', {
         thread_id: controller.threadId,
         turn_id: controller.turnId,
         mode: 'direct',
         steerText
       }, 'warn');
+      await controller.interrupt();
+      throw new ExecutorPreemptedError('Codex executor preempted because the active app-server turn could not be steered after PLAN.md changed', latestUsage);
     }
   }
 }

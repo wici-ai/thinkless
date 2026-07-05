@@ -22,8 +22,9 @@ const markerFromStatus = (status: PlanStep['status']): string => {
   return ' ';
 };
 
-const CHECKBOX_STEP_RE = /^-\s+\[([ x>!])\]\s+(S\d+)\s+(.+?)(?:\s+<!--.*)?$/;
-const HEADING_STEP_RE = /^(#{2,4}\s+)(S\d+)(?:\s+[—-]\s+|\s+)(.+?)(?:\s+<!--.*)?$/;
+const STEP_ID_PATTERN = 'S\\d+[A-Za-z]*';
+const CHECKBOX_STEP_RE = new RegExp(`^-\\s+\\[([ x>!])\\]\\s+(${STEP_ID_PATTERN})\\s+(.+?)(?:\\s+<!--.*)?$`);
+const HEADING_STEP_RE = new RegExp(`^(#{2,4}\\s+)(${STEP_ID_PATTERN})(?:\\s+[—-]\\s+|\\s+)(.+?)(?:\\s+<!--.*)?$`);
 
 export async function readPlan(paths: RunPaths): Promise<string> {
   if (!(await exists(paths.plan))) return '';
@@ -64,13 +65,13 @@ export async function setPlanStepStatus(paths: RunPaths, stepId: string, status:
   const next = plan
     .split('\n')
     .map((line) => {
-      const checkbox = /^(-\s+\[)([ x>!])(\]\s+)(S\d+)(\s+.+?)(?:\s+<!--.*)?$/.exec(line);
+      const checkbox = new RegExp(`^(-\\s+\\[)([ x>!])(\\]\\s+)(${STEP_ID_PATTERN})(\\s+.+?)(?:\\s+<!--.*)?$`).exec(line);
       const trailer = ` <!-- status:${status}${iter === undefined ? '' : ` iter:${iter}`} -->`;
       if (checkbox) {
         if (checkbox[4] !== stepId) return line;
         return `${checkbox[1]}${marker}${checkbox[3]}${checkbox[4]}${checkbox[5]}${trailer}`;
       }
-      const heading = /^(#{2,4}\s+)(S\d+)(.*?)(?:\s+<!--.*)?$/.exec(line);
+      const heading = new RegExp(`^(#{2,4}\\s+)(${STEP_ID_PATTERN})(.*?)(?:\\s+<!--.*)?$`).exec(line);
       if (!heading || heading[2] !== stepId) return line;
       return `${heading[1]}${heading[2]}${heading[3].replace(/\s+<!--.*?-->\s*$/, '').trimEnd()}${trailer}`;
     })
@@ -89,7 +90,7 @@ export async function applyPlanDiff(paths: RunPaths, diff: { add?: Array<{ after
 
   for (const item of diff.modify ?? []) {
     lines = lines.map((line) => {
-      const match = /^(-\s+\[[ x>!]\]\s+)(S\d+)(\s+)(.+)$/.exec(line);
+      const match = new RegExp(`^(-\\s+\\[[ x>!]\\]\\s+)(${STEP_ID_PATTERN})(\\s+)(.+)$`).exec(line);
       if (!match || match[2] !== item.id) return line;
       return `${match[1]}${match[2]}${match[3]}${item.text}`;
     });
@@ -97,7 +98,7 @@ export async function applyPlanDiff(paths: RunPaths, diff: { add?: Array<{ after
 
   for (const id of diff.obsolete ?? []) {
     lines = lines.map((line) => {
-      const match = /^-\s+\[([ x>!])\]\s+(S\d+)\s+(.+)$/.exec(line);
+      const match = new RegExp(`^-\\s+\\[([ x>!])\\]\\s+(${STEP_ID_PATTERN})\\s+(.+)$`).exec(line);
       if (!match || match[2] !== id || match[1] === 'x') return line;
       return `- [!] ${match[2]} ${match[3]} <!-- status:blocked obsolete:true -->`;
     });

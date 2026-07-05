@@ -5,7 +5,7 @@ import { readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, RunEvent } from '../shared/types.js';
 import { runSupervisor } from '../supervisor/index.js';
-import { parsePlanSteps } from '../supervisor/plan.js';
+import { nextExecutableStep, parsePlanSteps, setPlanStepStatus } from '../supervisor/plan.js';
 import { readOutbox } from '../supervisor/outbox.js';
 import { findNearDuplicateContinuationStep, stepTitleSimilarity } from '../supervisor/stepSimilarity.js';
 
@@ -21,6 +21,9 @@ async function main(): Promise<void> {
     ),
     'distinct continuation steps should pass dedup'
   );
+  const suffixedSteps = parsePlanSteps('# PLAN\n\n- [x] S24 Test MAC support\n- [>] S24B Compare MAC/AQL options <!-- status:active iter:46 -->\n- [ ] S25 Choose carrier\n');
+  assert(suffixedSteps.map((step) => step.id).join(',') === 'S24,S24B,S25', `suffixed plan steps should parse: ${JSON.stringify(suffixedSteps)}`);
+  assert(nextExecutableStep('# PLAN\n\n- [x] S24 Test MAC support\n- [>] S24B Compare MAC/AQL options <!-- status:active iter:46 -->\n- [ ] S25 Choose carrier\n')?.id === 'S24B', 'active suffixed step should be the next executable step');
 
   await installFakeCodex();
   const originalPath = process.env.PATH ?? '';
@@ -34,6 +37,10 @@ async function main(): Promise<void> {
   try {
     await createSampleTarget(target, true);
     const paths = runPaths(target);
+    await writeFile(paths.plan, '# PLAN\n\n- [>] S24B Compare MAC/AQL options\n- [ ] S25 Choose carrier\n');
+    await setPlanStepStatus(paths, 'S24B', 'done', 46);
+    const suffixedUpdatedPlan = await readFile(paths.plan, 'utf8');
+    assert(suffixedUpdatedPlan.includes('- [x] S24B Compare MAC/AQL options <!-- status:done iter:46 -->'), `setPlanStepStatus should update suffixed step ids:\n${suffixedUpdatedPlan}`);
     await writeFile(paths.plan, '# PLAN\n\n- [x] S1 Draft final report <!-- status:done iter:1 -->\n');
 
     const result = await runSupervisor({

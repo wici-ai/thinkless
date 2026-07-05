@@ -65,6 +65,8 @@ async function main(): Promise<void> {
   const secondPrompt = await readFile(join(paths.artifacts, 'iter-2.prompt.txt'), 'utf8');
   assert(secondPrompt.includes('Continue the existing Codex session for this WiCi run.'), 'resume prompt must continue the existing Codex session');
   assert(secondPrompt.includes('Supervisor receipt focus: S2.'), 'resume prompt missing supervisor receipt focus');
+  assert(secondPrompt.includes('Step boundary: this Codex turn may only produce a receipt for S2.'), 'resume prompt must bound Codex to the supervisor focus step');
+  assert(secondPrompt.includes('Do not mark later numbered PLAN.md steps done or active'), 'executor prompt must prevent single-turn advancement across later PLAN.md steps');
   assert(secondPrompt.includes('GOAL.md and PLAN.md have already been updated on disk'), 'resume prompt must tell Codex to re-read updated disk files');
   assert(secondPrompt.includes('New requirement or steering delta to apply now:\nnew operator steering'), 'resume prompt missing steering delta');
   assert(!secondPrompt.includes('Current PLAN.md:'), 'resume prompt should not inline the full PLAN.md');
