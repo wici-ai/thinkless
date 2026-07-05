@@ -75,6 +75,10 @@ const CONTINUATION_STALL_REPLY_PREFIX = 'continuation-stall-';
 const URGENT_ABORT_REASON = 'urgent abort injection';
 const EXECUTOR_MAX_EPOCH_ITERATIONS = envPositiveInt('WICI_EXECUTOR_MAX_EPOCH_ITERATIONS', 12);
 const EXECUTOR_CONTEXT_SOFT_INPUT_TOKENS = envPositiveInt('WICI_EXECUTOR_CONTEXT_SOFT_INPUT_TOKENS', 180_000);
+// Hard ceiling that forces a fresh epoch even if a stale/unmatched executorReset
+// marker is stuck pending (see clearExecutorReset). Without this, a stuck reset
+// silently disables the soft-threshold check below for the rest of the run.
+const EXECUTOR_CONTEXT_HARD_INPUT_TOKENS = envPositiveInt('WICI_EXECUTOR_CONTEXT_HARD_INPUT_TOKENS', EXECUTOR_CONTEXT_SOFT_INPUT_TOKENS * 3);
 const EXECUTOR_DURABLE_PROMPT_SOFT_CHARS = envPositiveInt('WICI_EXECUTOR_DURABLE_PROMPT_SOFT_CHARS', 120_000);
 const EXECUTOR_NO_PROGRESS_FRESH_THRESHOLD = 2;
 const PLANNER_EPOCH_TURNS = 3;
@@ -1527,7 +1531,11 @@ async function continueDirectExhaustedPlan(
     }
   }
   const nextStep = nextExecutableStep(updatedPlan);
-  const continuationStepId = nextStep?.id ?? checkpoint.next_step ?? 'plan_continuation';
+  // No sentinel fallback here: withExecutorContextReset's stepId must be a real
+  // step id or undefined. A fabricated string (e.g. 'plan_continuation') can
+  // never match a real stepId in clearExecutorReset, which would leave the
+  // reset stuck forever and silently disable the epoch-reset safety checks.
+  const continuationStepId = nextStep?.id ?? checkpoint.next_step ?? undefined;
   checkpoint = {
     ...checkpoint,
     sessions: withExecutorContextReset(withPlannerSessionAfterDiff(checkpoint.sessions, diff.sessionId, true), continuationStepId, 'plan_continuation'),
@@ -2343,12 +2351,15 @@ function contextWindowResetSteerText(stepId: string): string {
 }
 
 async function executorFreshEpochReason(paths: ReturnType<typeof runPaths>, checkpoint: Checkpoint, stepId: string): Promise<string | null> {
+  const inputTokens = checkpoint.sessions.executorUsage?.tokens_input;
+  if (inputTokens !== undefined && inputTokens >= EXECUTOR_CONTEXT_HARD_INPUT_TOKENS) {
+    return `context_input_tokens_hard_${inputTokens}`;
+  }
   if (checkpoint.sessions.executorReset) return null;
   if (checkpoint.iter <= 0) return null;
   if ((checkpoint.consecutive_duplicate_direct_rejects ?? 0) >= EXECUTOR_NO_PROGRESS_FRESH_THRESHOLD && checkpoint.next_step === stepId) {
     return 'no_progress_epoch';
   }
-  const inputTokens = checkpoint.sessions.executorUsage?.tokens_input;
   if (inputTokens !== undefined && inputTokens >= EXECUTOR_CONTEXT_SOFT_INPUT_TOKENS) {
     return `context_input_tokens_${inputTokens}`;
   }

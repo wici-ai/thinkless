@@ -1,4 +1,5 @@
 import { appendFile, chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -57,11 +58,27 @@ export async function readJsonLines<T>(path: string): Promise<T[]> {
     .map((line) => JSON.parse(line) as T);
 }
 
+// Streams instead of readFile()-ing the whole file: run logs (events.jsonl,
+// codex-run.jsonl) can grow past V8's ~512MB max string length on long runs,
+// which turns a single readFile into a permanent crash loop on every restart.
 export async function lineCount(path: string): Promise<number> {
   if (!(await exists(path))) return 0;
-  const raw = await readFile(path, 'utf8');
-  if (raw.length === 0) return 0;
-  return raw.endsWith('\n') ? raw.split('\n').length - 1 : raw.split('\n').length;
+  return new Promise((resolve, reject) => {
+    let count = 0;
+    let sawAnyBytes = false;
+    let endedWithNewline = true;
+    const stream = createReadStream(path);
+    stream.on('data', (data: string | Buffer) => {
+      const chunk = typeof data === 'string' ? Buffer.from(data) : data;
+      sawAnyBytes = true;
+      for (let i = 0; i < chunk.length; i += 1) {
+        if (chunk[i] === 0x0a) count += 1;
+      }
+      endedWithNewline = chunk.length === 0 || chunk[chunk.length - 1] === 0x0a;
+    });
+    stream.on('end', () => resolve(sawAnyBytes && !endedWithNewline ? count + 1 : count));
+    stream.on('error', reject);
+  });
 }
 
 export async function truncateJsonLines(path: string, count: number): Promise<void> {
