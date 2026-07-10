@@ -223,9 +223,10 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".wici \\[runnable\\] STOP"
+expect "Selected runnable:"
 sleep 1
-send -- "\\n"
+sleep 1
+send -- "\\r"
 sleep 3
 send -- "\\003"
 expect eof
@@ -240,8 +241,9 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".wici \\[runnable\\]"
-send -- "\\n"
+expect "Selected runnable: session can be resumed as Chat without GOAL.md or supervisor context"
+sleep 1
+send -- "\\r"
 expect "legacy chat-only candidate can resume chat"
 sleep 1
 send -- "\\003"

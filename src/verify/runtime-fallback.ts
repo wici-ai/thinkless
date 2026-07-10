@@ -19,13 +19,13 @@ async function main(): Promise<void> {
 
   const config = await loadConfig('auto');
   assert(config.tools.planner.command === 'codex', `planner should default to codex: ${JSON.stringify(config.tools.planner)}`);
-  assert(config.tools.planner.model === 'gpt-5.5', `planner should use Codex model: ${JSON.stringify(config.tools.planner)}`);
+  assert(config.tools.planner.model === 'gpt-5.6-sol', `planner should use Codex model: ${JSON.stringify(config.tools.planner)}`);
   assert(config.tools.planner.effort === 'xhigh', `planner should default to xhigh: ${JSON.stringify(config.tools.planner)}`);
   assert(config.tools.chat?.command === 'claude', `chat should remain Claude-first: ${JSON.stringify(config.tools.chat)}`);
   assert(config.tools.chat?.effort === 'high', `chat Claude default should remain high: ${JSON.stringify(config.tools.chat)}`);
 
   const selection = defaultRuntimeSelection();
-  assert(formatRuntimeSelection(selection, 'planner').includes('agent=codex model=gpt-5.5 effort=xhigh'), 'TUI planner default should be Codex xhigh');
+  assert(formatRuntimeSelection(selection, 'planner').includes('agent=codex model=gpt-5.6-sol effort=xhigh'), 'TUI planner default should be Codex xhigh');
   const selectedCodexPlanner = parseRuntimeCommand('/agent plan codex', selection)?.next;
   assert(selectedCodexPlanner && formatRuntimeSelection(selectedCodexPlanner, 'planner').includes('effort=xhigh'), 'Selecting Codex planner should use xhigh by default');
 
@@ -33,11 +33,11 @@ async function main(): Promise<void> {
     target,
     prompt: 'plan',
     outputLastMessage: '.thinkless/artifacts/planner-codex.md',
-    model: 'gpt-5.5',
+    model: 'gpt-5.6-sol',
     effort: 'xhigh'
   });
   assert(codexPlannerArgs[0] === 'exec', 'Codex planner should use codex exec');
-  assert(codexPlannerArgs[codexPlannerArgs.indexOf('--model') + 1] === 'gpt-5.5', 'Codex planner must receive gpt-5.5');
+  assert(codexPlannerArgs[codexPlannerArgs.indexOf('--model') + 1] === 'gpt-5.6-sol', 'Codex planner must receive gpt-5.6-sol');
   assert(codexPlannerArgs.includes('model_reasoning_effort="xhigh"'), 'Codex planner must receive xhigh effort');
   assert(codexPlannerArgs.at(-1) === '-' && codexPlannerArgs.stdin === 'plan', 'Codex planner must pass prompt over stdin');
 
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line) as { args: string[]; prompt: string });
-  assert(argsLog[0]?.args.includes('--model') && argsLog[0].args[argsLog[0].args.indexOf('--model') + 1] === 'gpt-5.5', 'Chat fallback must use Codex model');
+  assert(argsLog[0]?.args.includes('--model') && argsLog[0].args[argsLog[0].args.indexOf('--model') + 1] === 'gpt-5.6-sol', 'Chat fallback must use Codex model');
   assert(argsLog[0]?.args.includes('model_reasoning_effort="medium"'), 'Chat fallback must use Codex medium effort');
   assert(argsLog[0]?.args.at(-1) === '-' && argsLog[0].prompt.includes('summarize status'), 'Chat fallback must pass Codex prompt over stdin');
 

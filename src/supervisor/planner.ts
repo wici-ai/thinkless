@@ -6,7 +6,7 @@ import { atomicWriteFile, atomicWriteJson, exists, makeReadOnly, makeWritable } 
 import { commandExists } from '../shared/commands.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { EvalSha256, GoalFile, ToolInvocationResult, WiCiConfig } from '../shared/types.js';
-import { runtimeAgentFromCommand } from '../shared/runtime.js';
+import { runtimeAgentFromCommand, runtimeModelForAgent } from '../shared/runtime.js';
 import { applyPlanDiff } from './plan.js';
 import { type PlannerBenchmark, writeBenchmarkManifest } from './benchmark.js';
 import { appendSafety, formatSafetyForPrompt } from './safety.js';
@@ -618,7 +618,7 @@ function buildCodexPlanDiffPrompt(input: {
 }
 
 function codexPlannerModel(config: WiCiConfig): string {
-  return config.tools.planner.model?.trim() || 'gpt-5.5';
+  return config.tools.planner.model?.trim() || runtimeModelForAgent('codex');
 }
 
 function codexPlannerEffort(config: WiCiConfig): string {

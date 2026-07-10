@@ -18,6 +18,7 @@ async function main(): Promise<void> {
     curriculumSource,
     releaseTagSource,
     releaseTagVerifier,
+    releaseWorkflow,
     schemas
   ] = await Promise.all([
     readFile('package.json', 'utf8'),
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
     readFile('src/supervisor/curriculum.ts', 'utf8'),
     readFile('src/release/tag.ts', 'utf8'),
     readFile('src/verify/release-tag.ts', 'utf8'),
+    readFile('.github/workflows/public-release.yml', 'utf8'),
     readdir('schemas')
   ]);
   const pkg = JSON.parse(packageRaw) as { scripts: Record<string, string> };
@@ -151,11 +153,15 @@ async function main(): Promise<void> {
   assert(
     docsText.includes('Press `Ctrl+R` to open the selector') &&
       docsText.includes('bottom Chat input is paused while the selector is open') &&
-      docsText.includes('model is fixed by that agent') &&
+      docsText.includes('`gpt-5.6-sol`') &&
+      docsText.includes('`gpt-5.6-terra`') &&
+      docsText.includes('`gpt-5.6-luna`') &&
       docsText.includes('/agent chat claude') &&
+      docsText.includes('/model plan gpt-5.6-terra') &&
       docsText.includes('/effort execution high') &&
       docsText.includes('Claude effort options are `high`, `xhigh`, `max`, and `ultracode`') &&
-      docsText.includes('Codex effort options are `fast`, `medium`, `high`, and `xhigh`') &&
+      docsText.includes('GPT-5.6 Sol and Terra support `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`') &&
+      docsText.includes('GPT-5.6 Luna supports the same list except `ultra`') &&
       docsText.includes('model_reasoning_effort'),
     'docs should document per-workspace runtime selection commands'
   );
@@ -166,7 +172,7 @@ async function main(): Promise<void> {
       docsText.includes('`--mouse-reporting`'),
     'docs should document explicit select/scroll pointer modes'
   );
-  assert(docsText.includes('WICI_PLANNER_EFFORT') && docsText.includes('WICI_EXECUTOR_AGENT') && docsText.includes('WICI_EXECUTOR_EFFORT'), 'docs should document runtime environment overrides');
+  assert(docsText.includes('WICI_PLANNER_EFFORT') && docsText.includes('WICI_EXECUTOR_AGENT') && docsText.includes('WICI_EXECUTOR_MODEL') && docsText.includes('WICI_EXECUTOR_EFFORT'), 'docs should document runtime environment overrides');
   assert(docsText.includes('npm run verify:release-tag'), 'docs should document the guarded release tag verifier');
   assert(docsText.includes('planner-*.stdout.jsonl') && docsText.includes('.wici/codex-run.jsonl'), 'docs should document planner and Codex transcript paths');
   assert(docsText.includes('git clone git@github.com:wici-ai/thinkless.git'), 'docs should document a source checkout deployment path');
@@ -194,7 +200,8 @@ async function main(): Promise<void> {
       docsText.includes('curl -fsSL https://github.com/wici-ai/thinkless/releases/latest/download/install.sh | bash') &&
       docsText.includes('irm https://github.com/wici-ai/thinkless/releases/latest/download/install.ps1 | iex') &&
       docsText.includes('THINKLESS_TARBALL_URL') &&
-      docsText.includes('workflow is manually triggered') &&
+      docsText.includes('workflow runs automatically when a `v*.*.*` tag is pushed') &&
+      docsText.includes('rerun manually to repair release assets') &&
       docsText.includes('Publish public install release') &&
       docsText.includes('From a clean machine') &&
       docsText.includes('scripts/postinstall.mjs') &&
@@ -314,6 +321,18 @@ async function main(): Promise<void> {
     docsText.includes('npm run release:tag -- 0.1.0') && docsText.includes('It never pushes') && docsText.includes('If preflight fails'),
     'docs should document the guarded release tag command'
   );
+  assert(
+    releaseWorkflow.includes("- 'v*.*.*'") &&
+      releaseWorkflow.includes('gh release upload') &&
+      releaseWorkflow.includes('--clobber') &&
+      releaseWorkflow.includes('--verify-tag') &&
+      releaseWorkflow.includes('release/thinkless.tgz') &&
+      releaseWorkflow.includes('release/install.sh') &&
+      releaseWorkflow.includes('release/install.ps1') &&
+      !releaseWorkflow.includes('gh release delete') &&
+      !releaseWorkflow.includes('--cleanup-tag'),
+    'release workflow must auto-publish all install assets without deleting the source tag'
+  );
   assert(docsText.includes('docs/v1-completion-audit.md'), 'docs should link the V1 completion audit');
   assert(completionAudit.includes('Release preflight runs the automated V1 core gate'), 'completion audit should record the automated release gate');
   assert(completionAudit.includes('npm run verify:v1-core'), 'completion audit should list core verification commands');
@@ -323,7 +342,7 @@ async function main(): Promise<void> {
       completionAudit.includes('degraded_plan_request_starts_planner'),
     'completion audit should include blank-run Chat-agent gating evidence'
   );
-  assert(completionAudit.includes('agent and effort selection') && completionAudit.includes('model fixed by agent'), 'completion audit should include runtime selection evidence');
+  assert(completionAudit.includes('agent, model, and effort selection') && completionAudit.includes('GPT-5.6 Sol/Terra/Luna constraints'), 'completion audit should include runtime selection evidence');
   assert(completionAudit.includes('npm run verify:tui-chat-pty') && completionAudit.includes('pty_chat_first'), 'completion audit should include real PTY Chat-first verification evidence');
   assert(completionAudit.includes('npm run verify:tui-real-fake-chat') && completionAudit.includes('pty_chat_first_real_mode_fake_clis'), 'completion audit should include real-mode fake CLI Chat-first evidence');
   assert(

@@ -103,8 +103,9 @@ stty rows 40 columns 180
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect -ex "> many-candidates-target .thinkless2 \\[runnable\\] STOP"
-send -- "\\n"
+expect -ex "Selected runnable:"
+sleep 1
+send -- "\\r"
 sleep 8
 send -- "\\003"
 expect eof

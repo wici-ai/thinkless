@@ -59,7 +59,7 @@ npx tsx src/cli.tsx run \
 
 TUI controls:
 
-- `Ctrl+R` selects agent and effort for the active pane.
+- `Ctrl+R` selects agent, model, and effort for the active pane.
 - `Ctrl+O` toggles terminal pointer mode between text selection and app scrolling.
 - `/resume` opens the in-TUI resume selector.
 - `/dictate` inserts text from the configured local dictation command.
@@ -153,7 +153,7 @@ npm run verify:resume-rerunnable
 
 ## Release Gate
 
-Every release tag must pass the automated V1 core preflight. Use `npm run release:tag -- <version>` so Thinkless runs `npm run release:preflight` before creating an annotated local tag. The guarded tag command never pushes commits or tags.
+Every release tag must pass the automated V1 core preflight. Use `npm run release:tag -- <version>` so Thinkless runs `npm run release:preflight` before creating an annotated local tag. The guarded tag command never pushes commits or tags; pushing a `v*.*.*` tag triggers the release workflow that attaches `thinkless.tgz`, `install.sh`, and `install.ps1`.
 
 ## Contributing
 

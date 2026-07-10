@@ -1,6 +1,9 @@
 name: Publish public install release
 
 on:
+  push:
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
@@ -13,11 +16,13 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          ref: ${{ inputs.version }}
+          ref: ${{ env.VERSION }}
 
       - uses: actions/setup-node@v4
         with:
@@ -38,13 +43,25 @@ jobs:
       - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
         run: |
-          gh release delete "$VERSION" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create "$VERSION" \
-            release/thinkless.tgz \
-            release/install.sh \
-            release/install.ps1 \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Thinkless $VERSION" \
-            --notes "Thinkless install release assets built from the selected source tag."
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$VERSION" \
+              release/thinkless.tgz \
+              release/install.sh \
+              release/install.ps1 \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Thinkless $VERSION" \
+              --notes "Thinkless install release assets built from $VERSION."
+          else
+            gh release create "$VERSION" \
+              release/thinkless.tgz \
+              release/install.sh \
+              release/install.ps1 \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "Thinkless $VERSION" \
+              --notes "Thinkless install release assets built from $VERSION."
+          fi

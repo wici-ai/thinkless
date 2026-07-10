@@ -6,7 +6,7 @@ import { applyRuntimeSelection, loadConfig } from '../shared/config.js';
 import { clearChatSession, readChatSession, writeChatSession } from '../shared/chatSession.js';
 import { promptPath, type RunPaths } from '../shared/paths.js';
 import type { ChatLogEntry, RunEvent, RuntimeSelection, ToolMode } from '../shared/types.js';
-import { runtimeAgentFromCommand } from '../shared/runtime.js';
+import { runtimeAgentFromCommand, runtimeModelForAgent } from '../shared/runtime.js';
 import { INITIAL_GOAL_REQUIRED_MESSAGE } from '../shared/messages.js';
 import { appendSafety, formatChatSafetyForPrompt } from './safety.js';
 import { isClaudeEnvelope, parseClaudeJsonOutput } from './claudeOutput.js';
@@ -130,7 +130,7 @@ async function runCodexChatFallback(ctx: ChatTurnContext, config: Awaited<Return
   const userPrompt = `${buildChatPrompt(ctx)}\n\nClaude Chat was unavailable; answer through Codex Chat fallback. Claude failure: ${reason}`;
   const sessionId = await readChatSession(ctx.paths, 'codex');
   return runCodexChatTurn(ctx, command, {
-    model: 'gpt-5.5',
+    model: runtimeModelForAgent('codex'),
     effort: 'medium',
     systemPrompt,
     safetyText,

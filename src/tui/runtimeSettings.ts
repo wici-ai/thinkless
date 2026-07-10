@@ -2,17 +2,20 @@ import {
   RUNTIME_AGENTS,
   defaultEffortForAgent,
   effortOptionsForAgent,
+  isModelForAgent,
   isRuntimeAgent,
   normalizeEffortForAgent,
+  normalizeModelForAgent,
+  modelOptionsForAgent,
   runtimeAgentFromCommand,
   runtimeModelForAgent,
   type RuntimeAgent
 } from '../shared/runtime.js';
 import type { AgentRuntimeSelection, RuntimePane, RuntimeSelection } from '../shared/types.js';
 
-export type RuntimeField = 'agent' | 'effort';
+export type RuntimeField = 'agent' | 'model' | 'effort';
 
-export const RUNTIME_FIELDS: RuntimeField[] = ['agent', 'effort'];
+export const RUNTIME_FIELDS: RuntimeField[] = ['agent', 'model', 'effort'];
 
 const DEFAULT_AGENTS: Record<RuntimePane, RuntimeAgent> = {
   chat: 'claude',
@@ -47,11 +50,12 @@ export function formatRuntimeSelection(selection: RuntimeSelection, pane: Runtim
 
 export function formatRuntimeSelectorLine(selection: RuntimeSelection, pane: RuntimePane, activeField: RuntimeField | null): string {
   const runtime = normalizedRuntime(selection, pane);
+  if (!activeField) return `${runtimePaneLabel(pane)} ${runtime.agent}/${runtime.model}/${runtime.effort}`;
   const fields = RUNTIME_FIELDS.map((field) => {
-    const text = `${field}=${runtime[field]}`;
-    return activeField === field ? `[${text}]` : text;
+    const value = runtime[field];
+    return activeField === field ? `[${field}=${value}]` : value;
   });
-  return `${runtimePaneLabel(pane)} ${fields.join('  ')}  model=${runtime.model}`;
+  return `${runtimePaneLabel(pane)} ${fields.join('  ')}`;
 }
 
 export function nextRuntimeField(field: RuntimeField): RuntimeField {
@@ -83,13 +87,6 @@ export function parseRuntimeCommand(text: string, current: RuntimeSelection): { 
       status: `unknown runtime pane: ${match[2]}`
     };
   }
-  if (command === 'model') {
-    return {
-      next: current,
-      status: 'model is fixed by agent: claude=claude-opus-4-8 codex=gpt-5.5'
-    };
-  }
-
   const field = command as RuntimeField;
   const rawValue = match[3].trim().toLowerCase();
   if (!rawValue) {
@@ -99,17 +96,24 @@ export function parseRuntimeCommand(text: string, current: RuntimeSelection): { 
     };
   }
 
-  const currentAgent = normalizedRuntime(current, pane).agent as RuntimeAgent;
+  const currentRuntime = normalizedRuntime(current, pane);
+  const currentAgent = currentRuntime.agent as RuntimeAgent;
   if (field === 'agent' && !isRuntimeAgent(rawValue)) {
     return {
       next: current,
       status: `unknown agent: ${rawValue}`
     };
   }
-  if (field === 'effort' && rawValue !== 'default' && !effortOptionsForAgent(currentAgent).includes(rawValue)) {
+  if (field === 'model' && rawValue !== 'default' && !isModelForAgent(currentAgent, rawValue)) {
     return {
       next: current,
-      status: `unknown effort for ${currentAgent}: ${rawValue}`
+      status: `unknown model for ${currentAgent}: ${rawValue}`
+    };
+  }
+  if (field === 'effort' && rawValue !== 'default' && !effortOptionsForAgent(currentAgent, currentRuntime.model).includes(rawValue)) {
+    return {
+      next: current,
+      status: `unknown effort for ${currentRuntime.model}: ${rawValue}`
     };
   }
 
@@ -140,34 +144,49 @@ function updateRuntimeSelection(selection: RuntimeSelection, pane: RuntimePane, 
 
   const current = normalizedRuntime(selection, pane);
   const agent = current.agent as RuntimeAgent;
+  if (field === 'model') {
+    const model = normalizeModelForAgent(agent, value);
+    return {
+      ...selection,
+      [pane]: {
+        ...current,
+        model,
+        effort: normalizeEffortForAgent(agent, current.effort, model)
+      }
+    };
+  }
   return {
     ...selection,
     [pane]: {
       ...current,
-      model: runtimeModelForAgent(agent),
-      effort: normalizeEffortForAgent(agent, value)
+      effort: normalizeEffortForAgent(agent, value, current.model)
     }
   };
 }
 
 function runtimeValueOptions(selection: RuntimeSelection, pane: RuntimePane, field: RuntimeField): string[] {
-  const currentAgent = normalizedRuntime(selection, pane).agent as RuntimeAgent;
-  return field === 'agent' ? RUNTIME_AGENTS : effortOptionsForAgent(currentAgent);
+  const current = normalizedRuntime(selection, pane);
+  const currentAgent = current.agent as RuntimeAgent;
+  if (field === 'agent') return RUNTIME_AGENTS;
+  if (field === 'model') return modelOptionsForAgent(currentAgent);
+  return effortOptionsForAgent(currentAgent, current.model);
 }
 
 function normalizedRuntime(selection: RuntimeSelection, pane: RuntimePane): Required<AgentRuntimeSelection> {
   const runtime = selection[pane] ?? {};
   const agent = isRuntimeAgent(runtime.agent) ? runtime.agent : runtimeAgentFromCommand(runtime.agent, DEFAULT_AGENTS[pane]);
+  const model = normalizeModelForAgent(agent, runtime.model);
   return {
     agent,
-    model: runtimeModelForAgent(agent),
-    effort: runtime.effort ? normalizeEffortForAgent(agent, runtime.effort) : runtimeDefaultsForPane(pane, agent).effort
+    model,
+    effort: runtime.effort ? normalizeEffortForAgent(agent, runtime.effort, model) : runtimeDefaultsForPane(pane, agent).effort
   };
 }
 
 function normalizeRuntimeValue(pane: RuntimePane, field: RuntimeField, raw: string, currentAgent: RuntimeAgent): string {
   const normalized = raw.trim();
   if (field === 'agent' && normalized === 'default') return DEFAULT_AGENTS[pane];
+  if (field === 'model' && normalized === 'default') return runtimeModelForAgent(currentAgent);
   if (field === 'effort' && normalized === 'default') return defaultEffortForAgent(currentAgent);
   return normalized;
 }

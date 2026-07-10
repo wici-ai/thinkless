@@ -40,12 +40,12 @@ async function main(): Promise<void> {
       2
     )}\n`
   );
-  await writeFile(paths.runtimeSelection, `${JSON.stringify({ chat: { agent: 'codex', model: 'gpt-5.5', effort: 'high' } }, null, 2)}\n`);
+  await writeFile(paths.runtimeSelection, `${JSON.stringify({ chat: { agent: 'codex', model: 'gpt-5.6-terra', effort: 'high' } }, null, 2)}\n`);
   const reopenedOutput = await runDemo([]);
   const session = await readFile(paths.chatSession, 'utf8');
   assert(session.includes('preserve-demo-session'), 'demo without --fresh must preserve existing .wici chat session context');
   const reopenedUi = stripAnsi(reopenedOutput);
-  assert(reopenedUi.includes('CHAT agent=codex') && reopenedUi.includes('effort=high') && reopenedUi.includes('model=gpt-5.5'), `demo without --fresh must restore persisted Chat runtime:\n${reopenedUi}`);
+  assert(reopenedUi.includes('CHAT codex/gpt-5.6-terra/high'), `demo without --fresh must restore persisted Chat runtime:\n${reopenedUi}`);
 
   console.log(
     JSON.stringify(
@@ -79,7 +79,7 @@ async function runCli(args: string[]): Promise<string> {
     ['--import', 'tsx', 'src/cli.tsx', ...args],
     {
       cwd: resolve('.'),
-      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1', WICI_TUI_RENDER_ONCE_DELAY_MS: '700' },
+      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', THINKLESS_SELF_UPDATE: '0', WICI_TUI_RENDER_ONCE: '1', WICI_TUI_RENDER_ONCE_DELAY_MS: '700' },
       stdio: ['ignore', 'pipe', 'pipe']
     }
   );

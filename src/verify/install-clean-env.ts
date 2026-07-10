@@ -76,7 +76,7 @@ async function main(): Promise<void> {
     );
     const ui = stripAnsi(bare.all ?? '');
     assert(bare.exitCode === 0, `bare thinkless failed in clean shell with ${bare.exitCode}:\n${ui}`);
-    assert(ui.includes('CHAT agent=claude') && ui.includes('effort=high'), `bare thinkless did not load default chat runtime params:\n${ui}`);
+    assert(ui.includes('CHAT claude/claude-opus-4-8/high'), `bare thinkless did not load default chat runtime params:\n${ui}`);
     assert(ui.includes('Current goal: none'), `bare thinkless did not render the fresh default TUI state:\n${ui}`);
     assert(existsSync(join(workspace, '.thinkless1')), 'bare thinkless did not allocate .thinkless1/ in the current git root');
     assert(!existsSync(join(workspace, '.thinkless')), 'bare thinkless should not allocate the default .thinkless/ directory');

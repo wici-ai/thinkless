@@ -101,11 +101,11 @@ async function main(): Promise<void> {
   assert(files.chat.includes('writeUpdate: !blankRun') && files.chat.includes('onPlanningRequested'), 'ChatPane must let the Chat agent decide when blank-run input starts planning');
   assert(files.chatAgent.includes('isLikelyContextGatheringOnly') && files.chatAgent.includes('isLikelyPlanningRequest'), 'degraded Chat must distinguish code-reading requests from concrete planning requests');
   assert(
-    files.runtimeSettings.includes('formatRuntimeSelectorLine') &&
+      files.runtimeSettings.includes('formatRuntimeSelectorLine') &&
       files.runtimeSettings.includes('cycleRuntimeValue') &&
-      files.runtimeSettings.includes("RuntimeField = 'agent' | 'effort'") &&
-      files.runtimeSettings.includes('runtimeModelForAgent'),
-    'TUI must support visible agent/effort selection while deriving fixed models from claude/codex'
+      files.runtimeSettings.includes("RuntimeField = 'agent' | 'model' | 'effort'") &&
+      files.runtimeSettings.includes('modelOptionsForAgent'),
+    'TUI must support visible agent/model/effort selection for claude/codex'
   );
   assert(!files.app.includes('state.baseline ||'), 'TUI must not let a historical baseline.json alone block fresh Chat-first intake');
   assert(files.tuiChat.includes('goal_source_not_retroactive'), 'TUI intake verifier must prove goal_source is not written retroactively');

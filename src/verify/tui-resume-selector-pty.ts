@@ -104,8 +104,8 @@ set timeout 25
 spawn env FORCE_COLOR=0 TERM=xterm-256color node --import tsx src/cli.tsx tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect "\\[runnable\\] STOP"
 expect "Selected runnable: stopped run can be explicitly resumed"
+sleep 1
 send -- "\\r"
 sleep 3
 send -- "\\003"

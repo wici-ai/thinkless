@@ -141,7 +141,7 @@ async function verifyTuiRender(): Promise<{ rendered: true }> {
     ['--import', 'tsx', 'src/cli.tsx', 'tui', '--target', target, '--mode', 'stub', '--no-supervisor', '--no-fullscreen'],
     {
       cwd: resolve('.'),
-      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', WICI_TUI_RENDER_ONCE: '1' },
+      env: { ...process.env, FORCE_COLOR: '0', TERM: 'xterm-256color', THINKLESS_SELF_UPDATE: '0', WICI_TUI_RENDER_ONCE: '1' },
       stdio: ['ignore', 'pipe', 'pipe']
     }
   );

@@ -5,8 +5,8 @@ import {
   defaultEffortForAgent,
   isRuntimeAgent,
   normalizeEffortForAgent,
+  normalizeModelForAgent,
   runtimeAgentFromCommand,
-  runtimeModelForAgent,
   type RuntimeAgent
 } from './runtime.js';
 
@@ -100,10 +100,11 @@ function normalizeRuntimeSelection(selection: RuntimeSelection): RuntimeSelectio
 function normalizeAgentRuntime(runtime: AgentRuntimeSelection | undefined, fallback: RuntimeAgent): Required<AgentRuntimeSelection> {
   const selected = runtime?.agent?.trim();
   const agent = isRuntimeAgent(selected) ? selected : runtimeAgentFromCommand(selected, fallback);
+  const model = normalizeModelForAgent(agent, runtime?.model);
   return {
     agent,
-    model: runtimeModelForAgent(agent),
-    effort: normalizeEffortForAgent(agent, runtime?.effort ?? defaultEffortForAgent(agent))
+    model,
+    effort: normalizeEffortForAgent(agent, runtime?.effort ?? defaultEffortForAgent(agent), model)
   };
 }
 

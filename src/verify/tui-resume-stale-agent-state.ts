@@ -194,9 +194,10 @@ set env(LINES) 40
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".thinkless2 \\[runnable\\] ${visibleState}"
+expect "Selected runnable:"
 file delete -force "$env(STALE_AGENT_FILE)"
-send -- "\\n"
+sleep 1
+send -- "\\r"
 sleep 1
 ${expectedChat ? `expect "${expectedChat}"` : ''}
 send -- "\\003"

@@ -54,7 +54,8 @@ send -- "\\033\\[B"
 sleep 1
 send -- "\\033\\[A"
 sleep 1
-send -- "\\n"
+sleep 1
+send -- "\\r"
 sleep 1
 send -- "\\033"
 sleep 1

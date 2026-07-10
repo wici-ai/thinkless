@@ -7,8 +7,8 @@ import {
   defaultEffortForAgent,
   isRuntimeAgent,
   normalizeEffortForAgent,
+  normalizeModelForAgent,
   runtimeAgentFromCommand,
-  runtimeModelForAgent,
   type RuntimeAgent
 } from './runtime.js';
 
@@ -76,7 +76,7 @@ export function applyRuntimeSelection(config: WiCiConfig, runtime?: RuntimeSelec
 }
 
 function applyAgentRuntime(target: { command?: string; model?: string; effort?: string }, runtime: AgentRuntimeSelection | undefined, fallback: RuntimeAgent, defaultEffort?: string): void {
-  if (!runtime?.agent && !runtime?.effort) return;
+  if (!runtime?.agent && !runtime?.model && !runtime?.effort) return;
   const selectedAgent = normalizeDefault(runtime?.agent);
   const currentAgent = runtimeAgentFromCommand(target.command, fallback);
   const agent = isRuntimeAgent(selectedAgent) ? selectedAgent : currentAgent;
@@ -84,16 +84,17 @@ function applyAgentRuntime(target: { command?: string; model?: string; effort?: 
     throw new Error(`Unknown runtime agent: ${selectedAgent}. Expected claude or codex.`);
   }
   if (selectedAgent) target.command = agent;
-  target.model = runtimeModelForAgent(agent);
-  target.effort = normalizeEffortForAgent(agent, runtime?.effort ?? target.effort ?? (agent === 'codex' ? defaultEffort : undefined));
+  target.model = normalizeModelForAgent(agent, runtime?.model ?? target.model);
+  target.effort = normalizeEffortForAgent(agent, runtime?.effort ?? target.effort ?? (agent === 'codex' ? defaultEffort : undefined), target.model);
 }
 
 function envRuntime(prefix: 'WICI_CHAT' | 'WICI_PLANNER' | 'WICI_EXECUTOR'): AgentRuntimeSelection | undefined {
   const runtime: AgentRuntimeSelection = {
     agent: process.env[`${prefix}_AGENT`] ?? process.env[`${prefix}_COMMAND`],
+    model: process.env[`${prefix}_MODEL`],
     effort: process.env[`${prefix}_EFFORT`]
   };
-  return runtime.agent || runtime.effort ? runtime : undefined;
+  return runtime.agent || runtime.model || runtime.effort ? runtime : undefined;
 }
 
 function normalizeDefault(value: string | undefined): string | undefined {
@@ -105,8 +106,8 @@ function normalizeDefault(value: string | undefined): string | undefined {
 function normalizeAgentTool(target: { command?: string; model?: string; effort?: string }, fallback: RuntimeAgent, defaultEffort?: string): void {
   const agent = runtimeAgentFromCommand(target.command, fallback);
   target.command = target.command?.trim() || agent;
-  target.model = runtimeModelForAgent(agent);
-  target.effort = normalizeEffortForAgent(agent, target.effort ?? (agent === 'codex' ? defaultEffort : undefined) ?? defaultEffortForAgent(agent));
+  target.model = normalizeModelForAgent(agent, target.model);
+  target.effort = normalizeEffortForAgent(agent, target.effort ?? (agent === 'codex' ? defaultEffort : undefined) ?? defaultEffortForAgent(agent), target.model);
 }
 
 export async function readTextIfExists(path: string): Promise<string> {

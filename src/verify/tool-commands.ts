@@ -128,7 +128,7 @@ async function main(): Promise<void> {
   assert(codexChatArgs[0] === 'exec' && codexChatArgs.includes('--json') && codexChatArgs.includes('--output-last-message'), 'Codex Chat must use codex exec JSON output, not Claude print args');
   assert(codexChatArgs.at(-1) === '-' && codexChatArgs.stdin === 'chat with read-only context', `Codex Chat prompt must be passed over stdin to avoid Windows ENAMETOOLONG: ${JSON.stringify(codexChatArgs)}`);
   assert(!codexChatArgs.includes('chat with read-only context'), 'fresh Codex Chat prompt text must not be carried in argv on Windows');
-  assert(codexChatArgs[codexChatArgs.indexOf('--model') + 1] === 'gpt-5.5', 'Codex Chat must receive the fixed Codex model');
+  assert(codexChatArgs[codexChatArgs.indexOf('--model') + 1] === 'gpt-5.5', 'Codex Chat must receive the selected Codex model');
   assert(codexChatArgs.includes('-c') && codexChatArgs.includes('model_reasoning_effort="medium"'), 'Codex Chat must map effort to Codex config override');
   assert(!chatArgs.includes('--permission-mode') || chatArgs[chatArgs.indexOf('--permission-mode') + 1] !== 'plan', 'Chat agent must not be forced into Claude plan mode');
   assert(codexChatArgs.includes('--dangerously-bypass-approvals-and-sandbox'), 'Codex Chat must run with normal direct-work permissions instead of approval-gated sandboxing');
@@ -349,14 +349,25 @@ async function main(): Promise<void> {
   const loadedConfig = await loadConfig('stub');
   assert(loadedConfig.tools.chat?.command === 'claude', 'default config should expose Chat agent command');
   assert(loadedConfig.tools.chat?.model === 'claude-opus-4-8' && loadedConfig.tools.chat?.effort === 'high', 'Claude-backed Chat pane must default to claude-opus-4-8 high');
-  assert(loadedConfig.tools.planner.command === 'codex' && loadedConfig.tools.planner.model === 'gpt-5.5' && loadedConfig.tools.planner.effort === 'xhigh', 'Codex-backed planner must default to gpt-5.5 xhigh');
-  assert(loadedConfig.tools.executor.model === 'gpt-5.5' && loadedConfig.tools.executor.effort === 'medium', 'Codex-backed executor must force gpt-5.5 medium by default');
+  assert(loadedConfig.tools.planner.command === 'codex' && loadedConfig.tools.planner.model === 'gpt-5.6-sol' && loadedConfig.tools.planner.effort === 'xhigh', 'Codex-backed planner must default to gpt-5.6-sol xhigh');
+  assert(loadedConfig.tools.executor.model === 'gpt-5.6-sol' && loadedConfig.tools.executor.effort === 'medium', 'Codex-backed executor must default to gpt-5.6-sol medium');
   const switchedConfig = await loadConfig('stub');
-  applyRuntimeSelection(switchedConfig, { planner: { agent: 'codex', effort: 'fast' }, executor: { agent: 'claude', effort: 'ultracode' } });
+  applyRuntimeSelection(switchedConfig, { planner: { agent: 'codex', model: 'gpt-5.6-terra', effort: 'ultra' }, executor: { agent: 'claude', effort: 'ultracode' } });
   assert(switchedConfig.tools.planner.command === 'codex', 'runtime agent switch must allow planner pane to select codex');
-  assert(switchedConfig.tools.planner.model === 'gpt-5.5' && switchedConfig.tools.planner.effort === 'fast', 'codex agent selection must force gpt-5.5 and codex effort options');
+  assert(switchedConfig.tools.planner.model === 'gpt-5.6-terra' && switchedConfig.tools.planner.effort === 'ultra', 'codex runtime selection must preserve GPT-5.6 model and supported effort');
   assert(switchedConfig.tools.executor.command === 'claude', 'runtime agent switch must allow execution pane to select claude');
   assert(switchedConfig.tools.executor.model === 'claude-opus-4-8' && switchedConfig.tools.executor.effort === 'ultracode', 'claude agent selection must force claude-opus-4-8 and claude effort options');
+  const previousExecutorModel = process.env.WICI_EXECUTOR_MODEL;
+  const previousExecutorEffort = process.env.WICI_EXECUTOR_EFFORT;
+  try {
+    process.env.WICI_EXECUTOR_MODEL = 'gpt-5.6-luna';
+    process.env.WICI_EXECUTOR_EFFORT = 'max';
+    const envConfig = await loadConfig('stub');
+    assert(envConfig.tools.executor.model === 'gpt-5.6-luna' && envConfig.tools.executor.effort === 'max', 'environment runtime selection must preserve GPT-5.6 model and supported effort');
+  } finally {
+    restoreEnv('WICI_EXECUTOR_MODEL', previousExecutorModel);
+    restoreEnv('WICI_EXECUTOR_EFFORT', previousExecutorEffort);
+  }
   assert(runtimeAgentFromCommand('C:\\tmp\\claude.cmd', 'codex') === 'claude', 'runtime command detection must recognize Windows Claude shim paths');
   assert(runtimeAgentFromCommand('/tmp/codex', 'claude') === 'codex', 'runtime command detection must recognize POSIX Codex paths');
   assert(loadedConfig.budget.max_iters === 0, 'default config max_iters=0 should disable WiCi iteration hard caps for real runs');
@@ -397,7 +408,7 @@ async function main(): Promise<void> {
         transient_retry_detection: true,
         no_markdown_benchmark_inference: true,
         codex_output_schema_strict: true,
-        forced_agent_models: true,
+        selectable_agent_models: true,
         default_iteration_budget_unbounded: true,
         codex_planner_no_claude_args_after_failure: true,
         planner_abort: true,
@@ -730,6 +741,11 @@ console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_messag
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }
 
 function assertThrows(fn: () => unknown, message: string): void {

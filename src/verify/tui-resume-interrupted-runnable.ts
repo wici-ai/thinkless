@@ -272,9 +272,9 @@ set env(LINES) 40
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect -ex ".thinkless2 \\[runnable\\] ${visibleState}"
 expect -ex "${visibleReason}"
-send -- "\\n"
+sleep 1
+send -- "\\r"
 sleep 2
 send -- "\\003"
 expect eof

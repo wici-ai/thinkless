@@ -129,13 +129,14 @@ async function main(): Promise<void> {
   assert(windowsInstaller.includes('THINKLESS_WINDOWS_INSTALL_DEPS') && windowsInstaller.includes('THINKLESS_AUTH_ONBOARDING') && windowsInstaller.includes('codex login') && windowsInstaller.includes('gh auth login') && windowsInstaller.includes('claude'), 'Windows installer must document dependency and auth controls');
   assert(windowsInstaller.includes('SetEnvironmentVariable') && windowsInstaller.includes("verified node, npm, git, thinkless, codex, claude, and gh on PATH"), 'Windows installer must persist PATH and verify required commands');
   assert(docsWindowsInstaller === windowsInstaller, 'GitHub Pages docs/install.ps1 must stay identical to the Windows installer script');
-  assert(publicReleaseWorkflow.includes('workflow_dispatch:'), 'public release workflow must be manually triggered');
-  assert(!publicReleaseWorkflow.includes('push:') && !publicReleaseWorkflow.includes('pull_request:'), 'public release workflow must not run on pushes or pull requests');
+  assert(publicReleaseWorkflow.includes('workflow_dispatch:'), 'public release workflow must support manual asset repair');
+  assert(publicReleaseWorkflow.includes('push:') && publicReleaseWorkflow.includes("- 'v*.*.*'") && !publicReleaseWorkflow.includes('pull_request:'), 'public release workflow must run only for version tags or manual dispatch');
   assert(publicReleaseWorkflow.includes('permissions:') && publicReleaseWorkflow.includes('contents: write'), 'public release workflow must be able to publish releases in this repo');
   assert(publicReleaseWorkflow.includes('GH_TOKEN: ${{ github.token }}') && publicReleaseWorkflow.includes('--repo "$GITHUB_REPOSITORY"'), 'public release workflow must publish to the current public repo');
   assert(!publicReleaseWorkflow.includes(oldSplitTokenName) && !publicReleaseWorkflow.includes(oldSplitInputName), 'public release workflow must not require old split release credentials');
-  assert(publicReleaseWorkflow.includes('ref: ${{ inputs.version }}'), 'public release workflow must build from the explicitly selected release tag');
-  assert(publicReleaseWorkflow.includes('release/install.ps1'), 'public release workflow must upload the Windows installer asset');
+  assert(publicReleaseWorkflow.includes('ref: ${{ env.VERSION }}'), 'public release workflow must build from the pushed or explicitly selected release tag');
+  assert(publicReleaseWorkflow.includes('release/thinkless.tgz') && publicReleaseWorkflow.includes('release/install.sh') && publicReleaseWorkflow.includes('release/install.ps1'), 'public release workflow must upload every install asset');
+  assert(publicReleaseWorkflow.includes('gh release upload') && publicReleaseWorkflow.includes('--clobber') && !publicReleaseWorkflow.includes('gh release delete') && !publicReleaseWorkflow.includes('--cleanup-tag'), 'public release workflow must repair assets without deleting the release tag');
   assert(!publicReleaseWorkflow.includes(oldReleaseRepoName), 'release workflow must not reference the old split repo name');
   assert(!publicReleaseWorkflow.includes(oldDevRepoName), 'public release workflow must not reference the old dev repo name');
 

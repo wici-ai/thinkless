@@ -13,7 +13,7 @@ This audit records what is currently proven and what is covered by automated che
 | Chat is the first intake for a blank run, but first input is not automatically an initial goal | `npm run verify:tui-chat-intake` reports `blank_chat_routes_through_agent`, `degraded_inspection_does_not_start_planner`, and `degraded_plan_request_starts_planner` | Covered |
 | Real pseudo-terminal Chat input can submit the first blank-run goal and start execution | `npm run verify:tui-chat-pty` report `pty_chat_first` and `goal_source: tui_chat` | Covered |
 | Chat-first TUI can drive the real-mode planner/executor subprocess path without using stub execution | `npm run verify:tui-real-fake-chat` report `pty_chat_first_real_mode_fake_clis`, Codex planner invocation, and `EXECUTE_PROGRESS` evidence | Covered |
-| TUI exposes per-workspace Chat / PLAN / EXECUTION agent and effort selection, with model fixed by agent | `npm run verify:tui-structure`; `npm run verify:tool-commands` | Covered |
+| TUI exposes per-workspace Chat / PLAN / EXECUTION agent, model, and effort selection, including GPT-5.6 Sol/Terra/Luna constraints | `npm run verify:tui-structure`; `npm run verify:tool-commands` | Covered |
 | Real pseudo-terminal Chat input can answer planner clarification questions and resume the planner session | `npm run verify:tui-planner-clarification-pty` report `pty_planner_clarification`, `question_answered`, and `planner_session` | Covered |
 | Chat pane restores current goal, user steering, and planner answers from the blackboard without repeating the initial goal in transcript history | `npm run verify:tui-structure`, `npm run verify:v1-requirements` | Covered |
 | TUI does not directly write supervisor-owned GOAL/PLAN/checkpoint/ledger/event files; only ChatPane writes inbox injections | `npm run verify:tui-structure` report `chat_writes_only_inbox`, `goal_and_exec_read_only`, and static file-write API checks | Covered |
@@ -60,7 +60,7 @@ This audit records what is currently proven and what is covered by automated che
 | Codex transcript is saved for real runs | `.thinkless/codex-run.jsonl` / legacy `.wici/codex-run.jsonl` run artifacts | Covered |
 | Codex token usage is captured | `npm run verify:codex-run-usage`, `npm run verify:executor-contract`, `npm run verify:app-server-hotreload` | Covered |
 | Executor context is managed by adaptive short epochs instead of unbounded hidden resume history | `npm run verify:direct-executor-epoch` reports `fresh_epoch_iters` from context token pressure and verifies per-turn ledger token deltas | Covered |
-| Chat, planner, and executor agent/effort can be selected while models stay fixed to claude-opus-4-8 or gpt-5.5 | `npm run verify:tool-commands` | Covered |
+| Chat, planner, and executor agent/model/effort can be selected; Codex supports GPT-5.6 Sol, Terra, and Luna with model-specific efforts | `npm run verify:tool-commands` | Covered |
 | `codex exec resume` avoids unsupported `-C` | `npm run verify:executor-contract`, `npm run verify:tool-commands` | Covered |
 | Existing `GOAL.md` / `PLAN.md` can continue without passing a new `--goal` | `npm run verify:existing-goal` report `continued_without_new_goal` and `reused_goal_run_id` | Covered |
 | Exhausted direct plans pass through a continue-biased completion gate before planner continuation | `npm run verify:direct-plan-continuation`; `npm run verify:continuation-verdict` reports `explicit_complete_stops`, `explicit_continue_continues`, and `ambiguous_falls_back_to_continue` | Covered |

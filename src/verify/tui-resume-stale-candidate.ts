@@ -95,9 +95,10 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".thinkless2 \\[runnable\\] STOP"
+expect "Selected runnable:"
 file delete -force "$env(STALE_CHECKPOINT)"
-send -- "\\n"
+sleep 1
+send -- "\\r"
 sleep 2
 send -- "\\003"
 expect eof

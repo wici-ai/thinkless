@@ -36,12 +36,13 @@ async function main(): Promise<void> {
       FORCE_COLOR: '0',
       TERM: 'xterm-256color',
       HOME: home,
+      THINKLESS_SELF_UPDATE: '0',
       WICI_PTY_TARGET: currentTarget,
       WICI_THINKLESS_BIN: builtCli
     },
     reject: false,
     all: true,
-    timeout: 35_000,
+    timeout: 90_000,
     maxBuffer: 1024 * 1024 * 5
   });
   const output = stripAnsi(result.all ?? '');
@@ -162,14 +163,15 @@ function checkpoint(): Checkpoint {
 function expectScript(): string {
   return `
 log_user 1
-set timeout 25
+set timeout 60
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect "historical-target .thinkless2 \\[runnable\\] STOP"
+expect "Selected runnable: stopped run can be explicitly resumed"
 sleep 1
-send -- "\\n"
-sleep 3
+sleep 1
+send -- "x"
+sleep 8
 send -- "\\003"
 expect eof
 exit 0

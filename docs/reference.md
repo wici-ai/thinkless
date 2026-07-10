@@ -245,7 +245,7 @@ In an interactive TUI with no existing run and no `--goal`, the top Chat History
 
 Chat also acts as the run control surface. Typing a direct stop request such as `stop`, `/abort`, or `停一下` writes an urgent abort injection, interrupts an active Codex executor turn, and aborts an active planner subprocess instead of waiting for the next plan or execution safe point.
 
-The active workspace shows its current runtime selection. Press `Ctrl+R` to open the selector, use left/right to choose `agent` or `effort`, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. `agent` is always one of `claude` or `codex`; model is fixed by that agent: `claude` uses `claude-opus-4-8`, and `codex` uses `gpt-5.5`. Chat remains Claude-first and falls back to Codex medium when Claude is unavailable. PLAN defaults to Codex xhigh.
+The active workspace shows its current runtime selection. Press `Ctrl+R` to open the selector, use left/right to choose `agent`, `model`, or `effort`, use up/down to cycle values, then press Enter or Escape to close it. The bottom Chat input is paused while the selector is open. `agent` is always one of `claude` or `codex`; Claude uses `claude-opus-4-8`, while Codex can select `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, or the retained `gpt-5.5` compatibility option. Chat remains Claude-first and falls back to GPT-5.6 Sol medium when Claude is unavailable. PLAN defaults to GPT-5.6 Sol xhigh.
 
 Terminal text selection/copy is the default pointer mode in the Chat, PLAN, and EXECUTION panes. Terminal mouse protocols cannot reliably provide native drag selection and app-level touchpad scrolling at the same time, so Thinkless exposes two explicit modes: `mouse=select` for normal terminal selection, and `mouse=scroll` for TUI mouse-wheel/touchpad scrolling. Press `Ctrl+O` in the TUI to toggle modes, or start in scroll mode with `--mouse-reporting`.
 
@@ -253,12 +253,13 @@ Typed commands remain available for custom values that are not in the selector p
 
 ```text
 /agent chat claude
+/model plan gpt-5.6-terra
 /effort execution high
 /dictate
 /dictate submit
 ```
 
-Valid panes are `chat`, `plan`/`planner`, and `execution`/`exec`/`executor`. Claude effort options are `high`, `xhigh`, `max`, and `ultracode`. Codex effort options are `fast`, `medium`, `high`, and `xhigh`. Claude-backed panes receive `--model claude-opus-4-8` and the selected `--effort`; Codex-backed panes receive `--model gpt-5.5`, and Codex effort is passed through config as `model_reasoning_effort`.
+Valid panes are `chat`, `plan`/`planner`, and `execution`/`exec`/`executor`. Claude effort options are `high`, `xhigh`, `max`, and `ultracode`. GPT-5.6 Sol and Terra support `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`; GPT-5.6 Luna supports the same list except `ultra`. The retained GPT-5.5 option supports `low`, `medium`, `high`, and `xhigh`. Claude-backed panes receive `--model claude-opus-4-8` and the selected `--effort`; Codex-backed panes receive the selected `--model`, and Codex effort is passed through config as `model_reasoning_effort`.
 
 `/dictate` runs the local command configured in `WICI_DICTATION_COMMAND`, normalizes its stdout as transcript text, and inserts it into the bottom Chat input. `/dictate submit` sends that transcript immediately. The command can be any local speech-to-text bridge, such as a macOS Shortcut wrapper, Whisper CLI, or organization-approved transcription tool; Thinkless does not store speech credentials in config.
 
@@ -369,7 +370,7 @@ These one-line installers download `thinkless.tgz` from the latest public releas
 
 On startup, the `thinkless` CLI checks the latest GitHub release and self-updates when the release is newer than the local package version. Global installs update from the release `thinkless.tgz`; clean source checkouts fetch and detach to the release tag, then run `npm install` and `npm run build`. Dirty source checkouts are left alone, and network, GitHub, or update failures fail open so launch continues. Set `THINKLESS_SELF_UPDATE=0` to disable the startup check, `THINKLESS_SELF_UPDATE_VERBOSE=1` to print the decision, `THINKLESS_RELEASE_REPO=owner/repo` for a different release repository, or `THINKLESS_TARBALL_URL` for a custom tarball.
 
-The included `Publish public install release` workflow is manually triggered. It builds `thinkless.tgz` from the selected source tag with `fetch-depth: 1`, then uploads `thinkless.tgz`, `install.sh`, and `install.ps1` to this public repository's GitHub release using the workflow token.
+The included `Publish public install release` workflow runs automatically when a `v*.*.*` tag is pushed and can also be rerun manually to repair release assets. It builds `thinkless.tgz` from that exact source tag with `fetch-depth: 1`, then creates or updates the GitHub release with `thinkless.tgz`, `install.sh`, and `install.ps1` without deleting or recreating the tag.
 
 Install from a source checkout:
 
@@ -481,7 +482,8 @@ The three runtime panes can also be configured through environment variables:
 ```bash
 WICI_PLANNER_EFFORT=high \
 WICI_EXECUTOR_AGENT=codex \
-WICI_EXECUTOR_EFFORT=fast \
+WICI_EXECUTOR_MODEL=gpt-5.6-luna \
+WICI_EXECUTOR_EFFORT=max \
 npx tsx src/cli.tsx tui \
   --target /workspace/target-repo \
   --mode real

@@ -132,10 +132,10 @@ async function main(): Promise<void> {
   assertNoControlWrites('ChatPane', files.chat);
   assert(!files.chat.includes('initial goal:') && !files.chat.includes('`goal: ${text}`'), 'ChatPane transcript must not repeat the initial goal as history');
 
-  assert(files.runtime.includes('parseRuntimeCommand') && files.runtime.includes('/(agent|model|effort)'), 'runtime settings must parse agent/effort commands and reject model changes with a fixed-model status');
+  assert(files.runtime.includes('parseRuntimeCommand') && files.runtime.includes('/(agent|model|effort)'), 'runtime settings must parse agent/model/effort commands');
   assert(files.runtime.includes('formatRuntimeSelectorLine') && files.runtime.includes('cycleRuntimeValue') && files.runtime.includes('RUNTIME_FIELDS'), 'runtime settings must expose selector formatting and value cycling');
-  assert(files.runtime.includes("RUNTIME_FIELDS: RuntimeField[] = ['agent', 'effort']"), 'runtime selector must expose agent and effort only');
-  assert(files.runtime.includes('RUNTIME_AGENTS') && files.runtime.includes('runtimeModelForAgent'), 'runtime settings must offer claude/codex agents with fixed models');
+  assert(files.runtime.includes("RUNTIME_FIELDS: RuntimeField[] = ['agent', 'model', 'effort']"), 'runtime selector must expose agent, model, and effort');
+  assert(files.runtime.includes('RUNTIME_AGENTS') && files.runtime.includes('modelOptionsForAgent'), 'runtime settings must offer claude/codex agents and their model options');
 
   assert(!files.chatAgent.includes('readJsonLines<ChatLogEntry>(paths.chat)') && !files.chatAgent.includes('Recent Chat transcript'), 'Chat agent must not replay persisted Chat transcript into every prompt');
   assert(files.chatAgent.includes('resumeSessionId') && /'exec',\r?\n\s+'resume'/.test(files.chatAgent) && !files.chatAgent.includes("'--ephemeral'"), 'Codex Chat must persist and resume its own session instead of running ephemerally');
@@ -299,36 +299,51 @@ function verifyInputTraceFilter(): void {
 function verifyRuntimeSettings(): void {
   const defaults = defaultRuntimeSelection();
   assert(defaults.chat?.agent === 'claude' && defaults.chat.model === 'claude-opus-4-8' && defaults.chat.effort === 'high', 'Chat runtime should default to Claude claude-opus-4-8 high');
-  assert(defaults.planner?.agent === 'codex' && defaults.planner.model === 'gpt-5.5' && defaults.planner.effort === 'xhigh', 'PLAN runtime should default to Codex gpt-5.5 xhigh');
-  assert(defaults.executor?.agent === 'codex' && defaults.executor.model === 'gpt-5.5' && defaults.executor.effort === 'medium', 'EXECUTION runtime should default to Codex gpt-5.5 medium');
+  assert(defaults.planner?.agent === 'codex' && defaults.planner.model === 'gpt-5.6-sol' && defaults.planner.effort === 'xhigh', 'PLAN runtime should default to Codex gpt-5.6-sol xhigh');
+  assert(defaults.executor?.agent === 'codex' && defaults.executor.model === 'gpt-5.6-sol' && defaults.executor.effort === 'medium', 'EXECUTION runtime should default to Codex gpt-5.6-sol medium');
 
   const line = formatRuntimeSelectorLine(defaults, 'executor', 'agent');
-  assert(line.includes('[agent=codex]') && line.includes('effort=medium') && line.includes('model=gpt-5.5'), `runtime selector line should expose fixed model outside selectable fields: ${line}`);
+  assert(line.includes('[agent=codex]') && line.includes('gpt-5.6-sol') && line.includes('medium'), `runtime selector line should expose agent, model, and effort: ${line}`);
 
   const codexHigh = parseRuntimeCommand('/effort execution high', defaults);
-  assert(codexHigh?.next.executor?.effort === 'high' && codexHigh.next.executor.model === 'gpt-5.5', `Codex effort command should keep fixed model: ${JSON.stringify(codexHigh)}`);
+  assert(codexHigh?.next.executor?.effort === 'high' && codexHigh.next.executor.model === 'gpt-5.6-sol', `Codex effort command should keep the selected model: ${JSON.stringify(codexHigh)}`);
 
   const codexDefault = parseRuntimeCommand('/effort execution default', codexHigh.next);
-  assert(codexDefault?.next.executor?.effort === 'medium' && codexDefault.next.executor.model === 'gpt-5.5', `Codex default effort should reset to medium: ${JSON.stringify(codexDefault)}`);
+  assert(codexDefault?.next.executor?.effort === 'medium' && codexDefault.next.executor.model === 'gpt-5.6-sol', `Codex default effort should reset to medium: ${JSON.stringify(codexDefault)}`);
 
   const badCodexEffort = parseRuntimeCommand('/effort execution ultracode', defaults);
-  assert(badCodexEffort?.status.includes('unknown effort for codex') && badCodexEffort.next.executor?.effort === 'medium', `Codex should reject Claude-only effort: ${JSON.stringify(badCodexEffort)}`);
+  assert(badCodexEffort?.status.includes('unknown effort for gpt-5.6-sol') && badCodexEffort.next.executor?.effort === 'medium', `Codex should reject Claude-only effort: ${JSON.stringify(badCodexEffort)}`);
+
+  const terra = parseRuntimeCommand('/model execution gpt-5.6-terra', defaults);
+  assert(terra?.next.executor?.model === 'gpt-5.6-terra' && terra.next.executor.effort === 'medium', `Codex should support GPT-5.6 Terra: ${JSON.stringify(terra)}`);
+  const terraUltra = parseRuntimeCommand('/effort execution ultra', terra.next);
+  assert(terraUltra?.next.executor?.effort === 'ultra', `GPT-5.6 Terra should support ultra effort: ${JSON.stringify(terraUltra)}`);
+  const luna = parseRuntimeCommand('/model execution gpt-5.6-luna', terraUltra.next);
+  assert(luna?.next.executor?.model === 'gpt-5.6-luna' && luna.next.executor.effort === 'medium', `GPT-5.6 Luna should reset unsupported ultra effort: ${JSON.stringify(luna)}`);
+  const lunaMax = parseRuntimeCommand('/effort execution max', luna.next);
+  assert(lunaMax?.next.executor?.effort === 'max', `GPT-5.6 Luna should support max effort: ${JSON.stringify(lunaMax)}`);
+  const lunaUltra = parseRuntimeCommand('/effort execution ultra', lunaMax.next);
+  assert(lunaUltra?.status.includes('unknown effort for gpt-5.6-luna') && lunaUltra.next.executor?.effort === 'max', `GPT-5.6 Luna should reject ultra effort: ${JSON.stringify(lunaUltra)}`);
+  const cycledModel = cycleRuntimeValue(defaults, 'executor', 'model', 1);
+  assert(cycledModel.executor?.model === 'gpt-5.6-terra', `TUI model selector should cycle through GPT-5.6 models: ${JSON.stringify(cycledModel.executor)}`);
 
   const plannerCodex = parseRuntimeCommand('/agent plan codex', defaults);
   assert(plannerCodex?.next.planner, `PLAN agent switch should produce a planner runtime: ${JSON.stringify(plannerCodex)}`);
   const plannerCodexRuntime = plannerCodex.next.planner;
-  assert(plannerCodexRuntime.agent === 'codex' && plannerCodexRuntime.model === 'gpt-5.5' && plannerCodexRuntime.effort === 'xhigh', `PLAN agent switch should force planner Codex defaults: ${JSON.stringify(plannerCodex)}`);
+  assert(plannerCodexRuntime.agent === 'codex' && plannerCodexRuntime.model === 'gpt-5.6-sol' && plannerCodexRuntime.effort === 'xhigh', `PLAN agent switch should use planner Codex defaults: ${JSON.stringify(plannerCodex)}`);
 
-  const plannerFast = parseRuntimeCommand('/effort plan fast', plannerCodex.next);
-  assert(plannerFast?.next.planner, `PLAN effort switch should produce a planner runtime: ${JSON.stringify(plannerFast)}`);
-  const plannerFastRuntime = plannerFast.next.planner;
-  assert(plannerFastRuntime.effort === 'fast' && plannerFastRuntime.model === 'gpt-5.5', `PLAN Codex effort should accept fast: ${JSON.stringify(plannerFast)}`);
+  const plannerLow = parseRuntimeCommand('/effort plan low', plannerCodex.next);
+  assert(plannerLow?.next.planner, `PLAN effort switch should produce a planner runtime: ${JSON.stringify(plannerLow)}`);
+  const plannerLowRuntime = plannerLow.next.planner;
+  assert(plannerLowRuntime.effort === 'low' && plannerLowRuntime.model === 'gpt-5.6-sol', `PLAN Codex effort should accept low: ${JSON.stringify(plannerLow)}`);
 
-  const modelNoop = parseRuntimeCommand('/model plan anything', plannerFast.next);
-  assert(modelNoop?.next === plannerFast.next && modelNoop.status.includes('model is fixed by agent'), `model command should be a no-op status response: ${JSON.stringify(modelNoop)}`);
+  const plannerTerra = parseRuntimeCommand('/model plan gpt-5.6-terra', plannerLow.next);
+  assert(plannerTerra?.next.planner?.model === 'gpt-5.6-terra' && plannerTerra.next.planner.effort === 'low', `model command should select GPT-5.6 Terra: ${JSON.stringify(plannerTerra)}`);
+  const badModel = parseRuntimeCommand('/model plan gpt-5.6-unknown', plannerTerra.next);
+  assert(badModel?.next === plannerTerra.next && badModel.status.includes('unknown model for codex'), `model command should reject unknown Codex models: ${JSON.stringify(badModel)}`);
 
   const chatAgentCycle = cycleRuntimeValue(defaults, 'chat', 'agent', 1);
-  assert(chatAgentCycle.chat?.agent === 'codex' && chatAgentCycle.chat.model === 'gpt-5.5' && chatAgentCycle.chat.effort === 'medium', `TUI agent cycle should switch Chat to Codex defaults: ${JSON.stringify(chatAgentCycle.chat)}`);
+  assert(chatAgentCycle.chat?.agent === 'codex' && chatAgentCycle.chat.model === 'gpt-5.6-sol' && chatAgentCycle.chat.effort === 'medium', `TUI agent cycle should switch Chat to Codex defaults: ${JSON.stringify(chatAgentCycle.chat)}`);
 
   const chatEffortCycle = cycleRuntimeValue(defaults, 'chat', 'effort', 1);
   assert(chatEffortCycle.chat?.agent === 'claude' && chatEffortCycle.chat.effort === 'xhigh', `TUI effort cycle should follow Claude effort options: ${JSON.stringify(chatEffortCycle.chat)}`);

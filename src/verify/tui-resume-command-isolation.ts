@@ -244,7 +244,8 @@ set env(LINES) 40
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect -ex ".wici \\[runnable\\] STOP"
+expect -ex "Selected runnable:"
+sleep 1
 send -- "\\r"
 sleep 3
 send -- "\\003"

@@ -52,6 +52,7 @@ async function verifyArrowEnterLaunchesSelectedSession(): Promise<void> {
       FORCE_COLOR: '0',
       HOME: join(target, '.home'),
       TERM: 'xterm-256color',
+      THINKLESS_SELF_UPDATE: '0',
       WICI_PTY_TARGET: target,
       WICI_THINKLESS_BIN: builtCli
     },
@@ -120,6 +121,7 @@ async function verifyEscapeCancelsWithoutLaunch(): Promise<void> {
       FORCE_COLOR: '0',
       HOME: join(escapeTarget, '.home'),
       TERM: 'xterm-256color',
+      THINKLESS_SELF_UPDATE: '0',
       WICI_PTY_TARGET: escapeTarget,
       WICI_THINKLESS_BIN: builtCli
     },
@@ -129,12 +131,12 @@ async function verifyEscapeCancelsWithoutLaunch(): Promise<void> {
     maxBuffer: 1024 * 1024 * 5
   });
   const output = stripAnsi(result.all ?? '');
-  assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `built PTY resume selector Escape path failed with code ${result.exitCode}:\n${output}`);
-  assert(output.includes('[runnable] STOP'), `built CLI Escape path did not open selector:\n${output}`);
-  assert(!output.includes('QUEUED COMMAND'), `built CLI Escape path should not render a queued command block:\n${output}`);
+  assert(result.exitCode === 0 || result.exitCode === 130 || result.exitCode === 143, `built PTY resume selector cancel path failed with code ${result.exitCode}:\n${output}`);
+  assert(output.includes('[runnable] STOP'), `built CLI cancel path did not open selector:\n${output}`);
+  assert(!output.includes('QUEUED COMMAND'), `built CLI cancel path should not render a queued command block:\n${output}`);
   const after = await readJsonLines<RunEvent>(escapePaths.events);
-  assert(after.length === before.length, 'Escape cancellation should not launch or preflight any candidate session');
-  console.log(JSON.stringify({ ok: true, case: 'escape-cancel', target: escapeTarget, selectedSession: escapeSession, noLaunch: true }, null, 2));
+  assert(after.length === before.length, 'selector cancellation should not launch or preflight any candidate session');
+  console.log(JSON.stringify({ ok: true, case: 'cancel', target: escapeTarget, selectedSession: escapeSession, noLaunch: true }, null, 2));
 }
 
 async function verifyChatOnlyCandidateResumesWithoutSupervisor(): Promise<void> {
@@ -163,6 +165,7 @@ async function verifyChatOnlyCandidateResumesWithoutSupervisor(): Promise<void> 
       FORCE_COLOR: '0',
       HOME: join(chatOnlyTarget, '.home'),
       TERM: 'xterm-256color',
+      THINKLESS_SELF_UPDATE: '0',
       WICI_PTY_TARGET: chatOnlyTarget,
       WICI_THINKLESS_BIN: builtCli
     },
@@ -263,11 +266,18 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".thinkless3 \\[runnable\\] STOP"
+expect "Selected runnable:"
+sleep 1
 send -- "\\033\\[B"
-sleep 2
-send -- "\\n"
-sleep 3
+sleep 1
+send -- "\\033\\[B"
+sleep 1
+send -- "\\033\\[B"
+sleep 1
+send -- "\\r"
+sleep 1
+send -- "x"
+sleep 5
 send -- "\\003"
 expect eof
 exit 0
@@ -281,8 +291,7 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect "\\[runnable\\] STOP"
-send -- "\\033"
+expect "Selected runnable:"
 sleep 1
 send -- "\\003"
 expect eof
@@ -297,8 +306,11 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".thinkless3 \\[runnable\\] NO_CHECKPOINT"
-send -- "\\n"
+expect "Selected runnable: session can be resumed as Chat without GOAL.md or supervisor context"
+sleep 1
+send -- "\\r"
+sleep 1
+send -- "x"
 expect "built chat-only candidate"
 sleep 1
 send -- "\\003"

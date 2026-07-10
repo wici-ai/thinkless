@@ -86,6 +86,11 @@ export function App({
   resumeCandidatesRef.current = resumeCandidates;
   resumeIndexRef.current = resumeIndex;
 
+  const updateResumeIndex = useCallback((next: number) => {
+    resumeIndexRef.current = next;
+    setResumeIndex(next);
+  }, []);
+
   useEffect(() => {
     let alive = true;
     const paths = runPaths(activeTarget, activeSessionDir);
@@ -169,17 +174,17 @@ export function App({
     setResumeSelectorOpen(true);
     setResumeCandidatesLoaded(false);
     setResumeCandidates([]);
-    setResumeIndex(0);
+    updateResumeIndex(0);
     void discoverResumeCandidates({ currentTarget: activeTarget }).then((candidates) => {
       setResumeCandidates(candidates);
       setResumeCandidatesLoaded(true);
-      setResumeIndex(Math.max(0, candidates.findIndex((candidate) => candidate.runnable)));
+      updateResumeIndex(Math.max(0, candidates.findIndex((candidate) => candidate.runnable)));
     }).catch((error: unknown) => {
       setResumeCandidates([]);
       setResumeCandidatesLoaded(true);
       setStartError(`Resume scan failed: ${error instanceof Error ? error.message : String(error)}`);
     });
-  }, [activeTarget]);
+  }, [activeTarget, updateResumeIndex]);
 
   const selectResumeCandidate = useCallback(async (candidate: ResumeCandidate) => {
     if (!candidate.runnable) {
@@ -250,9 +255,9 @@ export function App({
     }
     if (resumeSelectorOpen) {
       if (key.upArrow) {
-        setResumeIndex((current) => Math.max(0, current - 1));
+        updateResumeIndex(Math.max(0, resumeIndexRef.current - 1));
       } else if (key.downArrow) {
-        setResumeIndex((current) => Math.min(Math.max(0, resumeCandidates.length - 1), current + 1));
+        updateResumeIndex(Math.min(Math.max(0, resumeCandidates.length - 1), resumeIndexRef.current + 1));
       } else if (key.return || input.includes('\r') || input.includes('\n')) {
         const candidate = resumeCandidatesRef.current[resumeIndexRef.current];
         if (candidate) void selectResumeCandidate(candidate);
@@ -340,7 +345,7 @@ export function App({
               loaded={resumeCandidatesLoaded}
               selectedIndex={resumeIndex}
               contentWidth={workspaceContentWidth}
-              onMove={setResumeIndex}
+              onMove={(updater) => updateResumeIndex(updater(resumeIndexRef.current))}
               onSelect={selectResumeCandidate}
               onCancel={() => {
                 setResumeSelectorOpen(false);
