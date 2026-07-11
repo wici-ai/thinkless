@@ -72,6 +72,11 @@ export async function startCodexAppServerTurn(input: {
     completionResolve = resolve;
     completionReject = reject;
   });
+  client.onFailure = (error) => {
+    usage.failed = true;
+    usage.errors.push(`Codex app-server notification pipeline failed: ${error.message}`);
+    completionReject?.(new CodexRunError(usage.errors.at(-1) ?? error.message, cloneUsageSummary(usage)));
+  };
 
   client.onNotification = async (message, raw) => {
     lastActivityAt = Date.now();
@@ -232,7 +237,10 @@ class CodexAppServerClient {
   private nextId = 1;
   private pending = new Map<number | string, PendingRequest>();
   private stderr = '';
+  private lineChain: Promise<void> = Promise.resolve();
+  private lineFailure: Error | null = null;
   onNotification?: (message: JsonRpcMessage, raw: string) => Promise<void>;
+  onFailure?: (error: Error) => void;
 
   constructor(private readonly command: string, private readonly paths: RunPaths, private readonly effort?: string) {}
 
@@ -249,9 +257,24 @@ class CodexAppServerClient {
     });
     this.rl = createInterface({ input: this.child.stdout });
     this.rl.on('line', (line) => {
-      this.handleLine(line).catch((error: unknown) => {
-        void appendFile(this.paths.supervisorLog, `[${nowIso()}] codex app-server handleLine error: ${error instanceof Error ? error.stack || error.message : String(error)}\n\n`).catch(() => undefined);
-      });
+      this.lineChain = this.lineChain
+        .then(async () => {
+          if (!this.lineFailure) await this.handleLine(line);
+        })
+        .catch(async (error: unknown) => {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          if (!this.lineFailure) {
+            this.lineFailure = failure;
+            this.onFailure?.(failure);
+            for (const pending of this.pending.values()) {
+              clearTimeout(pending.timer);
+              pending.reject(failure);
+            }
+            this.pending.clear();
+            this.rl?.close();
+          }
+          await appendFile(this.paths.supervisorLog, `[${nowIso()}] codex app-server handleLine error: ${failure.stack || failure.message}\n\n`).catch(() => undefined);
+        });
     });
     this.child.once('exit', (code, signal) => {
       const message = `codex app-server exited code=${code ?? 'null'} signal=${signal ?? 'null'}${this.stderr.trim() ? `: ${this.stderr.trim()}` : ''}`;

@@ -5,11 +5,13 @@ import { readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
 import { runSupervisor } from '../supervisor/index.js';
+import { directNoRunStall, directRejectStall } from '../supervisor/progressStall.js';
 
 const target = resolve('fixture/direct-no-progress-target');
 const fakeBin = resolve('fixture/direct-no-progress-bin');
 
 async function main(): Promise<void> {
+  verifySemanticStallClassification();
   await createSampleTarget(target, true);
   await rm(fakeBin, { recursive: true, force: true });
   await mkdir(fakeBin, { recursive: true });
@@ -53,13 +55,15 @@ async function main(): Promise<void> {
   }
 
   const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
-  assert(ledger.length === 3, `expected first status receipt to close S1 and continuation to run S2 within maxIters, got ${ledger.length}`);
-  assert(ledger[0].status === 'reject' && ledger[0].step_id === 'S1', `expected first row to record incomplete acceptance without repeating S1: ${JSON.stringify(ledger)}`);
-  assert(ledger[1].status === 'keep' && ledger[1].step_id === 'S2', `expected S2 keep after planner bottleneck review: ${JSON.stringify(ledger)}`);
+  assert(ledger.length === 3, `expected two non-acceptance S1 receipts plus one recovered S2 receipt, got ${ledger.length}`);
+  assert(ledger[0].status === 'reject' && ledger[0].step_id === 'S1', `expected first row to record incomplete acceptance: ${JSON.stringify(ledger)}`);
+  assert(ledger[1].status === 'reject' && ledger[1].step_id === 'S1', `changed-file churn must not hide the second non-acceptance receipt: ${JSON.stringify(ledger)}`);
+  assert(ledger[2].status === 'keep' && ledger[2].step_id === 'S2', `expected S2 keep after planner bottleneck review: ${JSON.stringify(ledger)}`);
 
   const events = await readJsonLines<RunEvent>(paths.events);
-  assert(events.filter((event) => event.type === 'EXECUTE_START' && event.message.includes('executing S1')).length === 1, 'step_done=true/tests_pass=false must not re-execute S1');
-  assert(events.some((event) => event.type === 'PLAN_CONTINUATION_APPLIED'), 'missing PLAN_CONTINUATION_APPLIED event after closing status-only step');
+  assert(events.filter((event) => event.type === 'EXECUTE_START' && event.message.includes('executing S1')).length === 2, 'S1 should reach the configured semantic reject threshold');
+  assert(events.some((event) => event.type === 'DIRECT_NO_PROGRESS_REPLAN_REQUEST'), 'missing forced planner bottleneck review after semantic reject threshold');
+  assert(events.some((event) => event.type === 'DIRECT_NO_PROGRESS_REPLAN_APPLIED'), 'missing applied planner bottleneck review');
   assert(!events.some((event) => event.type === 'DIRECT_NO_PROGRESS_ESCALATED'), 'planner recovery should avoid human escalation');
 
   const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
@@ -74,7 +78,43 @@ async function main(): Promise<void> {
   const goalDoc = await readFile(paths.goalDoc, 'utf8');
   assert(goalDoc.includes('## Bottleneck Review'), `planner should update GOAL.md with bottleneck review:\n${goalDoc}`);
 
-  console.log(JSON.stringify({ ok: true, direct_no_progress_replanned: true, ledger_rows: ledger.length }, null, 2));
+  console.log(JSON.stringify({ ok: true, direct_no_progress_replanned: true, changed_files_do_not_mask_rejects: true, repeated_no_run_detected: true, ledger_rows: ledger.length }, null, 2));
+}
+
+function verifySemanticStallClassification(): void {
+  const rejects = [
+    receipt(1, 'S1', 'reject', 'First parameter sweep rejected; wrote a diagnostic artifact.', 2),
+    receipt(2, 'S1', 'reject', 'Second differently worded parameter sweep rejected; wrote more files.', 7)
+  ];
+  const rejectStall = directRejectStall(rejects, 'S1', 2);
+  assert(rejectStall.stalled && rejectStall.count === 2, `same-step non-acceptance must force planner review regardless of prose/files: ${JSON.stringify(rejectStall)}`);
+
+  const noRuns = [
+    receipt(3, 'S2', 'keep', 'Decision-quality NoRun: external GPU lane remained occupied.', 1),
+    receipt(4, 'S3', 'keep', 'No-run packet recorded; no benchmark was launched because the same lane is occupied.', 3),
+    receipt(5, 'S4', 'keep', 'NoRun only. Material launch authority is still absent.', 4)
+  ];
+  const noRunStall = directNoRunStall(noRuns, 3);
+  assert(noRunStall.stalled && noRunStall.count === 3, `renamed NoRun steps must reach the material-trigger boundary: ${JSON.stringify(noRunStall)}`);
+}
+
+function receipt(iter: number, stepId: string, status: LedgerEntry['status'], reflection: string, changedFiles: number): LedgerEntry {
+  return {
+    id: `iter-${iter}`,
+    ts: new Date().toISOString(),
+    iter,
+    step_id: stepId,
+    commit: null,
+    hypothesis: `step ${stepId}`,
+    metric: null,
+    baseline: null,
+    delta_pct: null,
+    confidence: 'direct-executor-receipt',
+    cost: { wall_ms: 1 },
+    guards: { direct: true, step_done: status === 'keep', tests_pass: status === 'keep', changed_files: changedFiles, reason: reflection.slice(0, 240) },
+    status,
+    reflection
+  };
 }
 
 async function writeFakeCodex(): Promise<void> {
@@ -155,10 +195,10 @@ if (prompt.includes('Supervisor receipt focus: S2') || prompt.includes('S2 Add t
   process.exit(0);
 }
 const result = {
-  step_done: true,
+  step_done: false,
   tests_pass: false,
-  notes: 'Re-read GOAL.md and PLAN.md. PLAN marks S1 active; S1a and S1b remain pending/inactive. Remote drift check succeeded. No files were changed because PLAN has not activated the concrete repair.',
-  changed_files: [],
+  notes: 'Re-read GOAL.md and PLAN.md. The same broad status step remains unaccepted; another diagnostic artifact was written but acceptance and causal knowledge did not advance.',
+  changed_files: ['PLAN.md', '.thinkless/artifacts/status-receipt.json'],
   next: null
 };
 writeFileSync(out.replace(/\\.txt$/, '.json'), JSON.stringify(result, null, 2) + '\\n');

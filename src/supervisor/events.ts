@@ -3,6 +3,7 @@ import type { RunEvent } from '../shared/types.js';
 
 export class EventWriter {
   #seq = 0;
+  #writeChain: Promise<void> = Promise.resolve();
 
   constructor(private readonly path: string) {}
 
@@ -23,7 +24,9 @@ export class EventWriter {
       message,
       data
     };
-    await appendJsonLine(this.path, event);
+    const write = this.#writeChain.then(() => appendJsonLine(this.path, event));
+    this.#writeChain = write.catch(() => undefined);
+    await write;
     await maybePauseForTest(type);
     return event;
   }

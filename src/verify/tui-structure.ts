@@ -30,6 +30,9 @@ async function main(): Promise<void> {
     chatSession: await readFile(join(TOOL_ROOT, 'src', 'shared', 'chatSession.ts'), 'utf8'),
     chatPrompt: await readFile(join(TOOL_ROOT, 'prompts', 'chat.md'), 'utf8'),
     supervisor: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'index.ts'), 'utf8'),
+    eventWriter: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'events.ts'), 'utf8'),
+    codexAppServer: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'codexAppServer.ts'), 'utf8'),
+    resume: await readFile(join(TOOL_ROOT, 'src', 'shared', 'resume.ts'), 'utf8'),
     goalDoc: await readFile(join(TOOL_ROOT, 'src', 'supervisor', 'goalDoc.ts'), 'utf8'),
     types: await readFile(join(TOOL_ROOT, 'src', 'shared', 'types.ts'), 'utf8'),
     crashHandlers: await readFile(join(TOOL_ROOT, 'src', 'shared', 'crashHandlers.ts'), 'utf8'),
@@ -194,6 +197,8 @@ async function main(): Promise<void> {
   assert(files.state.includes('readInjectionDir(inboxDone, true)'), 'useRunState must treat injections moved to inbox/done as applied');
   assert(files.state.includes('readTailLinesMaybe') && files.state.includes('CODEX_RUN_MAX_LINE_CHARS'), 'useRunState must tail and cap large Codex transcript lines instead of decoding whole jsonl files into the TUI');
   assert(files.state.includes('readJsonLinesTailMaybe<RunEvent>(paths.events') && files.state.includes('readRawLinesMaybe(paths.codexRun'), 'useRunState must tail high-churn event and Codex transcript files');
+  assert(files.eventWriter.includes('#writeChain') && files.codexAppServer.includes('lineChain'), 'event and app-server notification writes must be serialized to prevent file-handle bursts');
+  assert(files.resume.includes('readJsonLinesTail<RunEvent>(paths.events, 500)'), 'resume context must load a bounded event tail instead of decoding unbounded history');
   assert(files.state.includes('setTimeout') && files.state.includes('UI_REFRESH_DEBOUNCE_MS'), 'useRunState must coalesce rapid file updates');
   assertNoFileWriteApis('useRunState', files.state);
   assertOnlyChatPaneWritesInbox(files);

@@ -12,6 +12,7 @@ import { runClaudeStreamProcess } from './claudeProcess.js';
 import { primaryMetricValue } from './metricFormat.js';
 import { buildCodexPlannerArgs } from './planner.js';
 import { isTransientNetworkFailure, transientFailureReason, transientRetryDelayMs } from './transientRetry.js';
+import { isToolUsageLimitFailure } from './agentFailure.js';
 
 export interface StopDecision {
   stop: boolean;
@@ -138,7 +139,8 @@ export async function directContinuationVerdict(
     if (parsed.decision === 'continue') {
       return { decision: 'continue', reason: parsed.reason ?? 'LLM continuation verdict', source: 'llm' };
     }
-  } catch {
+  } catch (error) {
+    if (isToolUsageLimitFailure(error instanceof Error ? error.message : String(error))) throw error;
     return fallback;
   }
 

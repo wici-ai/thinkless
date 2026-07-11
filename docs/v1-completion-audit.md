@@ -64,7 +64,10 @@ This audit records what is currently proven and what is covered by automated che
 | `codex exec resume` avoids unsupported `-C` | `npm run verify:executor-contract`, `npm run verify:tool-commands` | Covered |
 | Existing `GOAL.md` / `PLAN.md` can continue without passing a new `--goal` | `npm run verify:existing-goal` report `continued_without_new_goal` and `reused_goal_run_id` | Covered |
 | Exhausted direct plans pass through a continue-biased completion gate before planner continuation | `npm run verify:direct-plan-continuation`; `npm run verify:continuation-verdict` reports `explicit_complete_stops`, `explicit_continue_continues`, and `ambiguous_falls_back_to_continue` | Covered |
+| Repeated fallback verdicts cannot preempt planner dependency/implementation recovery | `npm run verify:continuation-escalation` reports `fallback_recovery_continues` and preserves distinct-state deduplication | Covered |
 | Executor failures and timeouts are recoverable long-goal events, not immediate whole-goal blockers | `npm run verify:direct-recovery` report `recoverable_failure`, `ledger_rows: 2`, and `resumed_executor`; code emits `EXECUTE_RECOVERABLE_FAILURE` and continues with `codex exec resume --last` | Covered |
+| Agent quota exhaustion pauses once instead of creating a crash/log storm | `npm run verify:direct-usage-limit` reports `usage_limit_pauses_once`, leaves the active step pending, and records no ledger row | Covered |
+| Repeated non-acceptance and NoRun receipts force planner review or a material-trigger pause even when files were written | `npm run verify:direct-no-progress` reports `changed_files_do_not_mask_rejects` and `repeated_no_run_detected` | Covered |
 | Codex may diagnose failures, update `PLAN.md` / `.opt`, and continue the same goal | `npm run verify:direct-recovery` asserts the recovery prompt includes previous failure context and authorizes PLAN updates; `npm run verify:executor-contract` covers resume command shape | Covered |
 
 ## Hot Reload And Durability

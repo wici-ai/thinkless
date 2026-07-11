@@ -273,8 +273,9 @@ async function main(): Promise<void> {
     'docs install page should expose the public one-line installer, copy button, purpose, and verification command'
   );
   assert(
-    docsText.includes('`GOAL.md + PLAN.md` as one goal') && !docsText.includes('execute a `PLAN.md` step'),
-    'docs should document whole-goal Codex execution instead of the old step-only contract'
+    docsText.includes('one planner-selected step boundary per executor turn') &&
+      docsText.includes('semantic rather than file-activity based'),
+    'docs should document bounded executor turns and semantic planner review instead of unbounded whole-goal self-planning'
   );
   assert(
     docsText.includes('optional planner scripts are persisted executable and runnable when present'),
@@ -422,7 +423,7 @@ async function main(): Promise<void> {
   assert(completionAudit.includes('npm run verify:ssh-evidence'), 'completion audit should include shared SSH evidence verifier');
   assert(completionAudit.includes('npm run verify:no-secrets'), 'completion audit should include committed secret scan verification');
   assert(supervisorIndex.includes("waitReason: 'PLAN_READY'"), 'fresh V1 path should be able to return PLAN_READY without a baseline');
-  assert(supervisorIndex.includes('return runDirectPlanExecution'), 'fresh V1 path should feed PLAN.md directly to Codex execution');
+  assert(supervisorIndex.includes('return await runDirectPlanExecution'), 'fresh V1 path should await PLAN.md execution inside supervisor failure handling');
   assert(supervisorIndex.includes('directContinuationVerdict') && supervisorIndex.includes('DIRECT_CONTINUATION_VERDICT'), 'direct V1 path should gate exhausted plans with a continuation verdict');
   assert(supervisorIndex.includes('LEGACY_BASELINE_IGNORED') && supervisorIndex.includes('legacy_optimizer === true'), 'fresh V1 should ignore historical baseline files unless the legacy optimizer is enabled');
   assert(supervisorIndex.includes("phase: 'direct_plan_diff'"), 'fresh V1 hot reload should emit planner diff token usage');

@@ -79,6 +79,7 @@ npm run verify:v1-slice
 npm run verify:direct-no-scripts
 npm run verify:direct-no-progress
 npm run verify:direct-recovery
+npm run verify:direct-usage-limit
 npm run verify:direct-context-reset
 npm run verify:direct-executor-epoch
 npm run verify:direct-transient-retry
@@ -307,7 +308,7 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 - `GOAL.md` and `PLAN.md` are materialized;
 - optional planner scripts are persisted executable and runnable when present, while no-script plans still execute directly;
 - fresh execution does not wait for baseline or evaluation gates;
-- the executor prompt gives Codex `GOAL.md + PLAN.md` as one goal while keeping step IDs only as a thin receipt/progress focus;
+- the executor prompt gives Codex `GOAL.md + PLAN.md` as durable context while enforcing one planner-selected step boundary per executor turn;
 - direct execution writes a thin `ledger.jsonl` receipt with token usage for observability;
 - a git checkpoint and `wici/best` rollback tag are created;
 - the TUI header displays the current rollback checkpoint, or `rollback pending` before one exists;
@@ -317,6 +318,10 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 `npm run verify:direct-no-scripts` covers the complementary path: an existing markdown `PLAN.md` can execute directly without `.opt/checks.sh`, `.opt/measure.sh`, or `.opt/benchmark.json`.
 
 `npm run verify:direct-recovery` covers long-goal recovery: a fake real-mode Codex fails the first invocation, WiCi records `EXECUTE_RECOVERABLE_FAILURE` without entering `FAILED`, then the second invocation uses `codex exec resume --last` and completes.
+
+`npm run verify:direct-usage-limit` covers quota exhaustion: a Codex usage-limit response pauses the run after one attempt, leaves the current PLAN step pending, emits `TOOL_USAGE_LIMIT_STOP`, and does not manufacture ledger crash iterations. Crash-loop fingerprints ignore ephemeral thread/turn IDs, so changing runtime IDs cannot defeat the three-strike guard for other repeatable failures.
+
+Direct progress review is semantic rather than file-activity based. Consecutive non-acceptance rejects for the same step force a planner bottleneck review even when the executor wrote PLAN, diagnostics, or receipt artifacts. Three consecutive explicit NoRun receipts across renamed PLAN steps pause on a material-trigger boundary instead of allowing another status probe. Planner review must record the exhausted avenue and choose a falsifiable, materially different mechanism; parameter sweeps require evidence that the parameter family controls the target bottleneck.
 
 `npm run verify:direct-executor-epoch` covers adaptive short executor epochs: fake Codex cumulative token usage crosses the context pressure threshold, WiCi starts fresh executor threads from durable handoff state, and ledger cost records per-turn token deltas instead of cumulative totals.
 
@@ -330,7 +335,9 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 
 `npm run verify:continuation-verdict` covers the direct completion gate: explicit `complete` stops, explicit `continue` continues, and ambiguous or stub verdicts fall back to continue. Keep-only plateau short-circuiting applies only to goals with a finite numeric metric target; functional goals without one always reach the completion verdict so diagnostic receipts can establish completion.
 
-`npm run verify:continuation-escalation` covers the direct completion gate stall path: repeated fallback verdicts on distinct `ledger_seq + plan_hash` states pause with a `continuation-stall-*` outbox question, wait without advancing, and resume through the existing steer path. A process restart on the same ledger/plan state does not increment the streak again.
+`npm run verify:continuation-escalation` covers the direct completion recovery path: repeated fallback verdicts on distinct `ledger_seq + plan_hash` states emit `CONTINUATION_FALLBACK_RECOVERY` but do not preempt planner continuation. The planner must first turn safe missing prerequisites and receipt `next_actions` into executable work. A process restart on the same ledger/plan state does not increment the streak again; near-duplicate continuation steps still use the separate dedup escalation guard.
+
+Codex app-server notifications and event-file appends are serialized so a notification burst cannot open thousands of concurrent file handles. Resume context loads only a bounded tail of `events.jsonl`, allowing failed or long-running sessions with very large histories to reopen without constructing a V8-sized whole-file string.
 
 `npm run verify:step-dedup` covers continuation-step duplicate detection: near-identical planner-diff steps are rejected, PLAN.md is restored, and the run escalates through the continuation outbox channel while distinct steps pass the similarity gate.
 

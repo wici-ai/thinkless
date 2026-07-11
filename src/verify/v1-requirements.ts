@@ -230,7 +230,7 @@ async function main(): Promise<void> {
   );
 
   assert(files.supervisor.includes("waitReason: 'PLAN_READY'"), 'fresh V1 setup must be able to return PLAN_READY without a baseline');
-  assert(files.supervisor.includes('return runDirectPlanExecution'), 'fresh V1 setup must directly enter PLAN.md execution');
+  assert(files.supervisor.includes('return await runDirectPlanExecution'), 'fresh V1 setup must directly await PLAN.md execution so failures remain inside supervisor classification');
   assert(files.supervisor.includes("mode: 'direct'"), 'fresh V1 events must identify direct PLAN.md execution');
   assert(files.supervisor.includes('directContinuationVerdict') && files.supervisor.includes('DIRECT_CONTINUATION_VERDICT'), 'fresh V1 must gate exhausted direct plans before continuation');
   assert(files.supervisor.includes('LEGACY_BASELINE_IGNORED'), 'fresh V1 must ignore historical baseline.json unless legacy optimizer is explicitly enabled');
@@ -242,6 +242,8 @@ async function main(): Promise<void> {
   assert(!files.context.includes('locked eval scripts'), 'direct context must not tell Codex eval scripts are locked by default');
   assert(files.executor.includes('Treat existing scripts under') && files.executor.includes('planner-provided validation artifacts'), 'executor prompt must treat .opt scripts as planner artifacts');
   assert(files.executor.includes('Thinkless will not run git add or git commit for direct V1 execution'), 'executor prompt must make direct V1 commits executor-owned');
+  assert(files.executor.includes('Safe non-auth build tools and dependencies are implementation work'), 'executor must acquire safe missing prerequisites instead of handing them to the operator');
+  assert(files.executor.includes('user-pinned commit') && files.executor.includes('not permission to substitute revisions'), 'executor must preserve user-pinned baseline identity');
   assert(files.plannerPrompt.includes('executor-owned git commit action') && files.plannerDiffPrompt.includes('executor-owned git commit action'), 'planner prompts must put commit responsibility into PLAN.md');
   assert(files.executor.includes('You may edit ${planPath}') && files.executor.includes('Do not stop at the first failing command'), 'executor prompt must authorize recovery/debug/plan updates');
   assert(files.executor.includes('research the relevant documentation or tutorials yourself'), 'executor prompt must make research/debugging a Codex responsibility, not a Chat input requirement');

@@ -167,10 +167,14 @@ set timeout 60
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect "Selected runnable: stopped run can be explicitly resumed"
-sleep 1
-sleep 1
-send -- "x"
+expect {
+  "> historical-target" {}
+  "> current-target" {
+    send -- "\\033\\[B"
+    sleep 1
+  }
+}
+send -- "\\r"
 sleep 8
 send -- "\\003"
 expect eof

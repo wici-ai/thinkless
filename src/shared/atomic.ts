@@ -58,6 +58,33 @@ export async function readJsonLines<T>(path: string): Promise<T[]> {
     .map((line) => JSON.parse(line) as T);
 }
 
+export async function readJsonLinesTail<T>(path: string, limit: number, maxBytes = 4 * 1024 * 1024): Promise<T[]> {
+  if (!(await exists(path)) || limit <= 0) return [];
+  const handle = await open(path, 'r');
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, Math.max(1, maxBytes));
+    const position = Math.max(0, size - length);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, position);
+    let lines = buffer.toString('utf8').split('\n');
+    if (position > 0) lines = lines.slice(1);
+    const parsed: T[] = [];
+    for (const line of lines.slice(-limit * 2)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        parsed.push(JSON.parse(trimmed) as T);
+      } catch {
+        // A bounded tail may start inside a JSONL record; ignore that fragment.
+      }
+    }
+    return parsed.slice(-limit);
+  } finally {
+    await handle.close();
+  }
+}
+
 // Streams instead of readFile()-ing the whole file: run logs (events.jsonl,
 // codex-run.jsonl) can grow past V8's ~512MB max string length on long runs,
 // which turns a single readFile into a permanent crash loop on every restart.

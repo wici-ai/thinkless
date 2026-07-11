@@ -83,10 +83,14 @@ async function main(): Promise<void> {
     `REFLECT checkpoint with stale executor session should replay from durable PLAN/ledger state: ${JSON.stringify(reflectCandidate)}`
   );
 
+  const largePrefix = 'x'.repeat(5 * 1024 * 1024);
+  const tailEvent = { seq: 99, ts: ts(), type: 'TAIL_EVENT', level: 'info', message: 'bounded resume tail survived a huge event history' };
+  await writeFile(numberedPaths.events, `${largePrefix}\n${JSON.stringify(tailEvent)}\n`);
   const context = await loadResumeContext(numberedCandidate);
   assert(context.goal?.run_id === 'resume-selector-run', 'loadResumeContext should preserve selected goal');
   assert(context.checkpoint?.sessions.planner === 'planner-session', 'loadResumeContext should preserve selected planner session');
   assert(context.paths.stateDir === numbered, 'loadResumeContext should use selected session dir');
+  assert(context.events.length === 1 && context.events[0].seq === 99, `resume context must read a bounded event tail instead of decoding the whole file: ${JSON.stringify(context.events)}`);
 
   const preflight = await preflightResumeCandidate(target, legacy);
   assert(preflight.runnable && preflight.fallback === 'executor_rerun', `preflight should report executor rerun fallback: ${JSON.stringify(preflight)}`);

@@ -30,6 +30,16 @@ If the current `PLAN.md` is a shallow external-plan wrapper, remote-plan-only bo
 
 For nontrivial architecture/debug diffs, preserve a compact RFC-style decision packet in `ASSUMPTIONS.md` or the affected `PLAN.md` step: problem, inferred invariants, options considered, chosen approach, risks, and validation. For diagnostics, a step is done only after it produces decision-quality evidence: a narrowed root cause, falsified hypothesis, concrete next experiment, or durable invariant/constraint. If repeated iterations show the same blocker, same evidence, or same reject reason, compact the dead-end history into current facts, ruled-out paths, and one concrete discriminating next step instead of appending another retry.
 
+The planner owns the execution frontier. Keep each pending step bounded to one executor turn, and do not rely on the executor to invent or absorb later steps. For investigation and optimization work, require one falsifiable hypothesis, one discriminating observation or measurement, and an explicit failure branch per active step.
+
+Treat edits, generated artifacts, report counts, and repeated measurements as activity, not accepted progress. Parameter sweeps and threshold changes require causal attribution that the parameter is the active bottleneck. After two materially similar variants fail to improve the acceptance metric or narrow the cause, record that avenue as exhausted and move to a different mechanism or architecture boundary rather than another nearby value.
+
+If the latest receipts are explicitly `NoRun` because an external prerequisite is unchanged, preserve the stable blocker and name the exact material trigger for resuming. Do not create another status-probe step that can only reproduce the same observation.
+
+An ordinary missing non-auth build tool, SDK installer, compiler, debugger, package, or other safely obtainable dependency is not an external blocker. Convert scoped/reversible acquisition or a supported available alternative into the next executable step. Require operator action only for credentials, license acceptance, destructive machine-wide changes, or external authority that the executor cannot obtain safely.
+
+Treat an explicit user-pinned commit, artifact, environment, or baseline as authoritative identity. A failed reproduction may expose an environment or harness mismatch, but must not silently substitute a nearby revision, reopen commit archaeology, or block requested implementation when the user explicitly said to proceed from that identity.
+
 When the new input says there was no accepted improvement, repeated safe-validation/holdout rejection, or a performance plateau, do not mark the goal or step blocked and do not just append another similar retry. Treat it as a bottleneck-review event: update `GOAL.md` when the active optimization target, stop boundary, validation contract, or bottleneck framing should change; update `PLAN.md` with the reviewed bottleneck, ruled-out path, and the next highest-value attempt or a bounded deeper-debugging step.
 
 Preserve existing step IDs and do not rewrite completed steps unless the new requirement explicitly makes them obsolete or the surrounding prose is being compacted without changing their recorded meaning. Any newly added executable step must keep WiCi's discoverable step shape, preferably:

@@ -42,11 +42,21 @@ async function main(): Promise<void> {
     assert(plannerPrompt.includes('## Primary') && plannerPrompt.includes('## Stretch'), 'planner prompt must model primary and stretch goal scope');
     assert(plannerPrompt.includes('stop_when') && plannerPrompt.includes('continue improving'), 'planner prompt must bound continue-improving stretch scope');
     assert(plannerPrompt.includes('Original External Plan Snapshot') && plannerPrompt.includes('Expanded Execution Plan'), 'planner prompt must preserve and expand external plans locally');
+    assert(plannerPrompt.includes('one falsifiable hypothesis') && plannerPrompt.includes('planner owns the execution frontier'), 'planner prompt must define a bounded hypothesis frontier');
+    assert(plannerPrompt.includes('activity, not evidence of goal progress') && plannerPrompt.includes('mark that avenue exhausted'), 'planner prompt must reject file churn and repeated parameter variants as progress');
+    assert(plannerPrompt.includes('exact material trigger') && plannerPrompt.includes('another status probe'), 'planner prompt must bound unchanged NoRun blockers');
+    assert(plannerPrompt.includes('ordinary missing non-auth build tool') && plannerPrompt.includes('scoped/reversible acquisition'), 'planner prompt must turn safe missing dependencies into executable work');
+    assert(plannerPrompt.includes('explicit user-pinned commit') && plannerPrompt.includes('authoritative identity'), 'planner prompt must preserve user-pinned baselines');
     assert(diffPrompt.includes('living self-interrogation artifact'), 'planner-diff prompt must maintain ASSUMPTIONS.md');
     assert(diffPrompt.includes('authoritative evidence that can override an adopted assumption'), 'planner-diff prompt must treat steering as an assumption override');
     assert(diffPrompt.includes('## Primary') && diffPrompt.includes('## Stretch'), 'planner-diff prompt must preserve primary/stretch goal scope');
     assert(diffPrompt.includes('stop_when') && diffPrompt.includes('continue improving'), 'planner-diff prompt must bound continue-improving stretch scope');
     assert(diffPrompt.includes('remote-plan-only bootstrap') && diffPrompt.includes('Original External Plan Snapshot'), 'planner-diff prompt must repair remote-plan-only wrappers');
+    assert(diffPrompt.includes('one falsifiable hypothesis') && diffPrompt.includes('planner owns the execution frontier'), 'planner-diff prompt must preserve bounded hypothesis ownership');
+    assert(diffPrompt.includes('activity, not accepted progress') && diffPrompt.includes('record that avenue as exhausted'), 'planner-diff prompt must route away from rejected parameter loops');
+    assert(diffPrompt.includes('exact material trigger') && diffPrompt.includes('another status-probe step'), 'planner-diff prompt must stop repeated NoRun probes');
+    assert(diffPrompt.includes('ordinary missing non-auth build tool') && diffPrompt.includes('supported available alternative'), 'planner-diff prompt must recover missing dependencies without operator handoff');
+    assert(diffPrompt.includes('explicit user-pinned commit') && diffPrompt.includes('reopen commit archaeology'), 'planner-diff prompt must not replace a user-pinned baseline');
 
     console.log(
       JSON.stringify(

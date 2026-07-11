@@ -65,6 +65,8 @@ import { codexUsageFromError } from './codexRun.js';
 import { PLANNER_SELECTED_METRIC, formatPrimaryMetricTransition, primaryMetricTag, primaryMetricValue } from './metricFormat.js';
 import { isTransientNetworkFailure, transientFailureReason, transientRetryDelayMs, transientRetryMessage } from './transientRetry.js';
 import { findNearDuplicateContinuationStep } from './stepSimilarity.js';
+import { crashFailureSignature, isToolUsageLimitFailure, toolUsageLimitReason } from './agentFailure.js';
+import { directNoRunStall, directRejectStall, type DirectProgressStall } from './progressStall.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
 const EVAL_LOCK_WAIT_REASON = 'awaiting eval lock approval';
@@ -245,7 +247,9 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
         await events.emit('STOP', setup.waitReason);
         return { state: 'STOP', reason: setup.waitReason, iter: checkpoint.iter };
       }
-      return runDirectPlanExecution(paths, goal, config, events, checkpoint, maxIters, options);
+      // Await inside the supervisor try/catch so direct-path failures are
+      // classified and checkpointed before the run lock is released.
+      return await runDirectPlanExecution(paths, goal, config, events, checkpoint, maxIters, options);
     }
     checkpoint = await recoverIncompleteAttempt(paths, checkpoint, baseline, events);
     await runStartupScorerSelftest(paths, goal, baseline, config, events);
@@ -416,6 +420,21 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       } catch (error) {
         const usage = codexUsageFromError(error);
         const reason = errorMessage(error);
+        if (isToolUsageLimitFailure(reason)) {
+          await revertToBest(paths, baseline.best_commit);
+          await setPlanStepStatus(paths, step.id, 'pending');
+          checkpoint = {
+            ...checkpoint,
+            supervisor_state: 'STOP',
+            iter: nextIter - 1,
+            next_step: step.id,
+            ledger_seq: await lineCount(paths.ledger),
+            events_seq: events.seq,
+            plan_hash: await hashFile(paths.plan)
+          };
+          await saveCheckpoint(paths, checkpoint);
+          throw error;
+        }
         if (isTransientNetworkFailure(reason)) {
           const retryKey = `${step.id}:${nextIter}`;
           const attempt = (transientExecutorRetries.get(retryKey) ?? 0) + 1;
@@ -916,6 +935,25 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     return { state: 'STOP', reason: limitReason, iter: checkpoint.iter };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
+    if (isToolUsageLimitFailure(reason)) {
+      const usageReason = toolUsageLimitReason(reason);
+      const stopReason = `Agent usage limit reached; paused without retrying: ${usageReason}`;
+      await writeOutbox(paths, { kind: 'info', text: stopReason }).catch(() => undefined);
+      await events.emit('TOOL_USAGE_LIMIT_STOP', stopReason, { reason: usageReason }, 'warn').catch(() => undefined);
+      const stoppedCheckpoint = await readJsonFileMaybe<Checkpoint>(paths.checkpoint).catch(() => null)
+        ?? await loadCheckpoint(paths).catch(() => null);
+      const ledgerSeq = await lineCount(paths.ledger);
+      if (stoppedCheckpoint) {
+        await saveCheckpoint(paths, {
+          ...stoppedCheckpoint,
+          supervisor_state: 'STOP',
+          iter: ledgerSeq,
+          ledger_seq: ledgerSeq,
+          events_seq: events.seq
+        });
+      }
+      return { state: 'STOP', reason: stopReason, iter: ledgerSeq };
+    }
     await writeOutbox(paths, { kind: 'error', text: reason }).catch(() => undefined);
     await events.emit('FAILED', reason, undefined, 'error');
     const failedCheckpoint = await readJsonFileMaybe<Checkpoint>(paths.checkpoint).catch(() => null)
@@ -1092,6 +1130,17 @@ async function runDirectPlanExecution(
       });
       await appendLedger(paths, ledgerEntry);
       const ledgerAfterIteration = await readLedger(paths);
+      const noRunStall = directNoRunStall(ledgerAfterIteration, directNoRunThreshold());
+      if (noRunStall.stalled) {
+        checkpoint = {
+          ...checkpoint,
+          best_commit: regressed ? checkpoint.best_commit : directBestCommit,
+          events_seq: events.seq
+        };
+        await saveCheckpoint(paths, checkpoint);
+        const stopped = await stopDirectNoProgressForHuman(paths, goal, checkpoint, events, step.id, nextIter, noRunStall, 'Repeated explicit NoRun receipts reached the external-blocker boundary; pausing until a material trigger or a genuinely different avenue is provided.');
+        return stopped.stop;
+      }
       const directNoProgress = directNoProgressStall(ledgerAfterIteration, step.id, config);
       const shouldFreshAfterNoProgress = directNoProgress.count >= EXECUTOR_NO_PROGRESS_FRESH_THRESHOLD;
       checkpoint = {
@@ -1198,6 +1247,21 @@ async function runDirectPlanExecution(
       }
       const usage = codexUsageFromError(error);
       const reason = errorMessage(error);
+      if (isToolUsageLimitFailure(reason)) {
+        await revertToBest(paths, checkpoint.best_commit ?? 'NO_HEAD');
+        await setPlanStepStatus(paths, step.id, 'pending', nextIter);
+        checkpoint = {
+          ...checkpoint,
+          supervisor_state: 'STOP',
+          iter: nextIter - 1,
+          next_step: step.id,
+          ledger_seq: await lineCount(paths.ledger),
+          events_seq: events.seq,
+          plan_hash: await hashFile(paths.plan)
+        };
+        await saveCheckpoint(paths, checkpoint);
+        throw error;
+      }
       if (isExecutorContextWindowExhausted(reason)) {
         await events.emit('EXECUTOR_CONTEXT_WINDOW_RESET', 'Codex executor context window was exhausted; starting a fresh executor thread from durable PLAN/ledger state', {
           iter: nextIter,
@@ -1279,7 +1343,7 @@ async function runDirectPlanExecution(
         changedFiles: []
       });
       await appendLedger(paths, ledgerEntry);
-      const crashLoopCount = consecutiveCrashCount(await readLedger(paths), step.id, String(ledgerEntry.guards.reason));
+      const crashLoopCount = consecutiveCrashCount(await readLedger(paths), step.id, ledgerEntry.reflection);
       if (crashLoopCount >= 3) {
         await events.emit('EXECUTE_CRASH_LOOP_BLOCKED', `Blocked ${step.id} after ${crashLoopCount} consecutive executor crashes: ${reason}`, {
           iter: nextIter,
@@ -1381,50 +1445,13 @@ async function continueDirectExhaustedPlan(
     events_seq: events.seq
   };
   await saveCheckpoint(paths, checkpoint);
-  if (verdict.source === 'fallback' && continuationFallbacks >= continuationFallbackThreshold()) {
-    const threshold = continuationFallbackThreshold();
-    const replyKey = `${CONTINUATION_STALL_REPLY_PREFIX}${checkpoint.iter}`;
-    const reason = `Continuation gate fell back ${continuationFallbacks} consecutive time(s); pausing instead of continuing to manufacture work.`;
-    const questionText = buildContinuationStallQuestionText(reason, {
-      goal,
-      plan,
-      ledger,
-      verdict,
-      continuationFallbacks,
-      threshold
-    });
-    const question = await writeOutbox(paths, {
-      kind: 'question',
-      text: questionText,
-      replyKey,
-      data: {
-        mode: 'direct',
-        verdict,
-        consecutive_continuation_fallbacks: continuationFallbacks,
-        threshold,
-        recent_ledger: summarizeRecentLedgerForQuestion(ledger),
-        pending_steps: summarizePendingPlanSteps(plan)
-      }
-    });
-    checkpoint = {
-      ...checkpoint,
-      supervisor_state: 'STOP',
-      next_step: null,
-      ledger_seq: await lineCount(paths.ledger),
-      events_seq: events.seq,
-      plan_hash: await hashFile(paths.plan)
-    };
-    await saveCheckpoint(paths, checkpoint);
-    await events.emit('CONTINUATION_ESCALATED', reason, {
+  if (verdict.source === 'fallback' && fallbackState.counted && continuationFallbacks >= continuationFallbackThreshold()) {
+    await events.emit('CONTINUATION_FALLBACK_RECOVERY', `Continuation verdict fell back ${continuationFallbacks} time(s) across distinct execution states; planner recovery remains responsible for producing the next executable step.`, {
       mode: 'direct',
       verdict,
-      reply_key: replyKey,
-      outbox_id: question.id,
       consecutive_continuation_fallbacks: continuationFallbacks,
-      threshold
+      threshold: continuationFallbackThreshold()
     }, 'warn');
-    await events.emit('STOP', reason, { mode: 'direct', reply_key: replyKey, outbox_id: question.id }, 'warn');
-    return { goal, checkpoint, continued: false, stop: { state: 'STOP', reason, iter: checkpoint.iter } };
   }
   if (verdict.decision === 'complete') {
     const reason = `PLAN.md exhausted and completion gate marked the goal complete: ${verdict.reason}`;
@@ -1580,10 +1607,10 @@ async function replanDirectNoProgress(input: {
   plan: string;
   step: { id: string; text: string };
   iter: number;
-  stall: { count: number; threshold: number; reason: string };
+  stall: DirectProgressStall;
   ledger: LedgerEntry[];
 }): Promise<{ goal: GoalFile; checkpoint: Checkpoint; continued: boolean; stop?: SupervisorResult }> {
-  const reason = `Direct executor produced ${input.stall.count} consecutive no-progress reject receipt(s) for ${input.step.id}: ${input.stall.reason}`;
+  const reason = `Direct executor produced ${input.stall.count} consecutive non-acceptance reject receipt(s) for ${input.step.id}: ${input.stall.reason}`;
   await input.events.emit('DIRECT_NO_PROGRESS_REPLAN_REQUEST', `${reason}; requesting planner bottleneck review before pausing.`, {
     iter: input.iter,
     step_id: input.step.id,
@@ -1658,7 +1685,7 @@ async function stopDirectNoProgressForHuman(
   events: EventWriter,
   stepId: string,
   iter: number,
-  stall: { count: number; threshold: number; reason: string },
+  stall: DirectProgressStall,
   reason: string
 ): Promise<{ goal: GoalFile; checkpoint: Checkpoint; continued: boolean; stop: SupervisorResult }> {
   const replyKey = `stop-${goal.version}-${iter}-direct-stall`;
@@ -1675,15 +1702,19 @@ async function stopDirectNoProgressForHuman(
     text: [
       detailText,
       '',
-      `Repeated step: ${stepId}.`,
-      `Repeated receipt signature: ${stall.reason}`,
+      stall.kind === 'no_run_loop' ? `Latest step: ${stepId}; the repeated blocker spans recent PLAN steps.` : `Repeated step: ${stepId}.`,
+      `Repeated receipt pattern: ${stall.reason}`,
       '',
-      'For this stall, a useful steer should name the concrete evidence to collect, the alternate path to try, or the acceptance criterion that is already satisfied.'
+      stall.kind === 'no_run_loop'
+        ? 'Resume only when there is a material external-state trigger or a genuinely different avenue; renaming another status probe is not progress.'
+        : 'For this stall, a useful steer should name the concrete evidence to collect, the alternate path to try, or the acceptance criterion that is already satisfied.'
     ].join('\n'),
     replyKey,
     data: {
       mode: 'direct',
+      stall_kind: stall.kind,
       step_id: stepId,
+      consecutive_no_progress_receipts: stall.count,
       consecutive_duplicate_direct_rejects: stall.count,
       threshold: stall.threshold,
       latest_reason: stall.reason,
@@ -1700,7 +1731,7 @@ async function stopDirectNoProgressForHuman(
     plan_hash: await hashFile(paths.plan)
   };
   await saveCheckpoint(paths, checkpoint);
-  await events.emit('DIRECT_NO_PROGRESS_ESCALATED', reason, {
+  await events.emit(stall.kind === 'no_run_loop' ? 'DIRECT_NO_RUN_ESCALATED' : 'DIRECT_NO_PROGRESS_ESCALATED', reason, {
     iter,
     step_id: stepId,
     mode: 'direct',
@@ -1718,7 +1749,7 @@ async function buildDirectNoProgressReplanSteerText(
   goal: GoalFile,
   plan: string,
   step: { id: string; text: string },
-  stall: { count: number; threshold: number; reason: string },
+  stall: DirectProgressStall,
   ledger: LedgerEntry[]
 ): Promise<string> {
   const recentLedger = ledger.slice(-8).map((entry) => ({
@@ -1737,13 +1768,18 @@ async function buildDirectNoProgressReplanSteerText(
   return [
     'Direct execution is stuck in a no-progress loop and needs a planner bottleneck review before more executor turns are allowed.',
     `The repeated step is ${step.id}: ${step.text}.`,
-    `Observed stall: ${stall.count} consecutive no-progress reject receipts reached threshold ${stall.threshold}.`,
-    `Repeated receipt signature: ${stall.reason}`,
+    `Observed stall: ${stall.count} consecutive non-acceptance reject receipts reached threshold ${stall.threshold}.`,
+    `Repeated receipt pattern: ${stall.reason}`,
     '',
     'Planner task:',
     '- Re-read GOAL.md, PLAN.md, ASSUMPTIONS.md, recent ledger, lessons, and context.',
     '- Restate the actual bottleneck and update GOAL.md if the current goal/validation contract is missing an active requirement, stop boundary, or acceptance gap.',
     '- Update PLAN.md to close the ineffective repeated step and add the next concrete executable step.',
+    '- Treat changed files, longer diagnostics, renamed steps, and additional receipt artifacts as activity, not goal progress. State what acceptance evidence or causal knowledge actually changed.',
+    '- Record the exhausted avenue and the falsified hypothesis. The next step must test a different mechanism or architecture boundary, not another parameter value in the same sweep.',
+    '- Before tuning thresholds or retry limits, require evidence that the parameter family materially controls the target bottleneck. Prefer source attribution, ownership/lifecycle boundaries, and byte/cost breakdowns over blind local sweeps.',
+    '- Define one falsifiable hypothesis, the discriminating observation, and the branch to take if it fails.',
+    '- If recent receipts are explicit NoRun results for an unchanged external blocker, do not create another status probe. Leave no executable step and name the exact material trigger needed to resume.',
     '- If PLAN.md is only an external/remote-plan wrapper, repair it by preserving the referenced plan as an Original External Plan Snapshot and adding an Expanded Execution Plan with concrete technical steps before continuing.',
     '- Do not just ask for human input because executor repeated status checks; first try to recover by planning.',
     '- Brainstorm and select a bounded next method when useful: instrumentation, targeted trace, log audit, state/path inspection, smaller validation, or an alternate hypothesis within the existing user scope.',
@@ -1789,6 +1825,10 @@ async function buildDirectPlanContinuationSteerText(
     'Do not mark the overall run complete solely because the current plan is exhausted.',
     `The continue-biased completion gate chose to continue: ${continuationReason}`,
     'Read GOAL.md, PLAN.md, ASSUMPTIONS.md, lessons, and recent ledger/context below, then derive the next concrete high-value executable step that advances the active goal.',
+    'A fallback completion verdict is not permission to pause before planner recovery. First consume the latest receipt next_actions and convert any safe in-scope setup, dependency acquisition, toolchain installation, or supported alternate implementation path into an executable PLAN step.',
+    'Do not hand ordinary non-auth prerequisites back to the operator. Ask only when credentials, license acceptance, destructive machine-wide change, or external authority is genuinely required and no safe scoped alternative exists.',
+    'If GOAL.md or user steering pins a commit, artifact, environment, or baseline, treat that identity as authoritative. A failed reproduction may expose an environment or harness mismatch, but must not silently replace the pinned identity or reopen neighboring-commit archaeology.',
+    'After diagnostics have identified the earliest actionable boundary, prefer an implementation or dependency-unblocking step over another proof-of-absence/status receipt.',
     'Deepen quality within the fixed user scope. You may refine acceptance evidence, quality thresholds, validation rigor, boundary statements, and goal wording that remain within the existing requirement.',
     'Do not invent new product scope, features, deployments, benchmarks, or user requirements. New scope may only come from user Chat or hot-reload injections.',
     'Append or update PLAN.md with that next step and leave it pending. Keep prior completed steps intact.',
@@ -2229,33 +2269,18 @@ function previousKeepMetric(ledger: LedgerEntry[]): MetricStats | null {
 }
 
 function consecutiveCrashCount(ledger: LedgerEntry[], stepId: string, reason: string): number {
+  const signature = crashFailureSignature(reason);
   let count = 0;
   for (let index = ledger.length - 1; index >= 0; index -= 1) {
     const entry = ledger[index];
-    if (entry.step_id !== stepId || entry.status !== 'crash' || entry.guards.reason !== reason) break;
+    if (entry.step_id !== stepId || entry.status !== 'crash' || crashFailureSignature(entry.reflection) !== signature) break;
     count += 1;
   }
   return count;
 }
 
-function directNoProgressStall(ledger: LedgerEntry[], stepId: string, config: WiCiConfig): { stalled: boolean; count: number; threshold: number; reason: string } {
-  const threshold = directNoProgressThreshold(config);
-  let count = 0;
-  let reason = '';
-  for (let index = ledger.length - 1; index >= 0; index -= 1) {
-    const entry = ledger[index];
-    if (!isNoProgressDirectReject(entry, stepId)) break;
-    const currentReason = normalizeDirectRejectReason(String(entry.guards.reason ?? ''));
-    if (!reason) reason = currentReason;
-    if (currentReason !== reason) break;
-    count += 1;
-  }
-  return {
-    stalled: count >= threshold,
-    count,
-    threshold,
-    reason: reason || 'latest direct reject was not a repeated no-progress receipt'
-  };
+function directNoProgressStall(ledger: LedgerEntry[], stepId: string, config: WiCiConfig): DirectProgressStall {
+  return directRejectStall(ledger, stepId, directNoProgressThreshold(config));
 }
 
 function directNoProgressThreshold(config: WiCiConfig): number {
@@ -2265,28 +2290,8 @@ function directNoProgressThreshold(config: WiCiConfig): number {
   return Math.max(3, config.retry.stall_replan_after);
 }
 
-function isNoProgressDirectReject(entry: LedgerEntry, stepId: string): boolean {
-  return (
-    entry.step_id === stepId &&
-    entry.status === 'reject' &&
-    entry.confidence === 'direct-executor-receipt' &&
-    entry.metric === null &&
-    entry.guards.direct === true &&
-    entry.guards.step_done === true &&
-    entry.guards.tests_pass === false &&
-    Number(entry.guards.changed_files ?? 0) === 0
-  );
-}
-
-function normalizeDirectRejectReason(reason: string): string {
-  return reason
-    .replace(/\biter(?:ation)?[-\s:]*\d+\b/gi, 'iter#')
-    .replace(/\bS\d+[a-z]?\b/g, 'S#')
-    .replace(/\b\d{4}-\d{2}-\d{2}T[0-9:.+-]+Z\b/g, 'timestamp')
-    .replace(/\b\d+\b/g, '#')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 200);
+function directNoRunThreshold(): number {
+  return envPositiveInt('WICI_DIRECT_NO_RUN_THRESHOLD', 3);
 }
 
 function directMetricDeltaPct(base: MetricStats, next: MetricStats, direction: GoalFile['metric']['direction']): number {

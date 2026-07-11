@@ -9,6 +9,7 @@ import type { Checkpoint, GoalFile, IterResult, ToolInvocationResult, WiCiConfig
 import { CodexRunError, appendCodexRunTranscript, assertCodexRunSucceeded, parseCodexRunEvents, syntheticCodexRunEvent } from './codexRun.js';
 import { formatSafetyForPrompt } from './safety.js';
 import { startCodexAppServerTurn } from './codexAppServer.js';
+import { isToolUsageLimitFailure } from './agentFailure.js';
 
 const EXECUTOR_IDLE_TIMEOUT_MS = 60 * 60_000;
 const EXECUTOR_HARD_TIMEOUT_MS = 12 * 60 * 60_000;
@@ -209,6 +210,7 @@ export async function startExecutorStep(
             };
           })
           .catch(async (error) => {
+            if (isToolUsageLimitFailure(errorMessage(error))) throw error;
             await options.onBackendFallback?.({
               from: 'app-server',
               to: 'exec',
@@ -226,6 +228,7 @@ export async function startExecutorStep(
         interrupt: turn.interrupt
       };
     } catch (error) {
+      if (isToolUsageLimitFailure(errorMessage(error))) throw error;
       await options.onBackendFallback?.({
         from: 'app-server',
         to: 'exec',
@@ -284,6 +287,8 @@ async function buildExecutorPrompt(
       `Before architecture-sensitive changes or debugging, infer the target system invariants from repo docs, code paths, logs, tests, ledger/receipts, and ASSUMPTIONS.md: source of truth, ownership boundary, resource identity/lifecycle, translation or mapping points, fallback policy, and proof evidence.`,
       `Debug deeply when needed: add bounded instrumentation, correlate logs across boundaries, inspect call stacks/modules/return values, bisect, profile, and run targeted experiments, while respecting inferred invariants and avoiding unlabelled fallbacks or masked ownership/resource mapping gaps.`,
       `Only mark diagnostic work done when you have decision-quality evidence: narrowed root cause, falsified hypothesis, concrete next experiment, or durable invariant/constraint; if the blocker remains, name the earliest suspicious point, what was ruled out, and the next highest-value test.`,
+      `Safe non-auth build tools and dependencies are implementation work: acquire them scoped/reversibly or use supported alternatives; ask only for credentials, license acceptance, destructive system changes, or external authority.`,
+      `A user-pinned commit, artifact, environment, or baseline is authoritative; reproduction failure indicates a harness/environment mismatch, not permission to substitute revisions or reopen baseline archaeology.`,
       `If ${planPath} is only a shallow external-plan wrapper that says to read/follow a remote plan without carrying its technical contents locally, treat that as a plan/harness defect: fetch or re-read the external plan, update ${planPath} with an Original External Plan Snapshot plus an Expanded Execution Plan, then execute the next concrete technical step instead of returning another status-only receipt.`,
       `When you intentionally change target repository files, validate them and create the git commit yourself as directed by ${planPath}. Thinkless will not run git add or git commit for direct V1 execution.`,
       `For long-running installs, builds, SSH tasks, model downloads, and benchmarks, prefer commands that stream progress or write logs you can tail so the TUI remains observable.`,
@@ -311,6 +316,8 @@ async function buildExecutorPrompt(
     `Do not stop at the first failing command. Diagnose the failure, inspect logs/state, add bounded instrumentation, correlate logs across boundaries, inspect call stacks/modules/return values, bisect, profile, update the plan if needed, and continue with the best next attempt until the goal is actually satisfied or you have concrete evidence that it cannot be satisfied.`,
     `Aggressive debugging is allowed when it is bounded and evidence-producing, but it must respect inferred architecture invariants: no unlabelled fallback, no masking missing ownership/resource mappings, and no pretending compatibility data is authoritative truth.`,
     `Only mark diagnostic work done when you have decision-quality evidence: narrowed root cause, falsified hypothesis, concrete next experiment, or durable invariant/constraint. If the blocker remains, report the earliest suspicious point, what you ruled out, and the next highest-value test; adding logs without a new conclusion is partial/reject, not done.`,
+    `Safe non-auth build tools and dependencies are implementation work: acquire them scoped/reversibly or use supported alternatives; ask only for credentials, license acceptance, destructive system changes, or external authority.`,
+    `A user-pinned commit, artifact, environment, or baseline is authoritative; reproduction failure indicates a harness/environment mismatch, not permission to substitute revisions or reopen baseline archaeology.`,
     `If repeated iterations have the same blocker, same evidence, or same reject reason, change strategy or inspect the plan/harness/receipt path instead of repeating the same test.`,
     `If ${planPath} is only a shallow external-plan wrapper that says to read/follow a remote plan without carrying its technical contents locally, treat that as a plan/harness defect: fetch or re-read the external plan, update ${planPath} with an Original External Plan Snapshot plus an Expanded Execution Plan, then execute the next concrete technical step instead of returning another status-only receipt.`,
     `When the task depends on unfamiliar tools, models, services, runtimes, or deployment practices, research the relevant documentation or tutorials yourself using the native tools available to Codex; do not require the user to include research/debugging instructions in Chat.`,

@@ -3,17 +3,17 @@ import { resolve } from 'node:path';
 import { createSampleTarget } from '../sample.js';
 import { readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
-import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
+import type { Checkpoint, RunEvent } from '../shared/types.js';
 import { continuationFallbackState } from '../supervisor/continuation.js';
-import { writeInjection } from '../supervisor/inbox.js';
 import { runSupervisor } from '../supervisor/index.js';
-import { readOutbox } from '../supervisor/outbox.js';
 
 const target = resolve('fixture/continuation-escalation-target');
 
 async function main(): Promise<void> {
   const originalThreshold = process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD;
+  const originalDedupThreshold = process.env.WICI_STEP_DEDUP_CONSECUTIVE;
   process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD = '2';
+  process.env.WICI_STEP_DEDUP_CONSECUTIVE = '99';
   try {
     verifyFallbackStateDeduplication();
     await createSampleTarget(target, true);
@@ -22,64 +22,31 @@ async function main(): Promise<void> {
 
     const first = await runSupervisor({
       target,
-      goal: 'Keep deriving useful direct steps after the current markdown plan is exhausted, but escalate if the completion gate cannot evaluate.',
-      maxIters: 5,
+      goal: 'Keep deriving useful direct steps after the current markdown plan is exhausted; fallback completion verdicts must not preempt planner recovery.',
+      maxIters: 3,
       mode: 'stub'
     });
-    assert(first.state === 'STOP', `fallback escalation should stop, got ${JSON.stringify(first)}`);
-    assert(first.reason.includes('Continuation gate fell back 2 consecutive time'), `unexpected escalation reason: ${first.reason}`);
-
-    const messages = await readOutbox(paths, 20);
-    const question = messages.find((message) => message.kind === 'question' && message.reply_key?.startsWith('continuation-stall-'));
-    assert(question?.reply_key, `missing continuation-stall question: ${JSON.stringify(messages)}`);
-    assert(question.text.includes('pausing instead of continuing'), `unexpected escalation question: ${question.text}`);
-    assert(question.text.includes('Progress:') && question.text.includes('Bottleneck:') && question.text.includes('Possible next actions:'), `continuation question lacks decision context:\n${question.text}`);
-    assert(question.text.includes('Ask a status question in Chat'), `continuation question must explain that status questions remain conversational:\n${question.text}`);
-    const questionData = question.data as { recent_ledger?: unknown[]; pending_steps?: unknown[] } | undefined;
-    assert(Array.isArray(questionData?.recent_ledger), `continuation question missing recent ledger data: ${JSON.stringify(question.data)}`);
-    assert(Array.isArray(questionData?.pending_steps), `continuation question missing pending step data: ${JSON.stringify(question.data)}`);
+    assert(first.state === 'STOP' && first.reason === 'Reached max_iters=3', `fallback recovery should continue until the explicit iteration bound: ${JSON.stringify(first)}`);
 
     const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
-    assert(checkpoint.supervisor_state === 'STOP', `checkpoint should stop after escalation: ${checkpoint.supervisor_state}`);
-    assert(checkpoint.consecutive_continuation_fallbacks === 2, `fallback counter not persisted: ${JSON.stringify(checkpoint)}`);
+    assert(checkpoint.supervisor_state === 'STOP', `checkpoint should stop only at max_iters: ${checkpoint.supervisor_state}`);
+    assert((checkpoint.consecutive_continuation_fallbacks ?? 0) >= 2, `fallback counter not persisted across distinct recovery states: ${JSON.stringify(checkpoint)}`);
 
     const events = await readJsonLines<RunEvent>(paths.events);
-    assert(events.some((event) => event.type === 'CONTINUATION_ESCALATED'), 'missing CONTINUATION_ESCALATED event');
+    assert(events.some((event) => event.type === 'CONTINUATION_FALLBACK_RECOVERY'), 'missing CONTINUATION_FALLBACK_RECOVERY event');
+    assert(!events.some((event) => event.type === 'CONTINUATION_ESCALATED'), 'fallback verdict alone must not escalate to human STOP');
     assert(events.filter((event) => event.type === 'DIRECT_CONTINUATION_VERDICT' && event.message.includes('continue')).length >= 2, 'missing fallback verdict events');
-
-    const ledgerBeforeWait = await readJsonLines<LedgerEntry>(paths.ledger);
-    const waiting = await runSupervisor({ target, maxIters: 5, mode: 'stub' });
-    assert(waiting.state === 'STOP' && waiting.reason === 'awaiting stop answer', `run should wait for continuation-stall answer: ${JSON.stringify(waiting)}`);
-    const ledgerAfterWait = await readJsonLines<LedgerEntry>(paths.ledger);
-    assert(ledgerAfterWait.length === ledgerBeforeWait.length, `waiting run unexpectedly advanced ledger: ${ledgerBeforeWait.length}->${ledgerAfterWait.length}`);
-
-    const steer = await writeInjection(paths, {
-      kind: 'steer',
-      text: 'Resume with one concrete verification step and avoid duplicate busywork.',
-      reply_to: question.reply_key,
-      priority: 'normal'
-    });
-    const resumed = await runSupervisor({ target, maxIters: 2, mode: 'stub' });
-    assert(resumed.state === 'STOP' && resumed.reason === 'Reached max_iters=2', `steer resume should continue to max_iters=2: ${JSON.stringify(resumed)}`);
-    const afterResumeCheckpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
-    assert(afterResumeCheckpoint.drained_inbox.includes(steer.id), `steer injection was not drained: ${JSON.stringify(afterResumeCheckpoint.drained_inbox)}`);
-    assert((afterResumeCheckpoint.consecutive_continuation_fallbacks ?? 0) <= 1, `fallback counter should reset before resumed work: ${JSON.stringify(afterResumeCheckpoint)}`);
-    const answered = (await readOutbox(paths, 20)).find((message) => message.id === question.id);
-    assert(answered?.answered === true && answered.answer_text?.includes('steer:'), `continuation-stall question was not marked answered: ${JSON.stringify(answered)}`);
-    const ledgerAfterResume = await readJsonLines<LedgerEntry>(paths.ledger);
-    assert(ledgerAfterResume.length > ledgerAfterWait.length, `steer resume did not execute new work: ${ledgerAfterWait.length}->${ledgerAfterResume.length}`);
+    assert(events.filter((event) => event.type === 'EXECUTE_START').length === 3, 'planner fallback recovery must execute through the explicit iteration bound');
     const plan = await readFile(paths.plan, 'utf8');
-    assert(plan.includes('Resume with one concrete verification step'), `resumed continuation did not add steer-driven work:\n${plan}`);
+    assert(plan.includes('status:done iter:3'), `planner recovery did not continue producing executable work through the explicit bound:\n${plan}`);
 
     console.log(
       JSON.stringify(
         {
           ok: true,
-          continuation_escalated: true,
+          fallback_recovery_continues: true,
           repeated_state_counted_once: true,
-          waits_without_input: true,
-          steer_resumes: true,
-          reply_key: question.reply_key
+          human_stop_not_preemptive: true
         },
         null,
         2
@@ -88,6 +55,8 @@ async function main(): Promise<void> {
   } finally {
     if (originalThreshold === undefined) delete process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD;
     else process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD = originalThreshold;
+    if (originalDedupThreshold === undefined) delete process.env.WICI_STEP_DEDUP_CONSECUTIVE;
+    else process.env.WICI_STEP_DEDUP_CONSECUTIVE = originalDedupThreshold;
     await rm(target, { recursive: true, force: true });
   }
 }

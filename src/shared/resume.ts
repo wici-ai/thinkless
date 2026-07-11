@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { exists, readJsonFileMaybe, readJsonLines } from './atomic.js';
+import { exists, readJsonFileMaybe, readJsonLines, readJsonLinesTail } from './atomic.js';
 import { isNumberedSessionDirName, runPaths, type RunPaths } from './paths.js';
 import type { ChatLogEntry, Checkpoint, GoalFile, OutboxMessage, RunEvent } from './types.js';
 
@@ -61,7 +61,7 @@ export async function loadResumeContext(candidate: Pick<ResumeCandidate, 'target
   const [goal, checkpoint, events] = await Promise.all([
     readJsonFileMaybe<GoalFile>(paths.goal),
     readJsonFileMaybe<Checkpoint>(paths.checkpoint),
-    readJsonLines<RunEvent>(paths.events)
+    readJsonLinesTail<RunEvent>(paths.events, 500)
   ]);
   return {
     candidate: await candidateFromPaths(paths, candidate.sessionDir),
@@ -234,8 +234,9 @@ function blocked(reason: string): Pick<ResumeCandidate, 'runnable' | 'status' | 
 
 async function readOutbox(path: string): Promise<OutboxMessage[]> {
   try {
-    const names = (await readdir(path)).filter((name) => /^out-.+\.json$/.test(name)).sort();
-    const messages = await Promise.all(names.map((name) => readJsonFileMaybe<OutboxMessage>(join(path, name))));
+    const names = (await readdir(path)).filter((name) => /^out-.+\.json$/.test(name)).sort().slice(-100);
+    const messages: Array<OutboxMessage | null> = [];
+    for (const name of names) messages.push(await readJsonFileMaybe<OutboxMessage>(join(path, name)));
     return messages.filter((message): message is OutboxMessage => Boolean(message));
   } catch {
     return [];
