@@ -4,6 +4,7 @@ import { createSampleTarget } from '../sample.js';
 import { readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
+import { continuationFallbackState } from '../supervisor/continuation.js';
 import { writeInjection } from '../supervisor/inbox.js';
 import { runSupervisor } from '../supervisor/index.js';
 import { readOutbox } from '../supervisor/outbox.js';
@@ -14,6 +15,7 @@ async function main(): Promise<void> {
   const originalThreshold = process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD;
   process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD = '2';
   try {
+    verifyFallbackStateDeduplication();
     await createSampleTarget(target, true);
     const paths = runPaths(target);
     await writeExhaustedPlan(paths.plan);
@@ -74,6 +76,7 @@ async function main(): Promise<void> {
         {
           ok: true,
           continuation_escalated: true,
+          repeated_state_counted_once: true,
           waits_without_input: true,
           steer_resumes: true,
           reply_key: question.reply_key
@@ -87,6 +90,47 @@ async function main(): Promise<void> {
     else process.env.WICI_CONTINUATION_FALLBACK_THRESHOLD = originalThreshold;
     await rm(target, { recursive: true, force: true });
   }
+}
+
+function verifyFallbackStateDeduplication(): void {
+  const initial = continuationFallbackState(
+    { ledger_seq: 22, plan_hash: 'same-plan', consecutive_continuation_fallbacks: 1 },
+    'fallback'
+  );
+  assert(initial.count === 2 && initial.counted, `new fallback state should increment once: ${JSON.stringify(initial)}`);
+
+  const repeated = continuationFallbackState(
+    {
+      ledger_seq: 22,
+      plan_hash: 'same-plan',
+      consecutive_continuation_fallbacks: initial.count,
+      last_continuation_fallback_state_key: initial.stateKey
+    },
+    'fallback'
+  );
+  assert(repeated.count === 2 && !repeated.counted, `same ledger/plan state must not increment after resume: ${JSON.stringify(repeated)}`);
+
+  const advanced = continuationFallbackState(
+    {
+      ledger_seq: 23,
+      plan_hash: 'new-plan',
+      consecutive_continuation_fallbacks: repeated.count,
+      last_continuation_fallback_state_key: repeated.stateKey
+    },
+    'fallback'
+  );
+  assert(advanced.count === 3 && advanced.counted, `changed ledger/plan state should count as real progress boundary: ${JSON.stringify(advanced)}`);
+
+  const recovered = continuationFallbackState(
+    {
+      ledger_seq: 23,
+      plan_hash: 'new-plan',
+      consecutive_continuation_fallbacks: advanced.count,
+      last_continuation_fallback_state_key: advanced.stateKey
+    },
+    'llm'
+  );
+  assert(recovered.count === 0 && recovered.stateKey === undefined, `non-fallback verdict should reset the fallback streak: ${JSON.stringify(recovered)}`);
 }
 
 async function writeExhaustedPlan(path: string): Promise<void> {

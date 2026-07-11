@@ -106,7 +106,7 @@ export async function directContinuationVerdict(
       source: 'deterministic'
     };
   }
-  if (analysis.no_recent_keep && analysis.ewma_marginal_value < analysis.tau) {
+  if (hasQuantifiedMetricTarget(goal) && analysis.no_recent_keep && analysis.ewma_marginal_value < analysis.tau) {
     return {
       decision: 'continue',
       reason: `Deterministic continuation stall: no keep in the last ${analysis.N} ledger row(s) and marginal value ${formatNumber(analysis.ewma_marginal_value)} is below tau ${formatNumber(analysis.tau)}.`,
@@ -143,6 +143,10 @@ export async function directContinuationVerdict(
   }
 
   return fallback;
+}
+
+function hasQuantifiedMetricTarget(goal: GoalFile): boolean {
+  return typeof goal.metric.target === 'number' && Number.isFinite(goal.metric.target);
 }
 
 async function runDirectContinuationVerdictTool(paths: RunPaths, prompt: string, config: WiCiConfig): Promise<string> {

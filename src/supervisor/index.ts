@@ -35,6 +35,7 @@ import {
 } from './evaluate.js';
 import { commitAll, commitAllWithKey, currentCommit, ensureGitIdentity, ensureGitRepo, hasChanges, resolveGitWorktreeRoot, tagBest, tagPerf, revertToBest, resetToCommit } from './gitgate.js';
 import { directContinuationVerdict, shouldStop } from './stop.js';
+import { continuationFallbackState } from './continuation.js';
 import {
   assertRealToolsReady,
   checkToolHealth,
@@ -1360,15 +1361,23 @@ async function continueDirectExhaustedPlan(
 
   const ledger = await readLedger(paths);
   const verdict = await directContinuationVerdict(paths, goal, ledger, config);
+  const fallbackState = continuationFallbackState(checkpoint, verdict.source);
   await events.emit(
     'DIRECT_CONTINUATION_VERDICT',
     `Direct completion gate chose ${verdict.decision}: ${verdict.reason}`,
-    { verdict, mode: 'direct' }
+    {
+      verdict,
+      mode: 'direct',
+      continuation_state_key: fallbackState.stateKey ?? null,
+      fallback_counted: fallbackState.counted,
+      consecutive_continuation_fallbacks: fallbackState.count
+    }
   );
-  const continuationFallbacks = verdict.source === 'fallback' ? (checkpoint.consecutive_continuation_fallbacks ?? 0) + 1 : 0;
+  const continuationFallbacks = fallbackState.count;
   checkpoint = {
     ...checkpoint,
     consecutive_continuation_fallbacks: continuationFallbacks,
+    last_continuation_fallback_state_key: fallbackState.stateKey,
     events_seq: events.seq
   };
   await saveCheckpoint(paths, checkpoint);
@@ -1424,6 +1433,7 @@ async function continueDirectExhaustedPlan(
       supervisor_state: 'STOP',
       next_step: null,
       consecutive_continuation_fallbacks: 0,
+      last_continuation_fallback_state_key: undefined,
       consecutive_duplicate_continuation_steps: 0,
       ledger_seq: await lineCount(paths.ledger),
       events_seq: events.seq,
@@ -2932,6 +2942,7 @@ async function handlePendingStopQuestion(
       ...checkpoint,
       drained_inbox: [...checkpoint.drained_inbox, ...injectionIds(drained)],
       consecutive_continuation_fallbacks: continuationStall ? 0 : checkpoint.consecutive_continuation_fallbacks,
+      last_continuation_fallback_state_key: continuationStall ? undefined : checkpoint.last_continuation_fallback_state_key,
       consecutive_duplicate_continuation_steps: continuationStall ? 0 : checkpoint.consecutive_duplicate_continuation_steps,
       consecutive_duplicate_direct_rejects: directStall ? 0 : checkpoint.consecutive_duplicate_direct_rejects,
       events_seq: events.seq
@@ -2952,6 +2963,7 @@ async function handlePendingStopQuestion(
   const next = {
     ...checkpoint,
     consecutive_continuation_fallbacks: continuationStall ? 0 : checkpoint.consecutive_continuation_fallbacks,
+    last_continuation_fallback_state_key: continuationStall ? undefined : checkpoint.last_continuation_fallback_state_key,
     consecutive_duplicate_continuation_steps: continuationStall ? 0 : checkpoint.consecutive_duplicate_continuation_steps,
     consecutive_duplicate_direct_rejects: directStall ? 0 : checkpoint.consecutive_duplicate_direct_rejects,
     events_seq: events.seq

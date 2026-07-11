@@ -328,9 +328,9 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 
 `npm run verify:self-interrogation` covers AI-led planning assumptions: the planner prompt requires 2-3 approaches, self-grilling, narrow `## QUESTION` use, and materializes `ASSUMPTIONS.md`.
 
-`npm run verify:continuation-verdict` covers the direct completion gate: explicit `complete` stops, explicit `continue` continues, and ambiguous or stub verdicts fall back to continue.
+`npm run verify:continuation-verdict` covers the direct completion gate: explicit `complete` stops, explicit `continue` continues, and ambiguous or stub verdicts fall back to continue. Keep-only plateau short-circuiting applies only to goals with a finite numeric metric target; functional goals without one always reach the completion verdict so diagnostic receipts can establish completion.
 
-`npm run verify:continuation-escalation` covers the direct completion gate stall path: repeated fallback verdicts pause with a `continuation-stall-*` outbox question, wait without advancing, and resume through the existing steer path.
+`npm run verify:continuation-escalation` covers the direct completion gate stall path: repeated fallback verdicts on distinct `ledger_seq + plan_hash` states pause with a `continuation-stall-*` outbox question, wait without advancing, and resume through the existing steer path. A process restart on the same ledger/plan state does not increment the streak again.
 
 `npm run verify:step-dedup` covers continuation-step duplicate detection: near-identical planner-diff steps are rejected, PLAN.md is restored, and the run escalates through the continuation outbox channel while distinct steps pass the similarity gate.
 

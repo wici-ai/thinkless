@@ -29,12 +29,22 @@ async function main(): Promise<void> {
 
     const plateau = await directContinuationVerdict(
       paths,
-      goal('plateau-goal', { target: null, tau: 0.01, N: 2, K: 3 }),
+      goal('plateau-goal', { target: 100, tau: 0.01, N: 2, K: 3 }),
       [ledgerEntry(1, 'keep', metric(5), 0), ledgerEntry(2, 'reject', null, null), ledgerEntry(3, 'reject', null, null)],
       config('stub', 'codex')
     );
     assert(plateau.decision === 'continue' && plateau.source === 'fallback', `expected deterministic plateau to route through escalation fallback, got ${JSON.stringify(plateau)}`);
     assert(plateau.reason.includes('Deterministic continuation stall'), `unexpected plateau reason: ${plateau.reason}`);
+
+    await writeFile(paths.goalDoc, '# functional-complete-goal\n\nThe diagnostic receipts prove the functional goal is complete.\n');
+    const functionalComplete = await directContinuationVerdict(
+      paths,
+      goal('functional-complete-goal', { target: null, tau: 0.01, N: 2, K: 3 }),
+      [ledgerEntry(1, 'reject', null, null), ledgerEntry(2, 'reject', null, null)],
+      config('auto', 'codex')
+    );
+    assert(functionalComplete.decision === 'complete', `functional goals without a numeric target must reach the LLM completion gate, got ${JSON.stringify(functionalComplete)}`);
+    assert(functionalComplete.source === 'llm', `functional goal was incorrectly short-circuited by keep-only plateau logic: ${JSON.stringify(functionalComplete)}`);
 
     await writeFile(paths.goalDoc, '# complete-goal\n\nAll acceptance evidence is present.\n');
     const complete = await directContinuationVerdict(paths, goal('complete-goal'), [], config('auto', 'claude'));
@@ -68,6 +78,7 @@ async function main(): Promise<void> {
           deterministic_target_met_stops: true,
           deterministic_primary_done_stops: true,
           deterministic_plateau_escalates: true,
+          functional_receipts_reach_completion_gate: true,
           codex_planner_verdict_supported: true,
           ambiguous_falls_back_to_continue: true,
           stub_falls_back_to_continue: true
