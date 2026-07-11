@@ -4,7 +4,20 @@ import https from 'node:https';
 import { resolve } from 'node:path';
 import { commandExists } from '../shared/commands.js';
 import { TOOL_ROOT } from '../shared/paths.js';
+import { runtimeAgentFromCommand, type RuntimeAgent } from '../shared/runtime.js';
 import type { Checkpoint, WiCiConfig } from '../shared/types.js';
+
+export type CodexInstallMethod = 'npm' | 'homebrew' | 'standalone';
+
+export interface ToolUpdateResult {
+  attempted: boolean;
+  ok: boolean;
+  method: string;
+  command?: string;
+  args?: string[];
+  exitCode?: number;
+  error?: string;
+}
 
 export interface ToolHealth {
   command: string;
@@ -13,6 +26,7 @@ export interface ToolHealth {
   doctor?: string;
   doctorError?: string;
   updatePending?: boolean;
+  update?: ToolUpdateResult;
   error?: string;
 }
 
@@ -32,6 +46,22 @@ export interface ToolVersionDriftReport {
 
 export interface ToolVersionDriftOptions {
   allowWiCiBoundary?: boolean;
+}
+
+export interface ToolAutoUpdateBoundaryOptions {
+  resumePreflight?: boolean;
+}
+
+interface ExternalToolUpdateCommandResult {
+  exitCode: number;
+  stdout: string;
+  all?: string;
+}
+
+export interface ExternalToolUpdateOptions {
+  runCommand?: (command: string, args: string[]) => Promise<ExternalToolUpdateCommandResult>;
+  detectCodexInstallMethod?: (runCommand: NonNullable<ExternalToolUpdateOptions['runCommand']>) => Promise<CodexInstallMethod>;
+  platform?: NodeJS.Platform;
 }
 
 export interface ThinklessReleaseInfo {
@@ -69,9 +99,10 @@ interface ThinklessSelfUpdateOptions {
 }
 
 export async function checkToolHealth(config: WiCiConfig, options: ToolHealthOptions = {}): Promise<ToolHealthReport> {
+  const commands = configuredExternalToolCommands(config);
   const [codex, claude, github] = await Promise.all([
-    inspectTool(config.tools.executor.command, ['--version'], ['doctor']),
-    inspectClaude(config.tools.planner.command, options.probeClaude === true),
+    inspectTool(commands.codex, ['--version'], ['doctor']),
+    inspectClaude(commands.claude, options.probeClaude === true),
     inspectTool('gh', ['--version'], [])
   ]);
   return { codex, claude, github };
@@ -98,10 +129,14 @@ export async function toolVersionsFromHealth(config: WiCiConfig, report: ToolHea
   };
 }
 
-export function shouldAutoUpdateToolsAtBoundary(config: WiCiConfig, checkpoint: Checkpoint): boolean {
+export function shouldAutoUpdateToolsAtBoundary(
+  config: WiCiConfig,
+  checkpoint: Checkpoint,
+  options: ToolAutoUpdateBoundaryOptions = {}
+): boolean {
   if (config.tools.mode === 'stub') return false;
   if (config.tools.auto_update === false) return false;
-  return !checkpoint.tool_versions || checkpoint.supervisor_state === 'STOP' || checkpoint.supervisor_state === 'FAILED';
+  return options.resumePreflight === true || !checkpoint.tool_versions || checkpoint.supervisor_state === 'STOP' || checkpoint.supervisor_state === 'FAILED';
 }
 
 export function reconcileToolVersionDrift(
@@ -151,18 +186,139 @@ export function assertNoActiveToolVersionDrift(checkpoint: Checkpoint, current: 
   void reconcileToolVersionDrift(checkpoint, current);
 }
 
-export async function updateToolsBetweenRuns(config: WiCiConfig): Promise<ToolHealthReport> {
-  const codexAvailable = await commandAvailable(config.tools.executor.command);
-  if (codexAvailable) {
-    await execa(config.tools.executor.command, ['update'], { reject: false, all: true });
+export async function updateToolsBetweenRuns(config: WiCiConfig, options: ExternalToolUpdateOptions = {}): Promise<ToolHealthReport> {
+  const commands = configuredExternalToolCommands(config);
+  const runCommand = options.runCommand ?? runExternalToolUpdateCommand;
+  const codexUpdate = await updateCodex(commands.codex, runCommand, options);
+  const claudeUpdate = await updateClaude(commands.claude, runCommand);
+  const report = await checkToolHealth(config);
+  report.codex.update = codexUpdate;
+  report.claude.update = claudeUpdate;
+  return report;
+}
+
+async function updateCodex(
+  command: string,
+  runCommand: NonNullable<ExternalToolUpdateOptions['runCommand']>,
+  options: ExternalToolUpdateOptions
+): Promise<ToolUpdateResult> {
+  if (!(await commandAvailable(command))) {
+    return { attempted: false, ok: false, method: 'unavailable', error: `${command} not found on PATH` };
   }
 
-  const claudeAvailable = await commandAvailable(config.tools.planner.command);
-  if (claudeAvailable) {
-    await execa(config.tools.planner.command, ['update'], { reject: false, all: true });
-  }
+  const detect = options.detectCodexInstallMethod ?? detectCodexInstallMethod;
+  const method = await detect(runCommand).catch((): CodexInstallMethod => 'standalone');
+  const platform = options.platform ?? process.platform;
+  const invocation = codexUpdateInvocation(method, platform);
+  return runToolUpdate(method, invocation.command, invocation.args, runCommand);
+}
 
-  return checkToolHealth(config);
+async function updateClaude(
+  command: string,
+  runCommand: NonNullable<ExternalToolUpdateOptions['runCommand']>
+): Promise<ToolUpdateResult> {
+  if (!(await commandAvailable(command))) {
+    return { attempted: false, ok: false, method: 'unavailable', error: `${command} not found on PATH` };
+  }
+  return runToolUpdate('claude-update', command, ['update'], runCommand);
+}
+
+async function runToolUpdate(
+  method: string,
+  command: string,
+  args: string[],
+  runCommand: NonNullable<ExternalToolUpdateOptions['runCommand']>
+): Promise<ToolUpdateResult> {
+  try {
+    const result = await runCommand(command, args);
+    const output = (result.all ?? result.stdout).trim();
+    return {
+      attempted: true,
+      ok: result.exitCode === 0,
+      method,
+      command,
+      args,
+      exitCode: result.exitCode,
+      ...(result.exitCode === 0 ? {} : { error: output || `${command} exited ${result.exitCode}` })
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      ok: false,
+      method,
+      command,
+      args,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+export function codexUpdateInvocation(method: CodexInstallMethod, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
+  if (method === 'npm') return { command: 'npm', args: ['install', '-g', '@openai/codex@latest'] };
+  if (method === 'homebrew') return { command: 'brew', args: ['upgrade', '--cask', 'codex'] };
+  if (platform === 'win32') {
+    return {
+      command: 'powershell.exe',
+      args: ['-NoProfile', '-ExecutionPolicy', 'ByPass', '-Command', 'irm https://chatgpt.com/codex/install.ps1 | iex']
+    };
+  }
+  return { command: 'sh', args: ['-c', 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'] };
+}
+
+export async function detectCodexInstallMethod(
+  runCommand: NonNullable<ExternalToolUpdateOptions['runCommand']>
+): Promise<CodexInstallMethod> {
+  const npm = await runCommand('npm', ['list', '-g', '--depth=0', '--json', '@openai/codex']).catch(() => null);
+  if (npm && npm.exitCode === 0 && npmPackageListed(npm.stdout, '@openai/codex')) return 'npm';
+
+  if (await commandAvailable('brew')) {
+    const brew = await runCommand('brew', ['list', '--cask', 'codex']).catch(() => null);
+    if (brew?.exitCode === 0) return 'homebrew';
+  }
+  return 'standalone';
+}
+
+function npmPackageListed(output: string, packageName: string): boolean {
+  try {
+    const parsed = JSON.parse(output) as { dependencies?: Record<string, unknown> };
+    return Object.prototype.hasOwnProperty.call(parsed.dependencies ?? {}, packageName);
+  } catch {
+    return false;
+  }
+}
+
+function configuredExternalToolCommands(config: WiCiConfig): Record<RuntimeAgent, string> {
+  const chat = config.tools.chat?.command;
+  const planner = config.tools.planner.command;
+  const executor = config.tools.executor.command;
+  return {
+    codex: commandForAgent('codex', [
+      [executor, 'codex'],
+      [planner, 'codex'],
+      [chat, 'claude']
+    ]),
+    claude: commandForAgent('claude', [
+      [chat, 'claude'],
+      [planner, 'codex'],
+      [executor, 'codex']
+    ])
+  };
+}
+
+function commandForAgent(agent: RuntimeAgent, candidates: Array<[string | undefined, RuntimeAgent]>): string {
+  for (const [command, fallback] of candidates) {
+    if (command && runtimeAgentFromCommand(command, fallback) === agent) return command;
+  }
+  return agent;
+}
+
+async function runExternalToolUpdateCommand(command: string, args: string[]): Promise<ExternalToolUpdateCommandResult> {
+  const result = await execa(command, args, { reject: false, all: true, timeout: 5 * 60_000 });
+  return {
+    exitCode: result.exitCode ?? 1,
+    stdout: result.stdout,
+    all: result.all
+  };
 }
 
 export async function runThinklessStartupSelfUpdate(env: NodeJS.ProcessEnv = process.env, options: ThinklessSelfUpdateOptions = {}): Promise<ThinklessSelfUpdateResult> {

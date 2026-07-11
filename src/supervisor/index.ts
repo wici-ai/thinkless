@@ -185,7 +185,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       }
     }
 
-    const didAutoUpdateTools = shouldAutoUpdateToolsAtBoundary(config, checkpoint);
+    const didAutoUpdateTools = shouldAutoUpdateToolsAtBoundary(config, checkpoint, { resumePreflight: Boolean(resumePreflight) });
     const toolHealth =
       config.tools.mode === 'stub'
         ? null

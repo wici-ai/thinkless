@@ -235,7 +235,7 @@ npx tsx src/cli.tsx doctor --update
 npx tsx src/cli.tsx doctor --deep
 ```
 
-`doctor --update` runs the Codex and Claude updaters, then reports health. `doctor --deep` performs a Claude print-mode auth probe. On supervisor start, Thinkless automatically checks for Codex/Claude updates at run boundaries when `tools.auto_update` is true, then records the versions in the checkpoint, and pending updates are not a WiCi supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run.
+`doctor --update` runs the Codex and Claude updaters, reports each update attempt, then reports health. Codex updates follow its detected installation method: global npm installs use `npm install -g @openai/codex@latest`, Homebrew installs use `brew upgrade --cask codex`, and standalone installs rerun the official OpenAI installer for the current platform. Claude Code uses its official `claude update` command. `doctor --deep` performs a Claude print-mode auth probe. On supervisor start, Thinkless automatically checks for Codex/Claude updates at fresh, stopped, failed, and explicit resume boundaries when `tools.auto_update` is true, then records the versions in the checkpoint. Update failures fail open but remain visible in `TOOL_UPDATE_CHECK` and `doctor --update` output; pending updates are not a supervisor start gate. Real mode only requires the CLIs to be reachable and healthy enough to run.
 
 Use `--mode stub`, `--mode auto`, or `--mode real` on `run` / `tui`.
 
@@ -457,7 +457,7 @@ git -C /path/to/thinkless status --short
 git -C /path/to/thinkless rev-parse HEAD
 ```
 
-The supervisor records the Thinkless package version, git commit, and dirty flag in `<target>/.wici/checkpoint.json` under `tool_versions.wici`. Codex/Claude/GitHub CLI changes are treated as recoverable external tool drift: Thinkless auto-updates Codex and Claude at run boundaries when `tools.auto_update` is true, and accepts/logs external CLI version changes if a resumed active checkpoint observes a new CLI version. Active runs still reject Thinkless package/git/mode drift; change Thinkless commits only between runs or roll back to the checkpointed commit.
+The supervisor records the Thinkless package version, git commit, and dirty flag in `<target>/.wici/checkpoint.json` under `tool_versions.wici`. Codex/Claude/GitHub CLI changes are treated as recoverable external tool drift: Thinkless auto-updates Codex and Claude at fresh, stopped, failed, and explicit resume boundaries when `tools.auto_update` is true, and accepts/logs external CLI version changes if a resumed active checkpoint observes a new CLI version. Active runs still reject Thinkless package/git/mode drift; change Thinkless commits only between runs or roll back to the checkpointed commit.
 
 Require real CLIs:
 

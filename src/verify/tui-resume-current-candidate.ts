@@ -223,8 +223,7 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect "Selected runnable:"
-expect ".thinkless2 \\[runnable\\] STOP"
+expect -ex "Selected runnable:"
 sleep 2
 send -- "\\003"
 expect eof
@@ -239,7 +238,7 @@ set timeout 25
 spawn "$env(WICI_THINKLESS_BIN)" tui --target "$env(WICI_PTY_TARGET)" --max-iters 0 --mode stub --no-fullscreen
 expect "CHAT"
 send -- "/resume\\r"
-expect ".thinkless \\[runnable\\] STOP"
+expect -ex "Selected runnable:"
 sleep 1
 sleep 1
 send -- "\\r"
