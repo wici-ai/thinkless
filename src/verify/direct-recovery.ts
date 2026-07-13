@@ -40,7 +40,7 @@ async function main(): Promise<void> {
       target,
       goal: 'Do not block after one executor failure; keep the goal alive long enough for Codex to debug and recover.',
       maxIters: 2,
-      mode: 'real'
+      mode: 'auto'
     });
 
     assert(result.state === 'STOP', `expected STOP after maxIters, got ${JSON.stringify(result)}`);
@@ -54,13 +54,21 @@ async function main(): Promise<void> {
   }
 
   const events = await readJsonLines<RunEvent>(paths.events);
-  assert(events.some((event) => event.type === 'EXECUTE_RECOVERABLE_FAILURE'), 'missing recoverable failure event');
+  const recoverable = events.find((event) => event.type === 'EXECUTE_RECOVERABLE_FAILURE');
+  assert(recoverable, 'missing recoverable failure event');
+  assert(
+    (recoverable.data as { failure_kind?: string } | undefined)?.failure_kind === 'cybersecurity_policy',
+    `policy refusal should be recorded as a recoverable typed failure: ${JSON.stringify(recoverable)}`
+  );
+  assert(!events.some((event) => event.type === 'TOOL_USAGE_LIMIT_STOP'), 'historical usage-limit text in command output must not stop the run');
+  assert(events.some((event) => event.type === 'EXECUTOR_POLICY_CONTEXT_RESET'), 'policy refusal should reset the executor thread before retry');
   assert(!events.some((event) => event.type === 'FAILED'), 'direct recovery should not mark supervisor FAILED');
   assert(events.some((event) => event.type === 'EXECUTE_DONE'), 'missing recovered EXECUTE_DONE');
 
   const ledger = await readJsonLines<LedgerEntry>(paths.ledger);
   assert(ledger.length === 2, `expected crash + keep ledger rows, got ${ledger.length}`);
   assert(ledger[0].status === 'crash', `first row should be crash: ${JSON.stringify(ledger[0])}`);
+  assert(ledger[0].reflection === 'Codex safety policy refused the executor turn as possible cybersecurity risk.', `policy ledger reason must be sanitized: ${ledger[0].reflection}`);
   assert(ledger[1].status === 'keep', `second row should be keep: ${JSON.stringify(ledger[1])}`);
 
   const checkpoint = await readJsonFile<Checkpoint>(paths.checkpoint);
@@ -72,9 +80,11 @@ async function main(): Promise<void> {
     .map((line) => JSON.parse(line) as { args: string[]; prompt: string });
   assert(argsLog.length === 2, `expected two Codex invocations, got ${argsLog.length}`);
   assert(argsLog[0].args[0] === 'exec' && argsLog[0].args[1] !== 'resume', `first invocation should be fresh exec: ${JSON.stringify(argsLog[0].args)}`);
-  assert(argsLog[1].args[0] === 'exec' && argsLog[1].args[1] === 'resume', `second invocation should resume: ${JSON.stringify(argsLog[1].args)}`);
-  assert(argsLog[1].prompt.includes('Previous executor attempt 1 for S1 failed'), 'recovery prompt should include previous failure');
-  assert(argsLog[1].prompt.includes('If PLAN.md or .opt scripts caused the failure, update them before retrying.'), 'recovery prompt should authorize plan updates');
+  assert(argsLog[1].args[0] === 'exec' && argsLog[1].args[1] !== 'resume', `policy retry should start a fresh executor thread: ${JSON.stringify(argsLog[1].args)}`);
+  assert(argsLog[1].prompt.includes('Previous executor attempt 1 for S1 was refused by Codex safety policy before completion.'), 'recovery prompt should identify the policy refusal without replaying it');
+  assert(argsLog[1].prompt.includes('Do not paste, summarize in detail, or replay the rejected command transcript verbatim.'), 'recovery prompt should prohibit transcript replay');
+  assert(argsLog[1].prompt.includes('small repository-scoped build, test, and inspection actions'), 'recovery prompt should prescribe a safe bounded retry shape');
+  assert(!argsLog[1].prompt.includes("You've hit your usage limit; this old incident is resolved"), 'recovery prompt leaked irrelevant command output from the rejected transcript');
 
   const status = await git(['status', '--short']);
   assert(status.trim() === '', `target worktree should be clean after recovery:\n${status}`);
@@ -85,8 +95,11 @@ async function main(): Promise<void> {
         ok: true,
         target,
         recoverable_failure: true,
+        cybersecurity_policy_retry: true,
+        fresh_executor_retry: true,
+        transcript_usage_text_ignored: true,
         ledger_rows: ledger.length,
-        resumed_executor: true
+        recovered_executor: true
       },
       null,
       2
@@ -160,8 +173,17 @@ writeFileSync(countPath, String(count));
 
 console.log(JSON.stringify({ type: 'turn.started' }));
 if (count === 1) {
-  console.error('simulated executor failure: first attempt hit a bad deployment path');
-  process.exit(42);
+  console.log(JSON.stringify({
+    type: 'item.completed',
+    item: {
+      type: 'command_execution',
+      aggregated_output: "Historical GOAL text: You've hit your usage limit; this old incident is resolved."
+    }
+  }));
+  const message = 'This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request.';
+  console.log(JSON.stringify({ type: 'error', message }));
+  console.log(JSON.stringify({ type: 'turn.failed', error: { message } }));
+  process.exit(1);
 }
 
 const outIndex = args.indexOf('--output-last-message');

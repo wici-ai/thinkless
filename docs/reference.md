@@ -312,14 +312,14 @@ That command creates `fixture/v1-slice-target`, runs one stubbed direct supervis
 - direct execution writes a thin `ledger.jsonl` receipt with token usage for observability;
 - a git checkpoint and `wici/best` rollback tag are created;
 - the TUI header displays the current rollback checkpoint, or `rollback pending` before one exists;
-- direct executor failure is recoverable: the first failed attempt is recorded as `crash`, the next Codex invocation resumes with the failure context, and the same goal can continue;
+- direct executor failure is recoverable: the first failed attempt is recorded as `crash`, the next Codex invocation receives bounded recovery context, and the same goal can continue; policy refusals start a fresh executor thread from durable workspace state;
 - the non-fullscreen TUI can render the bottom Chat input plus the switchable Chat History / Goal/Plan / Execution workspace over the run state.
 
 `npm run verify:direct-no-scripts` covers the complementary path: an existing markdown `PLAN.md` can execute directly without `.opt/checks.sh`, `.opt/measure.sh`, or `.opt/benchmark.json`.
 
-`npm run verify:direct-recovery` covers long-goal recovery: a fake real-mode Codex fails the first invocation, WiCi records `EXECUTE_RECOVERABLE_FAILURE` without entering `FAILED`, then the second invocation uses `codex exec resume --last` and completes.
+`npm run verify:direct-recovery` covers long-goal recovery: a fake auto-mode Codex first returns a structured cybersecurity-policy refusal whose command output also contains historical usage-limit text. Thinkless preserves the structured terminal error, records a sanitized typed `EXECUTE_RECOVERABLE_FAILURE` without entering `FAILED`, resets the rejected executor thread, gives a fresh executor a bounded repository-scoped retry prompt without replaying the rejected transcript, then completes from durable workspace state.
 
-`npm run verify:direct-usage-limit` covers quota exhaustion: a Codex usage-limit response pauses the run after one attempt, leaves the current PLAN step pending, emits `TOOL_USAGE_LIMIT_STOP`, and does not manufacture ledger crash iterations. Crash-loop fingerprints ignore ephemeral thread/turn IDs, so changing runtime IDs cannot defeat the three-strike guard for other repeatable failures.
+`npm run verify:direct-usage-limit` covers quota exhaustion: a structured Codex usage-limit terminal response pauses the run after one attempt, leaves the current PLAN step pending, emits `TOOL_USAGE_LIMIT_STOP`, and does not manufacture ledger crash iterations. Classification reads terminal `error` / `turn.failed` messages instead of scanning prompts or command output, so old quota text cannot turn an unrelated policy refusal into a false quota STOP. Crash-loop fingerprints ignore ephemeral thread/turn IDs, so changing runtime IDs cannot defeat the three-strike guard for other repeatable failures.
 
 Direct progress review is semantic rather than file-activity based. Consecutive non-acceptance rejects for the same step force a planner bottleneck review even when the executor wrote PLAN, diagnostics, or receipt artifacts. Three consecutive explicit NoRun receipts across renamed PLAN steps pause on a material-trigger boundary instead of allowing another status probe. Planner review must record the exhausted avenue and choose a falsifiable, materially different mechanism; parameter sweeps require evidence that the parameter family controls the target bottleneck.
 

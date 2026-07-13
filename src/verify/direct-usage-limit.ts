@@ -4,7 +4,14 @@ import { createSampleTarget } from '../sample.js';
 import { readJsonFile, readJsonLines } from '../shared/atomic.js';
 import { runPaths } from '../shared/paths.js';
 import type { Checkpoint, LedgerEntry, RunEvent } from '../shared/types.js';
-import { crashFailureSignature, isToolUsageLimitFailure, toolUsageLimitReason } from '../supervisor/agentFailure.js';
+import {
+  crashFailureSignature,
+  isToolCybersecurityPolicyFailure,
+  isToolUsageLimitFailure,
+  toolCybersecurityPolicyReason,
+  toolUsageLimitReason
+} from '../supervisor/agentFailure.js';
+import { CodexRunError, parseCodexRunEvents } from '../supervisor/codexRun.js';
 import { runSupervisor } from '../supervisor/index.js';
 
 const target = resolve('fixture/direct-usage-limit-target');
@@ -63,6 +70,27 @@ function verifyFailureClassification(): void {
   assert(isToolUsageLimitFailure(first), 'Codex usage-limit message was not classified');
   assert(toolUsageLimitReason(first).includes('usage limit'), 'usage-limit reason should retain the actionable message');
   assert(crashFailureSignature(first) === crashFailureSignature(second), 'ephemeral thread ids must not defeat crash-loop fingerprints');
+
+  const cybersecurityMessage = 'This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request.';
+  const pollutedTranscript = [
+    JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'command_execution',
+        aggregated_output: "Historical GOAL text: You've hit your usage limit; this old incident is resolved."
+      }
+    }),
+    JSON.stringify({ type: 'error', message: cybersecurityMessage }),
+    JSON.stringify({ type: 'turn.failed', error: { message: cybersecurityMessage } })
+  ].join('\n');
+  const pollutedError = new CodexRunError(`codex exec exited 1:\n${pollutedTranscript}`, parseCodexRunEvents(pollutedTranscript));
+  assert(!isToolUsageLimitFailure(pollutedTranscript), 'command output must not create a false usage-limit classification');
+  assert(!isToolUsageLimitFailure(pollutedError), 'CodexRunError must classify only its structured terminal errors');
+  assert(isToolCybersecurityPolicyFailure(pollutedError), 'terminal cybersecurity refusal was not classified');
+  assert(
+    toolCybersecurityPolicyReason(pollutedError) === 'Codex safety policy refused the executor turn as possible cybersecurity risk.',
+    'cybersecurity refusal reason must be stable and must not include the command transcript'
+  );
 }
 
 async function writeFakeAgents(): Promise<void> {

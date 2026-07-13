@@ -370,7 +370,7 @@ async function main(): Promise<void> {
   assert(
     completionAudit.includes('npm run verify:direct-recovery') &&
       completionAudit.includes('recoverable_failure') &&
-      completionAudit.includes('resumed_executor'),
+      completionAudit.includes('recovered_executor'),
     'completion audit should include direct executor recovery evidence'
   );
   assert(

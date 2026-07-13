@@ -65,7 +65,13 @@ import { codexUsageFromError } from './codexRun.js';
 import { PLANNER_SELECTED_METRIC, formatPrimaryMetricTransition, primaryMetricTag, primaryMetricValue } from './metricFormat.js';
 import { isTransientNetworkFailure, transientFailureReason, transientRetryDelayMs, transientRetryMessage } from './transientRetry.js';
 import { findNearDuplicateContinuationStep } from './stepSimilarity.js';
-import { crashFailureSignature, isToolUsageLimitFailure, toolUsageLimitReason } from './agentFailure.js';
+import {
+  crashFailureSignature,
+  isToolCybersecurityPolicyFailure,
+  isToolUsageLimitFailure,
+  toolCybersecurityPolicyReason,
+  toolUsageLimitReason
+} from './agentFailure.js';
 import { directNoRunStall, directRejectStall, type DirectProgressStall } from './progressStall.js';
 
 const EVAL_LOCK_REPLY_KEY = 'lock-eval';
@@ -420,7 +426,7 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
       } catch (error) {
         const usage = codexUsageFromError(error);
         const reason = errorMessage(error);
-        if (isToolUsageLimitFailure(reason)) {
+        if (isToolUsageLimitFailure(error)) {
           await revertToBest(paths, baseline.best_commit);
           await setPlanStepStatus(paths, step.id, 'pending');
           checkpoint = {
@@ -935,8 +941,8 @@ export async function runSupervisor(options: RunOptions): Promise<SupervisorResu
     return { state: 'STOP', reason: limitReason, iter: checkpoint.iter };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    if (isToolUsageLimitFailure(reason)) {
-      const usageReason = toolUsageLimitReason(reason);
+    if (isToolUsageLimitFailure(error)) {
+      const usageReason = toolUsageLimitReason(error);
       const stopReason = `Agent usage limit reached; paused without retrying: ${usageReason}`;
       await writeOutbox(paths, { kind: 'info', text: stopReason }).catch(() => undefined);
       await events.emit('TOOL_USAGE_LIMIT_STOP', stopReason, { reason: usageReason }, 'warn').catch(() => undefined);
@@ -1246,8 +1252,9 @@ async function runDirectPlanExecution(
         continue;
       }
       const usage = codexUsageFromError(error);
-      const reason = errorMessage(error);
-      if (isToolUsageLimitFailure(reason)) {
+      const cybersecurityPolicyFailure = isToolCybersecurityPolicyFailure(error);
+      const reason = cybersecurityPolicyFailure ? toolCybersecurityPolicyReason(error) : errorMessage(error);
+      if (isToolUsageLimitFailure(error)) {
         await revertToBest(paths, checkpoint.best_commit ?? 'NO_HEAD');
         await setPlanStepStatus(paths, step.id, 'pending', nextIter);
         checkpoint = {
@@ -1329,7 +1336,15 @@ async function runDirectPlanExecution(
       }
       const usageAccounting = usageDeltaForLedger(checkpoint, { usage });
       checkpoint = usageAccounting.checkpoint;
-      await events.emit('EXECUTE_RECOVERABLE_FAILURE', reason, usage ? { usage, usage_delta: usageAccounting.delta, mode: 'direct' } : { mode: 'direct' }, 'warn');
+      const failureData = cybersecurityPolicyFailure ? { failure_kind: 'cybersecurity_policy' } : {};
+      await events.emit(
+        'EXECUTE_RECOVERABLE_FAILURE',
+        reason,
+        usage
+          ? { usage, usage_delta: usageAccounting.delta, mode: 'direct', ...failureData }
+          : { mode: 'direct', ...failureData },
+        'warn'
+      );
       const ledgerEntry = directLedgerEntry({
         iter: nextIter,
         stepId: step.id,
@@ -1368,16 +1383,27 @@ async function runDirectPlanExecution(
       }
       await setPlanStepStatus(paths, step.id, 'pending', nextIter);
       await refreshContextSummary(paths, goal, events);
+      if (cybersecurityPolicyFailure) {
+        await events.emit(
+          'EXECUTOR_POLICY_CONTEXT_RESET',
+          `Starting a fresh executor thread for ${step.id} after a cybersecurity policy refusal`,
+          { iter: nextIter, step_id: step.id, mode: 'direct', reason: 'cybersecurity_policy_refusal' },
+          'warn'
+        );
+      }
       checkpoint = {
         ...checkpoint,
         supervisor_state: 'REFLECT',
         next_step: step.id,
+        sessions: cybersecurityPolicyFailure
+          ? withExecutorContextReset(checkpoint.sessions, step.id, 'cybersecurity_policy_refusal')
+          : checkpoint.sessions,
         ledger_seq: await lineCount(paths.ledger),
         events_seq: events.seq,
         plan_hash: await hashFile(paths.plan)
       };
       await saveCheckpoint(paths, checkpoint);
-      steerText = recoverySteerText(step.id, nextIter, reason);
+      steerText = recoverySteerText(step.id, nextIter, reason, cybersecurityPolicyFailure ? 'cybersecurity_policy' : 'generic');
       await writeOutbox(paths, {
         kind: 'info',
         text: `Executor attempt ${nextIter} failed and was recorded; WiCi will continue the same goal so Codex can diagnose, update PLAN.md, and retry. Reason: ${reason}`
@@ -2345,7 +2371,17 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function recoverySteerText(stepId: string, iter: number, reason: string): string {
+function recoverySteerText(stepId: string, iter: number, reason: string, failureKind: 'generic' | 'cybersecurity_policy' = 'generic'): string {
+  if (failureKind === 'cybersecurity_policy') {
+    return [
+      `Previous executor attempt ${iter} for ${stepId} was refused by Codex safety policy before completion.`,
+      'Continue the same authorized software-engineering goal; the refusal is not evidence about the target implementation.',
+      'Do not paste, summarize in detail, or replay the rejected command transcript verbatim.',
+      'Re-read the durable GOAL.md and PLAN.md, preserve useful partial files, and resume with small repository-scoped build, test, and inspection actions.',
+      'Keep each command narrowly tied to the current implementation step and avoid combining unrelated process, network, module, credential, or remote-host inspection in one command.',
+      'Do not attempt to bypass policy. If a particular action is genuinely disallowed, name that exact boundary and use an ordinary safe implementation or validation alternative.'
+    ].join('\n');
+  }
   return [
     `Previous executor attempt ${iter} for ${stepId} failed: ${reason}`,
     'Continue the same GOAL.md rather than blocking.',

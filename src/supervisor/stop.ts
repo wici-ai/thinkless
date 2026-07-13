@@ -140,7 +140,7 @@ export async function directContinuationVerdict(
       return { decision: 'continue', reason: parsed.reason ?? 'LLM continuation verdict', source: 'llm' };
     }
   } catch (error) {
-    if (isToolUsageLimitFailure(error instanceof Error ? error.message : String(error))) throw error;
+    if (isToolUsageLimitFailure(error)) throw error;
     return fallback;
   }
 

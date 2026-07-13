@@ -1,17 +1,23 @@
-const USAGE_LIMIT_PATTERN = /\b(?:you(?:'|’)ve hit your usage limit|usage limit|purchase more credits|out of credits|insufficient credits)\b/i;
+const USAGE_LIMIT_PATTERN = /\b(?:you(?:'|’)ve hit your usage limit|agent usage limit reached|usage limit (?:has been )?reached|purchase more credits|out of credits|insufficient credits)\b/i;
+const CYBERSECURITY_POLICY_PATTERN = /(?:content was flagged for possible cybersecurity risk|trusted access for cyber)/i;
 
-export function isToolUsageLimitFailure(text: string | undefined): boolean {
-  return Boolean(text && USAGE_LIMIT_PATTERN.test(text));
+export function isToolUsageLimitFailure(error: unknown): boolean {
+  return terminalFailureMessages(error).some((message) => USAGE_LIMIT_PATTERN.test(message));
 }
 
-export function toolUsageLimitReason(text: string | undefined): string {
-  const lines = (text ?? '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const matched = lines.find((line) => USAGE_LIMIT_PATTERN.test(line)) ?? 'Agent usage limit reached.';
-  const decoded = decodeJsonMessage(matched);
-  return truncate(decoded.replace(/\s+/g, ' '), 600);
+export function toolUsageLimitReason(error: unknown): string {
+  const matched = terminalFailureMessages(error).find((message) => USAGE_LIMIT_PATTERN.test(message)) ?? 'Agent usage limit reached.';
+  return truncate(matched.replace(/\s+/g, ' '), 600);
+}
+
+export function isToolCybersecurityPolicyFailure(error: unknown): boolean {
+  return terminalFailureMessages(error).some((message) => CYBERSECURITY_POLICY_PATTERN.test(message));
+}
+
+export function toolCybersecurityPolicyReason(error: unknown): string {
+  const matched = terminalFailureMessages(error).find((message) => CYBERSECURITY_POLICY_PATTERN.test(message));
+  if (!matched) return 'Codex safety policy refused the executor turn as possible cybersecurity risk.';
+  return 'Codex safety policy refused the executor turn as possible cybersecurity risk.';
 }
 
 export function crashFailureSignature(text: string | undefined): string {
@@ -28,23 +34,54 @@ export function crashFailureSignature(text: string | undefined): string {
     .slice(0, 600);
 }
 
-function decodeJsonMessage(line: string): string {
-  try {
-    const parsed = JSON.parse(line) as { message?: unknown; error?: { message?: unknown } };
-    if (typeof parsed.message === 'string') return parsed.message;
-    if (typeof parsed.error?.message === 'string') return parsed.error.message;
-  } catch {
-    // Preserve the useful source line when it is not a standalone JSON object.
+function terminalFailureMessages(error: unknown): string[] {
+  if (isRecord(error)) {
+    const usageErrors = usageFailureMessages(error.usage);
+    if (usageErrors.length > 0) return usageErrors;
+    if (error.cause !== undefined) {
+      const causeErrors = terminalFailureMessages(error.cause);
+      if (causeErrors.length > 0) return causeErrors;
+    }
+    if (typeof error.message === 'string') return terminalFailureMessages(error.message);
   }
-  const messageMatch = line.match(/"message"\s*:\s*"((?:\\.|[^"\\])*)"/);
-  if (!messageMatch) return line;
+  if (typeof error !== 'string') return [];
+
+  const structured = error
+    .split(/\r?\n/)
+    .map((line) => structuredTerminalMessage(line.trim()))
+    .filter((message): message is string => Boolean(message));
+  if (structured.length > 0) return structured;
+
+  const direct = error.trim();
+  return direct && !/[\r\n]/.test(direct) && direct.length <= 2_000 ? [direct] : [];
+}
+
+function usageFailureMessages(value: unknown): string[] {
+  if (!isRecord(value) || !Array.isArray(value.errors)) return [];
+  return value.errors.filter((message): message is string => typeof message === 'string' && message.trim().length > 0);
+}
+
+function structuredTerminalMessage(line: string): string | null {
+  if (!line.startsWith('{')) return null;
   try {
-    return JSON.parse(`"${messageMatch[1]}"`) as string;
+    const parsed = JSON.parse(line) as unknown;
+    if (!isRecord(parsed)) return null;
+    const type = typeof parsed.type === 'string' ? parsed.type : typeof parsed.method === 'string' ? parsed.method : '';
+    if (type !== 'error' && type !== 'turn.failed' && type !== 'turn/failed') return null;
+    if (typeof parsed.message === 'string') return parsed.message;
+    if (typeof parsed.error === 'string') return parsed.error;
+    if (isRecord(parsed.error) && typeof parsed.error.message === 'string') return parsed.error.message;
+    if (isRecord(parsed.data) && typeof parsed.data.message === 'string') return parsed.data.message;
+    return null;
   } catch {
-    return messageMatch[1];
+    return null;
   }
 }
 
 function truncate(text: string, maxChars: number): string {
   return text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

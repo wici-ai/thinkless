@@ -9,7 +9,7 @@ import type { Checkpoint, GoalFile, IterResult, ToolInvocationResult, WiCiConfig
 import { CodexRunError, appendCodexRunTranscript, assertCodexRunSucceeded, parseCodexRunEvents, syntheticCodexRunEvent } from './codexRun.js';
 import { formatSafetyForPrompt } from './safety.js';
 import { startCodexAppServerTurn } from './codexAppServer.js';
-import { isToolUsageLimitFailure } from './agentFailure.js';
+import { isToolCybersecurityPolicyFailure, isToolUsageLimitFailure } from './agentFailure.js';
 
 const EXECUTOR_IDLE_TIMEOUT_MS = 60 * 60_000;
 const EXECUTOR_HARD_TIMEOUT_MS = 12 * 60 * 60_000;
@@ -132,6 +132,7 @@ export async function runExecutorStep(
       const iterResult = await readIterResult(paths, artifactId);
       return { ...iterResult, invocation: { ok: true, stdout: result.all, usage: result.usage } };
     } catch (error) {
+      if (error instanceof CodexRunError) throw error;
       if (config.tools.mode === 'real') throw error;
       throw new Error(`Executor command failed after starting real executor; refusing to fall back to stub: ${errorMessage(error)}`);
     }
@@ -210,7 +211,7 @@ export async function startExecutorStep(
             };
           })
           .catch(async (error) => {
-            if (isToolUsageLimitFailure(errorMessage(error))) throw error;
+            if (isToolUsageLimitFailure(error) || isToolCybersecurityPolicyFailure(error)) throw error;
             await options.onBackendFallback?.({
               from: 'app-server',
               to: 'exec',
@@ -228,7 +229,7 @@ export async function startExecutorStep(
         interrupt: turn.interrupt
       };
     } catch (error) {
-      if (isToolUsageLimitFailure(errorMessage(error))) throw error;
+      if (isToolUsageLimitFailure(error) || isToolCybersecurityPolicyFailure(error)) throw error;
       await options.onBackendFallback?.({
         from: 'app-server',
         to: 'exec',
